@@ -11,16 +11,21 @@ from django.conf.urls import url
 from django.contrib import admin, auth, messages
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
+from django.core.signing import TimestampSigner
 from django.db import transaction
-from django.db.models import JSONField, Max
+from django.db.models import Max
 from django.forms import NumberInput, widgets
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils.html import format_html, urlencode
+from django.utils.safestring import mark_safe
 from import_export import fields, resources
 from import_export.admin import ImportExportModelAdmin
 from nested_inline.admin import NestedModelAdmin, NestedTabularInline
+from pygments import highlight
+from pygments.formatters.html import HtmlFormatter
+from pygments.lexers.data import JsonLexer
 from qrcode.image.svg import SvgPathFillImage
 
 import registration.emails
@@ -540,7 +545,7 @@ class EventAdmin(admin.ModelAdmin):
                     "venue",
                     "charity",
                     "donations",
-                    ("codeOfConduct", "badgeTheme"),
+                    ("codeOfConduct", "badgeTheme", "defaultBadgeTemplate"),
                 )
             },
         ),
@@ -585,6 +590,17 @@ class EventAdmin(admin.ModelAdmin):
                     "newStaffDiscount",
                     "dealerDiscount",
                     "assistantDiscount",
+                ),
+            },
+        ),
+        (
+            "Dealers Configuration",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    "dealerWifi",
+                    "dealerWifiPrice",
+                    "dealerPartnerPrice",
                 ),
             },
         ),
@@ -784,6 +800,8 @@ class StaffAdmin(ImportExportModelAdmin):
                     staff_copy.attendee = staff.attendee
                     staff_copy.event = event
                     staff_copy.registrationToken = getRegistrationToken()
+                    staff_copy.shirtsize = None
+                    staff_copy.checkedIn = False
                     staff_copy.save()
                     count += 1
 
@@ -928,7 +946,17 @@ def get_attendee_age(attendee):
 
 
 def print_badges(modeladmin, request, queryset):
-    pdf_path = generate_badge_labels(queryset, request)
+    if getattr(settings, "PRINT_RENDERER", "wkhtmltopdf") == "gotenberg":
+        signer = TimestampSigner()
+        data = signer.sign_object({
+            "badge_ids": [badge.id for badge in queryset],
+        })
+
+        pdf_path = reverse("registration:pdf") + f"?data={data}"
+    else:
+        pdf_name = generate_badge_labels(queryset, request)
+        pdf_path = reverse("registration:pdf") + f"?file={pdf_name}"
+
 
     response = HttpResponseRedirect(reverse("registration:print"))
     url_params = {"file": pdf_path, "next": request.get_full_path()}
@@ -1148,7 +1176,7 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
         "badgeName",
         "badgeNumber",
     ]
-    readonly_fields = ["get_age_range", "registrationToken"]
+    readonly_fields = ["get_age_range", "registrationToken", "image_signature"]
     actions = [
         assign_badge_numbers,
         print_badges,
@@ -1165,11 +1193,15 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
                     "printed",
                     ("badgeName", "badgeNumber", "get_age_range"),
                     ("registeredDate", "event", "registrationToken"),
+                    "image_signature",
                     "attendee",
                 )
             },
         ),
     )
+
+    def image_signature(self, obj):
+        return format_html('<img src="data:image/png;base64,{}">', obj.signature_bitmap)
 
     def get_age_range(self, obj):
         try:
@@ -1560,11 +1592,81 @@ class PrettyJSONWidget(widgets.Textarea):
             return super(PrettyJSONWidget, self).format_value(value)
 
 
+def json_highlight_format_value(value):
+    doc = json.dumps(value, indent=2, sort_keys=True)
+    # Get the Pygments formatter
+    formatter = HtmlFormatter(style="default")
+
+    # Highlight the data
+    response = highlight(doc, JsonLexer(), formatter)
+
+    # Get the stylesheet
+    style = "<style>" + formatter.get_style_defs() + "</style><br>"
+
+    # Safe the output
+    return mark_safe(style + response)
+
+
 class PaymentWebhookAdmin(admin.ModelAdmin):
     list_display = ("event_id", "event_type", "timestamp", "integration", "processed")
     list_filter = ("event_type", "processed")
     search_fields = ["event_id"]
-    formfield_overrides = {JSONField: {"widget": PrettyJSONWidget}}
+    readonly_fields = ("processed", "body_highlighted", "headers_highlighted")
+    exclude = ("body", "headers")
+
+    def body_highlighted(self, instance):
+        return json_highlight_format_value(instance.body)
+
+    body_highlighted.short_description = "Body"
+
+    def headers_highlighted(self, instance):
+        return json_highlight_format_value(instance.headers)
+
+    body_highlighted.short_description = "Headers"
 
 
 admin.site.register(PaymentWebhookNotification, PaymentWebhookAdmin)
+
+
+class BadgeTemplateAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "paperWidth",
+        "paperHeight",
+        "marginTop",
+        "marginBottom",
+        "marginLeft",
+        "marginRight",
+        "landscape",
+        "scale"
+    )
+
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": ("name", "template"),
+            }
+        ),
+        (
+            "Paper Setup",
+            {
+                "fields": (
+                    "landscape",
+                    "scale",
+                    ("paperWidth", "paperHeight"),
+                )
+            }
+        ),
+        (
+            "Margins And Padding",
+            {
+                "fields": (
+                    ("marginTop", "marginBottom"),
+                    ("marginLeft", "marginRight"),
+                ),
+            }
+        ),
+    )
+
+admin.site.register(BadgeTemplate, BadgeTemplateAdmin)

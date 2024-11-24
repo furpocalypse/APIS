@@ -162,6 +162,22 @@ class Venue(models.Model):
         return self.name
 
 
+class BadgeTemplate(models.Model):
+    name = models.CharField(max_length=100)
+    template = models.TextField()
+    paperWidth = models.CharField(max_length=10, null=True, verbose_name="Paper Width")
+    paperHeight = models.CharField(max_length=10, null=True, verbose_name="Paper Height")
+    marginTop = models.CharField(max_length=10, null=True, verbose_name = "Margin Top")
+    marginBottom = models.CharField(max_length=10, null=True, verbose_name = "Margin Bottom")
+    marginLeft = models.CharField(max_length=10, null=True, verbose_name="Margin Left")
+    marginRight = models.CharField(max_length=10, null=True, verbose_name = "Margin Right")
+    landscape = models.BooleanField(default=True)
+    scale = models.FloatField(default=1.0)
+
+    def __str__(self):
+        return str(self.name)
+
+
 class Event(LookupTable):
     dealerRegStart = models.DateTimeField(
         verbose_name="Dealer Registration Start",
@@ -194,6 +210,12 @@ class Event(LookupTable):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
+    )
+    defaultBadgeTemplate = models.ForeignKey(
+        BadgeTemplate,
+        null=True,
+        on_delete=models.SET_NULL,
+        verbose_name="Badge Template",
     )
     newStaffDiscount = models.ForeignKey(
         Discount,
@@ -292,6 +314,17 @@ class Event(LookupTable):
         decimal_places=2,
         default=0,
         help_text="External donations to add to metrics ",
+    )
+    dealerWifi = models.BooleanField(
+        default=True,
+        verbose_name="Dealer Wifi",
+        help_text="Include option to purchase Wifi on dealers form",
+    )
+    dealerWifiPrice = models.DecimalField(
+        decimal_places=2, max_digits=6, default=50, verbose_name="Wifi Price"
+    )
+    dealerPartnerPrice = models.DecimalField(
+        decimal_places=2, max_digits=6, default=55, verbose_name="Partner Price"
     )
 
 
@@ -428,12 +461,8 @@ class Badge(models.Model):
     badgeNumber = models.IntegerField(null=True, blank=True)
     printed = models.BooleanField(default=False)
     printCount = models.IntegerField(default=0)
-    signature_svg = models.FileField(
-        upload_to=badge_signature_svg_path, null=True, blank=True
-    )
-    signature_bitmap = models.ImageField(
-        upload_to=badge_signature_bitmap_path, null=True, blank=True
-    )
+    signature_svg = models.TextField(null=True, blank=True)
+    signature_bitmap = models.TextField(null=True, blank=True)
 
     def __str__(self):
         if self.badgeNumber is not None or self.badgeNumber == "":
@@ -801,6 +830,9 @@ class PaymentWebhookNotification(models.Model):
     processed = models.BooleanField(default=False)
     body = models.JSONField("Webhook body")
     headers = models.JSONField("Webhook headers")
+
+    def __str__(self):
+        return f"{self.integration} {self.event_type} {self.event_id}"
 
 
 class OrderItem(models.Model):

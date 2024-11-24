@@ -4,28 +4,6 @@
 {% block content %}
 
 
-  <div class="modal fade" id="buttonModal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
-    <div class="modal-dialog" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
-              aria-hidden="true">&times;</span>
-          </button>
-          <h4 class="modal-title" id="myModalLabel">Buttons for a Cause</h4>
-        </div>
-        <div class="modal-body">
-          <p>As an effort to further support our selected charity, we are asking Marketplace and Artist Alley
-            participants to provide incentives for those who donate. For a donation of $5 or more, the donor
-            will receive a free button. We humbly ask as a community, that we come together and help support the
-            cause.</p>
-          <p>Suggestions for incentives: a percentage or amount off of a purchase or a gift to attendees
-            possessing the button. If you are interested, please let us know what incentive you would like to
-            offer, and we will list your business and incentive on the {{ event.name }} website along with signs at
-            the charity donation table.</p>
-        </div>
-      </div>
-    </div>
-  </div>
   <div class="modal fade" id="ageModal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
     <div class="modal-dialog" role="document">
       <div class="modal-content">
@@ -78,14 +56,14 @@
           <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
         </div>
         <div class="form-group">
-          <label for="license" class="col-sm-3 control-label">Virginia Tax License <span
+          <label for="license" class="col-sm-3 control-label">{{ venue.state }} Tax License <span
               style="color:red;">*</span></label>
           <div class="col-sm-9">
-            <input type="text" id="license" name="license" placeholder="VA Tax License"
+            <input type="text" id="license" name="license" placeholder="Tax License ID"
                    class="form-control form-control-text" required maxlength="50">
 
             <label>
-              <input type="checkbox" id="tempLicense"/> I need a temporary tax license for VA.
+              <input type="checkbox" id="tempLicense"/> I need a temporary tax license for {{ venue.state }}.
             </label>
           </div>
           <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
@@ -121,17 +99,6 @@
         </div>
 
         <div class="form-group">
-          <label for="buttonOffer" class="col-sm-3 control-label">My offer for "Buttons for a Cause"</label>
-          <div class="col-sm-9">
-                    <textarea id="buttonOffer" name="buttonOffer"
-                              class="form-control form-control-textarea" maxlength="200"> </textarea>
-          </div>
-          <div class="col-sm-9 col-sm-offset-3 small">
-            <button class="btn btn-link btn-sm" data-toggle="modal" data-target="#buttonModal">What's this?
-            </button>
-          </div>
-        </div>
-        <div class="form-group">
           <label for="charityRaffle" class="col-sm-3 control-label">I have these items to donate to the Charity
             Raffle</label>
           <div class="col-sm-9">
@@ -147,15 +114,19 @@
         <h2>Placement Options</h2>
         <p>The options below may limit where you can be placed in our Marketplace.</p>
         <hr/>
+        {% if event.dealerWifi %}
         <div class="form-group">
           <label for="wifi" class="col-sm-3 control-label">I need Wi-Fi</label>
           <div class="col-sm-9">
             <input type="checkbox" id="wifi" name="wifi" class="form-control form-control-checkbox"/>
           </div>
-          <div class="col-sm-9 col-sm-offset-3 small">This option adds $50 to your table price. You will receive
+          <div class="col-sm-9 col-sm-offset-3 small">This option adds ${{ event.dealerWifiPrice   }} to your table price. You will receive
             Wi-Fi access details in your welcome packet at the con.
           </div>
         </div>
+        {% else %}
+          <input type="hidden" id="wifi" name="wifi" value="unchecked">
+        {%  endif %}
         <div class="form-group">
           <label for="switch" class="col-sm-3 control-label">I will consider different table types</label>
           <div class="col-sm-9">
@@ -206,19 +177,7 @@
           </div>
         </div>
         <hr/>
-        <div class="form-group">
-            <div class="checkbox col-sm-12">
-            <label>
-              <input type="checkbox" id="agreeToRules" name="agreeToRules" class="form-control-checkbox"
-                     required data-error="You must agree to the event code of conduct to register.">
-              I have read and understand the rules pertaining to both {{ event.name }} and the Markeplace. I agree to
-              abide by the {{ event.name }} <a href="{{ event.codeOfConduct }}" target="_blank">Code of Conduct</a>. By
-              registering for {{ event }} you attest that you are not listed on any sexual offender registry.
-            </label>
-          </div>
-          <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
-        </div>
-
+        {% include "templatetags/coc_sig.html" %}
 
         <div class="form-group">
           <div class="col-sm-9 col-sm-offset-3">
@@ -254,7 +213,7 @@
                   }
                   $("#partnerList").empty();
                   if (item.partnerMax > 0) {
-                      for (var i = item.partnerMin; i <= item.partnerMax; i++) {
+                      for (var i = item.partnerMin; i < item.partnerMax; i++) {
                           var partner = '<div class="partnerGroup"><input type="text" id="name_' + i + '" maxlength="400" class="form-control form-control-text" placeholder="Partner Name" />' +
                               '<input type="email" id="email_' + i + '" maxlength="200" class="form-control form-control-text" placeholder="Partner Email" />' +
                               '<input type="text" id="license_' + i + '" maxlength="50" placeholder="Partner Tax License" class="form-control form-control-text" />' +
@@ -264,7 +223,7 @@
                               $("#partnerList").append("<br/>");
                           }
                       }
-                      $("#partnerList").append("<span class='small'>If any partner will be selling their own merchandice, they must provide their license number or request a temporary license from the convention.</span>");
+                      $("#partnerList").append("<span class='small'>If any partner will be selling their own merchandise, they must provide their license number or request a temporary license from the convention.</span>");
                       $(".partnerLicense").click(partnerLicense);
                   }
               }
@@ -335,6 +294,14 @@
               return;
           }
 
+          let signature = $("#jsign_signature");
+          let nativeData = signature.jSignature("getData", "native");
+          if (nativeData.length < 2) {
+            alert("You must sign to acknowledge your acceptance of the Code of Conduct.");
+              $("#register").one('click', register_click);
+              return;
+          }
+
           var data = {
               'attendee': {
                   'firstName': $("#firstName").val(),
@@ -351,7 +318,9 @@
                   'birthdate': $("#birthDate").val(),
                   'emailsOk': $("#contact").is(':checked'),
                   'surveyOk': $("#survey").is(':checked'),
-                  'badgeName': $("#badgename").val()
+                  'badgeName': $("#badgename").val(),
+                  'signature_svg': signature.jSignature("getData", "svgbase64")[1],
+                  'signature_bitmap': signature.jSignature("getData", "image")[1]
               },
               'dealer': {
                   'businessName': $("#businessName").val(), 'website': $("#website").val(), 'logo': $("#logo").val(),
@@ -361,8 +330,8 @@
                   'chairs': $("#chairs").val(), 'partners': getPartners(), 'tables': $("#tables").val(),
                   'reception': false, 'artShow': false,
                   'charityRaffle': $("#charityRaffle").val(), 'agreeToRules': $("#agreeToRules").is(':checked'),
-                  'breakfast': $('#breakfast').is(':checked'), 'switch': $('#switch').is(':checked'),
-                  'buttonOffer': $('#buttonOffer').val(), 'asstbreakfast': false
+                  'breakfast': false, 'switch': $('#switch').is(':checked'),
+                  'asstbreakfast': false
               },
               'event': '{{event}}'
           };
