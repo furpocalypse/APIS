@@ -300,7 +300,7 @@ def add_assistants_checkout(request):
             return JsonResponse(
                 {
                     "success": False,
-                    "message": f"Bad request: name, email, and license fields are required to update assistant",
+                    "message": "Bad request: name, email, and license fields are required to update assistant",
                 }
             )
 

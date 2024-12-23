@@ -1,4 +1,3 @@
-from django.http import HttpRequest
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone

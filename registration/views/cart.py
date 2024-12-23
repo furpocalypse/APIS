@@ -209,7 +209,7 @@ def add_to_cart(request):
     """
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         return common.abort(400, "Unable to decode JSON body")
 
     event = Event.objects.get(default=True)
@@ -260,7 +260,7 @@ def remove_from_cart(request):
     order = request.session.get("order_items", [])
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         return common.abort(400, "Unable to decode JSON parameters")
     if "id" not in list(postData.keys()):
         return common.abort(400, "Required parameter `id` not specified")

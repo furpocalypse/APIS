@@ -5,9 +5,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 
 from registration.models import *
-from registration.tests import common
 from registration.tests.common import *
-from registration.views import onsite_admin
 
 
 class OnsiteBaseTestCase(TestCase):

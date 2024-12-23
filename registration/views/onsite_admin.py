@@ -707,7 +707,7 @@ def firebase_register(request):
         return JsonResponse({"success": True, "updated": True})
     except Firebase.DoesNotExist:
         pass
-    except Exception as e:
+    except Exception:
         return JsonResponse(
             {
                 "success": False,

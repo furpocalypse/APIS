@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 from datetime import datetime
@@ -59,7 +58,7 @@ def charge_payment(order, cc_data, request=None):
                 "last_name": cc_data["cc_lastname"],
             }
         )
-    except KeyError as e:
+    except KeyError:
         logger.debug("One or more billing address field omited - skipping")
 
     body = {
