@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime
+from datetime import timezone as python_tz
 from decimal import Decimal
 
 from django.shortcuts import render
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 def onsite(request):
     event = Event.objects.get(default=True)
     tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.now(python_tz.utc)
     context = {"event": event, "onsite": True}
     if event.onsiteRegStart <= today <= event.onsiteRegEnd:
         return render(request, "registration/onsite.html", context)
@@ -63,9 +64,9 @@ def onsite_cart(request):
             evt = event.eventStart
             tz = timezone.get_current_timezone()
             try:
-                birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+                birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
             except ValueError:
-                birthdate = tz.localize(datetime.strptime("2000-01-01", "%Y-%m-%d"))
+                birthdate = datetime.strptime("2000-01-01:EST", "%Y-%m-%d:%Z")
 
             age_at_event = (
                 evt.year

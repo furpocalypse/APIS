@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime
+from datetime import timezone as python_tz
 
 from django.shortcuts import render
 
@@ -64,7 +65,7 @@ def get_cart(request):
             evt = event.eventStart
             tz = timezone.get_current_timezone()
             try:
-                birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+                birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
             except ValueError:
                 logger.warning(
                     f"The required field 'birthdate' is not well-formed (got '{pda['birthdate']}')"
@@ -130,7 +131,7 @@ def saveCart(cart):
     evt = postData["event"]
 
     tz = timezone.get_current_timezone()
-    birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+    birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
 
     event = Event.objects.get(name=evt)
 

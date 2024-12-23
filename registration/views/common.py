@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime
+from datetime import timezone as python_tz
 from decimal import Decimal
 
 from django.conf import settings
@@ -206,7 +207,7 @@ def index(request):
         return render(request, "registration/docs/no-event.html")
 
     tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.now(python_tz.utc)
     discount = request.session.get("discount")
     if discount:
         discount = Discount.objects.filter(codeName=discount)

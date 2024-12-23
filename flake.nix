@@ -22,12 +22,14 @@
       # needed because, without it, the data contained within can't be
       # referenced in other parts of this file.
       devShells.x86_64-linux.default = pkgs.mkShell rec {
-        packages = [
-          pkgs.python3Full
-          (pkgs.poetry.override { python3 = python; })
-          pkgs.direnv
-          pkgs.gcc-unwrapped
-          pkgs.stdenv
+        packages = with pkgs; [
+          python3Full
+          (poetry.override { python3 = python; })
+          direnv
+          gcc-unwrapped
+          stdenv
+          wkhtmltopdf
+          postgresql
           # NOTE: Put additional packages you need in this array. Packages may be found by looking them up in
           # https://search.nixos.org/packages
         ];
