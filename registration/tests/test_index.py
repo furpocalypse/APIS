@@ -1,6 +1,5 @@
 import datetime
 
-from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import reverse
 from http import HTTPStatus

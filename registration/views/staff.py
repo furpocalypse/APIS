@@ -10,18 +10,14 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST
 
-import registration.emails
 from registration.models import *
 
 from .common import (
     abort,
-    clear_session,
-    get_client_ip,
     handler,
     logger,
-    success,
 )
-from .ordering import do_checkout, doZeroCheckout, get_total
+from .ordering import get_total
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +241,7 @@ def info_staff(request):
 def add_staff(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for add_staff()")
         return JsonResponse({"success": False})
 

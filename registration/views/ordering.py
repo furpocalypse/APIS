@@ -1,6 +1,5 @@
 import json
 import logging
-import time
 from json import JSONDecodeError
 
 from django.http import JsonResponse
@@ -213,7 +212,7 @@ def apply_discount(request):
 
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for apply_discount()")
         return JsonResponse({"success": False})
     dis = postData["discount"]

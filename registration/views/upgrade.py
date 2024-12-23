@@ -16,7 +16,6 @@ from registration.models import *
 from . import common
 from .common import (
     clear_session,
-    get_client_ip,
     get_registration_email,
     getOptionsDict,
     handler,
@@ -36,7 +35,7 @@ def upgrade(request, guid):
 def info_upgrade(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for info_upgrade()")
         return JsonResponse({"success": False}, status=400)
 
@@ -91,7 +90,7 @@ def find_upgrade(request):
 def add_upgrade(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for add_upgrade()")
         return JsonResponse({"success": False})
 
@@ -169,7 +168,7 @@ def send_upgrade_email(request, attendee, order):
     clear_session(request)
     try:
         registration.emails.send_upgrade_payment_email(attendee, order)
-    except Exception as e:
+    except Exception:
         logger.exception("Error sending UpgradePaymentEmail")
         registration_email = get_registration_email(event)
         return JsonResponse(
@@ -194,7 +193,7 @@ def checkout_upgrade(request):
     attendee = Attendee.objects.get(id=request.session.get("attendee_id"))
     try:
         post_data = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for checkout_upgrade()")
         return common.abort(400, "Unable to parse input options")
 

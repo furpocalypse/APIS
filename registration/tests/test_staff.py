@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from django.test import TestCase
 from django.test.utils import tag
