@@ -2,7 +2,7 @@
 name = "apis"
 version = "0.1.0"
 description = "Event Management System for Fan Conventions"
-authors = ["Anadon <joshua.r.marshall.1991@gmail.com>"]
+authors = ["Furthermore (To be filled out), Anadon <joshua.r.marshall.1991@gmail.com>"]
 license = "GPLv3"
 readme = "README.md"
 package-mode = false
@@ -10,7 +10,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.12"
 configobj = ">=5.0.8"
-django = ">=4.2.0,<5"
+django = ">=5.0.0,<6"
 django-admin-env-notice = ">=0.4"
 django-debug-toolbar = ">=4.3.0"
 django-extensions = ">=3.2.3"
