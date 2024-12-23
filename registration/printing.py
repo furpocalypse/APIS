@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import re
+from shutil import which
 import subprocess
 import sys
 import tempfile
@@ -15,7 +16,7 @@ PRINT_MODE = "pdf"
 
 # Platforms using the CUPS printing system (UNIX):
 unix = ["Linux", "linux2", "Darwin"]
-WKHTMLTOPDF = "/usr/local/bin/wkhtmltopdf"  # path to wkhtmltopdf binary
+WKHTMLTOPDF = which("wkhtmltopdf")  # path to wkhtmltopdf binary
 
 SCRIPT_PATH = os.path.dirname(os.path.realpath(__file__))
 NAMETAGS = os.path.join(
@@ -335,15 +336,15 @@ class Nametag:
 
         # read in the HTML
         self.log.debug("Generating nametag with nametag()")
-        self.log.debug("Reading {0}...".format(os.path.join(directory, "default.html")))
-        f = open(os.path.join(directory, "default.html"))
+        self.log.debug("Reading {0}...".format(os.path.join(directory, "div.html")))
+        f = open(os.path.join(directory, "div.html"))
         html = f.read()
         f.close()
 
         if len(html) == 0:  # template file is empty: use default instead.
             self.log.warn(
                 "HTML template file {0} is blank.".format(
-                    os.path.join(directory, "default.html")
+                    os.path.join(directory, "div.html")
                 )
             )
 

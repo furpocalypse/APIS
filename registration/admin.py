@@ -7,8 +7,10 @@ from io import BytesIO
 
 import qrcode
 from django import forms
-from django.conf.urls import url
-from django.contrib import admin, auth, messages
+from django.urls import re_path as url
+from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
+from django.contrib import messages
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.core.signing import TimestampSigner
@@ -65,7 +67,7 @@ def disable_two_factor(modeladmin, request, queryset):
 disable_two_factor.short_description = "Disable 2FA"
 
 
-class UserProfileAdmin(auth.admin.UserAdmin):
+class UserProfileAdmin(UserAdmin):
     model = User
     list_display = (
         "username",

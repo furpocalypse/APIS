@@ -16,3 +16,4 @@ venv3/
 .env
 htmlcov/
 .DS_Store
+.direnv/
