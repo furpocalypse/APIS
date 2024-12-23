@@ -32,10 +32,15 @@ def new_staff(request, guid):
     tz = timezone.get_current_timezone()
     today = datetime.now(python_tz.utc)
     context = {"token": guid, "event": event}
-    if event.staffRegStart <= today <= event.staffRegEnd or invite.ignore_time_window is True:
+    if (
+        event.staffRegStart <= today <= event.staffRegEnd
+        or invite.ignore_time_window is True
+    ):
         return render(request, "registration/staff/staff-new.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to slack and email for updates!"
+        )
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -170,7 +175,9 @@ def staff_index(request, guid):
     if event.staffRegStart <= today <= event.staffRegEnd:
         return render(request, "registration/staff/staff-locate.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to slack and email for updates!"
+        )
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."

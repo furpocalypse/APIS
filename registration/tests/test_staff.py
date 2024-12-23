@@ -285,7 +285,7 @@ class TestStaffIndex(StaffTestCase):
         response = self.client.get(reverse("registration:staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"not yet open", response.content)
-        
+
     @freeze_time(timezone.now() - timedelta(days=20))
     def test_staff_index_closed_upcoming(self):
         response = self.client.get(reverse("registration:staff", args=("foo",)))

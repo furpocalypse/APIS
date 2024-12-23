@@ -166,11 +166,17 @@ class BadgeTemplate(models.Model):
     name = models.CharField(max_length=100)
     template = models.TextField()
     paperWidth = models.CharField(max_length=10, null=True, verbose_name="Paper Width")
-    paperHeight = models.CharField(max_length=10, null=True, verbose_name="Paper Height")
-    marginTop = models.CharField(max_length=10, null=True, verbose_name = "Margin Top")
-    marginBottom = models.CharField(max_length=10, null=True, verbose_name = "Margin Bottom")
+    paperHeight = models.CharField(
+        max_length=10, null=True, verbose_name="Paper Height"
+    )
+    marginTop = models.CharField(max_length=10, null=True, verbose_name="Margin Top")
+    marginBottom = models.CharField(
+        max_length=10, null=True, verbose_name="Margin Bottom"
+    )
     marginLeft = models.CharField(max_length=10, null=True, verbose_name="Margin Left")
-    marginRight = models.CharField(max_length=10, null=True, verbose_name = "Margin Right")
+    marginRight = models.CharField(
+        max_length=10, null=True, verbose_name="Margin Right"
+    )
     landscape = models.BooleanField(default=True)
     scale = models.FloatField(default=1.0)
 

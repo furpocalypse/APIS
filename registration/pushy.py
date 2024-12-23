@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 class PushyAPI:
     @staticmethod
-    def send_push_notification(data: Any, to: list[str], options: dict[str: str]) -> None:
+    def send_push_notification(
+        data: Any, to: list[str], options: dict[str:str]
+    ) -> None:
         logger.info(to)
         if str(to[0].lower()) == "none":
             return

@@ -525,7 +525,9 @@ def addNewDealer(request):
 
     tz = timezone.get_current_timezone()
     try:
-        birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
+        birthdate = datetime.strptime(
+            f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z"
+        )
     except ValueError as e:
         logger.warning(f"Unable to parse birthdate: {pda['birthdate']} - {e}")
         return common.abort(400, f"Unable to parse birthdate: {pda['birthdate']}")

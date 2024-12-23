@@ -10,8 +10,10 @@ admin.autodiscover()
 urlpatterns = [
     path(
         "robots.txt",
-        lambda x: HttpResponse("User-Agent: *\n\nDisallow: /", content_type="text/plain"),
-        name="robots_file"
+        lambda x: HttpResponse(
+            "User-Agent: *\n\nDisallow: /", content_type="text/plain"
+        ),
+        name="robots_file",
     ),
     path("registration/", include("registration.urls", namespace="registration")),
     path("admin/", admin.site.urls),
@@ -25,4 +27,3 @@ if settings.DEBUG:
     urlpatterns = [
         path("__debug__/", include(debug_toolbar.urls)),
     ] + urlpatterns
-

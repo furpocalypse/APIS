@@ -35,7 +35,9 @@ urlpatterns = [
         registration.views.upgrade.info_upgrade,
         name="info_upgrade",
     ),
-    re_path(r"^upgrade/add/?$", registration.views.upgrade.add_upgrade, name="add_upgrade"),
+    re_path(
+        r"^upgrade/add/?$", registration.views.upgrade.add_upgrade, name="add_upgrade"
+    ),
     re_path(
         r"^upgrade/invoice/?$",
         registration.views.upgrade.invoice_upgrade,
@@ -55,11 +57,17 @@ urlpatterns = [
         r"^upgrade/(?P<guid>\w+)/?$", registration.views.upgrade.upgrade, name="upgrade"
     ),
     re_path(r"^staff/done/?$", registration.views.staff.staff_done, name="staff_done"),
-    re_path(r"^staff/lookup/?$", registration.views.staff.find_staff, name="find_staff"),
+    re_path(
+        r"^staff/lookup/?$", registration.views.staff.find_staff, name="find_staff"
+    ),
     re_path(r"^staff/info/?$", registration.views.staff.info_staff, name="info_staff"),
     re_path(r"^staff/add/?$", registration.views.staff.add_staff, name="add_staff"),
-    re_path(r"^staff/(?P<guid>\w+)/?$", registration.views.staff.staff_index, name="staff"),
-    re_path(r"^newstaff/done/?$", registration.views.staff.staff_done, name="doneNewStaff"),
+    re_path(
+        r"^staff/(?P<guid>\w+)/?$", registration.views.staff.staff_index, name="staff"
+    ),
+    re_path(
+        r"^newstaff/done/?$", registration.views.staff.staff_done, name="doneNewStaff"
+    ),
     re_path(
         r"^newstaff/lookup/?$",
         registration.views.staff.find_new_staff,
@@ -86,7 +94,9 @@ urlpatterns = [
         registration.views.dealers.addNewDealer,
         name="addNewDealer",
     ),
-    re_path(r"^dealer/done/?$", registration.views.dealers.done_dealer, name="done_dealer"),
+    re_path(
+        r"^dealer/done/?$", registration.views.dealers.done_dealer, name="done_dealer"
+    ),
     re_path(
         r"^dealer/thanks/?$",
         registration.views.dealers.thanks_dealer,
@@ -95,8 +105,12 @@ urlpatterns = [
     re_path(
         r"^dealer/lookup/?$", registration.views.dealers.find_dealer, name="find_dealer"
     ),
-    re_path(r"^dealer/add/?$", registration.views.dealers.add_dealer, name="add_dealer"),
-    re_path(r"^dealer/info/?$", registration.views.dealers.info_dealer, name="info_dealer"),
+    re_path(
+        r"^dealer/add/?$", registration.views.dealers.add_dealer, name="add_dealer"
+    ),
+    re_path(
+        r"^dealer/info/?$", registration.views.dealers.info_dealer, name="info_dealer"
+    ),
     re_path(
         r"^dealer/invoice/?$",
         registration.views.dealers.invoice_dealer,
@@ -146,8 +160,12 @@ urlpatterns = [
         name="done_asst_dealer",
     ),
     re_path(r"^onsite/?$", registration.views.onsite.onsite, name="onsite"),
-    re_path(r"^onsite/cart/?$", registration.views.onsite.onsite_cart, name="onsite_cart"),
-    re_path(r"^onsite/done/?$", registration.views.onsite.onsite_done, name="onsite_done"),
+    re_path(
+        r"^onsite/cart/?$", registration.views.onsite.onsite_cart, name="onsite_cart"
+    ),
+    re_path(
+        r"^onsite/done/?$", registration.views.onsite.onsite_done, name="onsite_done"
+    ),
     re_path(
         r"^onsite/admin/?$",
         registration.views.onsite_admin.onsite_admin,
@@ -275,7 +293,9 @@ urlpatterns = [
         registration.views.ordering.apply_discount,
         name="discount",
     ),
-    re_path(r"^cart/checkout/?$", registration.views.ordering.checkout, name="checkout"),
+    re_path(
+        r"^cart/checkout/?$", registration.views.ordering.checkout, name="checkout"
+    ),
     re_path(r"^cart/done/?$", registration.views.cart.cart_done, name="done"),
     re_path(r"^events/?$", registration.views.common.get_events, name="events"),
     re_path(
@@ -313,7 +333,9 @@ urlpatterns = [
         registration.views.attendee.get_free_price_levels,
         name="freepricelevels",
     ),
-    re_path(r"^shirts/?$", registration.views.common.get_shirt_sizes, name="shirtsizes"),
+    re_path(
+        r"^shirts/?$", registration.views.common.get_shirt_sizes, name="shirtsizes"
+    ),
     re_path(r"^tables/?$", registration.views.dealers.getTableSizes, name="tablesizes"),
     re_path(
         r"^addresses/?$",
@@ -343,4 +365,3 @@ urlpatterns = [
         name="square_webhook",
     ),
 ]
-

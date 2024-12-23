@@ -29,7 +29,9 @@ def onsite(request):
     if event.onsiteRegStart <= today <= event.onsiteRegEnd:
         return render(request, "registration/onsite.html", context)
     elif event.onsiteRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to our social media for updates!"
+        )
         return render(request, "registration/closed.html", context)
     elif event.onsiteRegEnd <= today:
         context["message"] = "has ended."
@@ -64,7 +66,9 @@ def onsite_cart(request):
             evt = event.eventStart
             tz = timezone.get_current_timezone()
             try:
-                birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
+                birthdate = datetime.strptime(
+                    f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z"
+                )
             except ValueError:
                 birthdate = datetime.strptime("2000-01-01:EST", "%Y-%m-%d:%Z")
 

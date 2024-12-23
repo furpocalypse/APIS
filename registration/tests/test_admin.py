@@ -551,7 +551,7 @@ class TestCashDrawerAdmin(TestCase):
         cash_drawer.delete()
 
 
-#class TestTwoFactorAdmin(TestCase):
+# class TestTwoFactorAdmin(TestCase):
 #    def setUp(self):
 #        self.user_profile_admin = admin.UserProfileAdmin(
 #            model=User, admin_site=AdminSite()
