@@ -258,7 +258,7 @@ def add_staff(request):
         return JsonResponse({"success": False, "message": "Attendee not found"})
 
     tz = timezone.get_current_timezone()
-    birthdate = datetime.strptime(f'{pda["birthdate"]}:{timezone.utc}', "%Y-%m-%d:%Z")
+    birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
 
     attendee.preferredName = pda.get("preferredName", "")
     attendee.firstName = pda["firstName"]
