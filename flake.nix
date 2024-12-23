@@ -30,6 +30,7 @@
           stdenv
           wkhtmltopdf
           postgresql
+          ruff
           # NOTE: Put additional packages you need in this array. Packages may be found by looking them up in
           # https://search.nixos.org/packages
         ];

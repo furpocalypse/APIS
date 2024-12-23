@@ -428,17 +428,17 @@ dev = ["attribution (==1.8.0)", "black (==24.8.0)", "build (>=1)", "flit (==3.9.
 
 [[package]]
 name = "django"
-version = "4.2.17"
+version = "5.1.4"
 description = "A high-level Python web framework that encourages rapid development and clean, pragmatic design."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 files = [
-    {file = "Django-4.2.17-py3-none-any.whl", hash = "sha256:3a93350214ba25f178d4045c0786c61573e7dbfa3c509b3551374f1e11ba8de0"},
-    {file = "Django-4.2.17.tar.gz", hash = "sha256:6b56d834cc94c8b21a8f4e775064896be3b4a4ca387f2612d4406a5927cd2fdc"},
+    {file = "Django-5.1.4-py3-none-any.whl", hash = "sha256:236e023f021f5ce7dee5779de7b286565fdea5f4ab86bae5338e3f7b69896cf0"},
+    {file = "Django-5.1.4.tar.gz", hash = "sha256:de450c09e91879fa5a307f696e57c851955c910a438a35e6b4c895e86bedc82a"},
 ]
 
 [package.dependencies]
-asgiref = ">=3.6.0,<4"
+asgiref = ">=3.8.1,<4"
 sqlparse = ">=0.3.1"
 tzdata = {version = "*", markers = "sys_platform == \"win32\""}
 
@@ -669,17 +669,17 @@ python-dateutil = ">=2.7"
 
 [[package]]
 name = "gotenberg-client"
-version = "0.8.0"
+version = "0.8.2"
 description = "A Python client for interfacing with the Gotenberg API"
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "gotenberg_client-0.8.0-py3-none-any.whl", hash = "sha256:4fbdb07cbcdfd43bd8253364d73aada71911ae5e7ee3419d0da8fdcf1628f2af"},
-    {file = "gotenberg_client-0.8.0.tar.gz", hash = "sha256:5eb80f0bc3fbf9c7ec9519e32bf447d694a3a8fa80b889a6f6e9a225abf0ec42"},
+    {file = "gotenberg_client-0.8.2-py3-none-any.whl", hash = "sha256:2a873e7fa9c4e9790f03da0130b12fabdb2144fc4e54732ac1196cd5a6a7f110"},
+    {file = "gotenberg_client-0.8.2.tar.gz", hash = "sha256:58387c6ceed6f274113c524f79b4cdbd83d971d0972805fe0f1dac2b648e27db"},
 ]
 
 [package.dependencies]
-httpx = {version = ">=0.28,<1.0", extras = ["http2"]}
+httpx = {version = ">=0.27", extras = ["http2"]}
 
 [package.extras]
 magic = ["python-magic"]
@@ -1589,13 +1589,13 @@ files = [
 
 [[package]]
 name = "urllib3"
-version = "2.2.3"
+version = "2.3.0"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 files = [
-    {file = "urllib3-2.2.3-py3-none-any.whl", hash = "sha256:ca899ca043dcb1bafa3e262d73aa25c465bfb49e0bd9dd5d59f1d0acba2f8fac"},
-    {file = "urllib3-2.2.3.tar.gz", hash = "sha256:e7d814a81dad81e6caf2ec9fdedb284ecc9c73076b62654547cc64ccdcae26e9"},
+    {file = "urllib3-2.3.0-py3-none-any.whl", hash = "sha256:1cee9ad369867bfdbbb48b7dd50374c0967a0bb7710050facf0dd6911440e3df"},
+    {file = "urllib3-2.3.0.tar.gz", hash = "sha256:f8c5449b3cf0861679ce7e0503c7b44b5ec981bec0d1d3795a07f1ba96f0204d"},
 ]
 
 [package.extras]
@@ -1641,4 +1641,4 @@ watchdog = ["watchdog (>=2.3)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "dff199ea2b2882a8b8fede9257876d622dffe926fcab6b45199651fc75f67f6d"
+content-hash = "9d83e9fda16a49b2aba57fae478e9881940d8797b4b5d237d05eafb2cf19a620"
