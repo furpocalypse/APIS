@@ -17,3 +17,5 @@ venv3/
 htmlcov/
 .DS_Store
 .direnv/
+registration/migrations/
+
