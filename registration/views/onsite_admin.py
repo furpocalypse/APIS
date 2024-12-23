@@ -349,10 +349,12 @@ def onsite_print_badges(request):
         terminal = get_active_terminal(request)
 
         signer = TimestampSigner()
-        data = signer.sign_object({
-            "badge_ids": [int(badge_id) for badge_id in badge_list],
-            "terminal": terminal.name if terminal else None,
-        })
+        data = signer.sign_object(
+            {
+                "badge_ids": [int(badge_id) for badge_id in badge_list],
+                "terminal": terminal.name if terminal else None,
+            }
+        )
 
         pdf_path = reverse("registration:pdf") + f"?data={data}"
     else:
@@ -483,7 +485,6 @@ def combine_orders(orders):
     # orderItems to the first order, and delete the rest.
     first_order = orders[0]
     if len(orders) > 1:
-
         order_items = []
         for order in orders[1:]:
             order_items += order.orderitem_set.all()

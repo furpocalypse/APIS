@@ -950,15 +950,16 @@ def get_attendee_age(attendee):
 def print_badges(modeladmin, request, queryset):
     if getattr(settings, "PRINT_RENDERER", "wkhtmltopdf") == "gotenberg":
         signer = TimestampSigner()
-        data = signer.sign_object({
-            "badge_ids": [badge.id for badge in queryset],
-        })
+        data = signer.sign_object(
+            {
+                "badge_ids": [badge.id for badge in queryset],
+            }
+        )
 
         pdf_path = reverse("registration:pdf") + f"?data={data}"
     else:
         pdf_name = generate_badge_labels(queryset, request)
         pdf_path = reverse("registration:pdf") + f"?file={pdf_name}"
-
 
     response = HttpResponseRedirect(reverse("registration:print"))
     url_params = {"file": pdf_path, "next": request.get_full_path()}
@@ -1363,7 +1364,6 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
     def render_change_form(self, request, context, *args, **kwargs):
         obj = kwargs.get("obj")
         if obj and obj.billingType == Order.CREDIT:
-
             context["api_data"] = obj.apiData
             if not obj.apiData:
                 messages.warning(
@@ -1640,7 +1640,7 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
         "marginLeft",
         "marginRight",
         "landscape",
-        "scale"
+        "scale",
     )
 
     fieldsets = (
@@ -1648,7 +1648,7 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
             None,
             {
                 "fields": ("name", "template"),
-            }
+            },
         ),
         (
             "Paper Setup",
@@ -1658,7 +1658,7 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
                     "scale",
                     ("paperWidth", "paperHeight"),
                 )
-            }
+            },
         ),
         (
             "Margins And Padding",
@@ -1667,8 +1667,9 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
                     ("marginTop", "marginBottom"),
                     ("marginLeft", "marginRight"),
                 ),
-            }
+            },
         ),
     )
+
 
 admin.site.register(BadgeTemplate, BadgeTemplateAdmin)

@@ -65,7 +65,9 @@ def get_cart(request):
             evt = event.eventStart
             tz = timezone.get_current_timezone()
             try:
-                birthdate = datetime.strptime(f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z")
+                birthdate = datetime.strptime(
+                    f'{pda["birthdate"]}:{python_tz.utc}', "%Y-%m-%d:%Z"
+                )
             except ValueError:
                 logger.warning(
                     f"The required field 'birthdate' is not well-formed (got '{pda['birthdate']}')"
@@ -163,7 +165,13 @@ def saveCart(cart):
             )
     attendee.save()
 
-    badge = Badge(badgeName=pda["badgeName"], event=event, attendee=attendee, signature_svg=pda.get("signature_svg"), signature_bitmap=pda.get("signature_bitmap"))
+    badge = Badge(
+        badgeName=pda["badgeName"],
+        event=event,
+        attendee=attendee,
+        signature_svg=pda.get("signature_svg"),
+        signature_bitmap=pda.get("signature_bitmap"),
+    )
     badge.save()
 
     priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
