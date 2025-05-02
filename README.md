@@ -26,7 +26,7 @@ Stack:
     or label printer, with Unicode-supported fonts (Emoji!)
   + Protect admin and volunteer logins with TOTP 2-Factor or FIDO U2F.
 
-![Screenshot of Cash Register Position](https://i.imgur.com/7iJSS8E.png)
+![Screenshot of Cash Register Position](/docs/admin-onsite.png)
 
 ## Quick start
 ### Running Using Published Docker Images
@@ -34,7 +34,7 @@ Stack:
     # Install docker using the instructions at either:
     # https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-20-04 or
     # https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository.
-    
+
     # Download docker-compose.yml and example.env files from this repo
 
     # Create .env from template and edit relevant settings (API keys, etc)
@@ -108,7 +108,13 @@ The following was tested on a fresh installation of Ubuntu 20.04.
     source venv/bin/activate
     pip install -r requirements.txt
 
-    # Review your settings
+    # Create a development database server
+    python manage.py make_db
+
+    # Start the development database server
+    python manage.py start_db
+
+    # Review your settings, including the database settings from the output from make_db.
     cp fm_eventmanager/settings.py.devel fm_eventmanager/settings.py
 
     python manage.py migrate

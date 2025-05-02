@@ -17,7 +17,7 @@ from django.db.models import Max
 from django.forms import NumberInput, widgets
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
-from django.urls import reverse
+from django.urls import path, reverse
 from django.utils.html import format_html, urlencode
 from django.utils.safestring import mark_safe
 from import_export import fields, resources
@@ -29,17 +29,15 @@ from pygments.lexers.data import JsonLexer
 from qrcode.image.svg import SvgPathFillImage
 
 import registration.emails
+import registration.views.onsite_admin
 import registration.views.printing
 from registration import mqtt, payments
 from registration.forms import FirebaseForm
 from registration.models import *
-from registration.pushy import PushyAPI, PushyError
 
 from . import printing
 
 logger = logging.getLogger(__name__)
-
-TWOPLACES = Decimal(10) ** -2
 
 admin.site.site_url = None
 admin.site.site_header = "APIS Backoffice"
@@ -90,12 +88,10 @@ admin.site.register(User, UserProfileAdmin)
 
 
 class FirebaseAdmin(admin.ModelAdmin):
-    list_display = ("name", "token", "closed")
+    list_display = ("name", "cashdrawer", "print_via_mqtt", "background_color", "webview")
     form = FirebaseForm
 
     def render_change_form(self, request, context, *args, **kwargs):
-        obj = kwargs.get("obj")
-
         return super(FirebaseAdmin, self).render_change_form(
             request, context, *args, **kwargs
         )
@@ -109,41 +105,35 @@ class FirebaseAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         obj.save()
+
         data = {
-            "command": "settings",
-            "json": self.get_provisioning(obj, closed=obj.closed),
+            "updateConfig": {
+                "config": self.get_provisioning(obj),
+            }
         }
 
-        try:
-            PushyAPI.send_push_notification(data, [obj.token], None)
-        except PushyError as e:
-            messages.warning(
-                request,
-                f"We tried to update the terminal's settings, but there was a problem: {e}",
-            )
+        registration.views.onsite_admin.send_mqtt_message_to_terminal(obj, data)
 
     @staticmethod
-    def get_provisioning(firebase, **kwargs):
+    def get_provisioning(firebase):
         current_site = Site.objects.get_current()
-        endpoint = settings.REGISTER_ENDPOINT
-        if endpoint is None:
-            endpoint = "https://{0}{1}".format(current_site.domain, reverse("root"))
+        endpoint = "https://{0}".format(current_site.domain)
+        token = mqtt.get_client_token(firebase)
 
-        document = {
-            "v": 1,
-            "client_id": settings.SQUARE_APPLICATION_ID,
-            "api_key": settings.REGISTER_KEY,
+        return {
+            "terminalName": firebase.name,
             "endpoint": endpoint,
-            "name": firebase.name,
-            "location_id": settings.REGISTER_SQUARE_LOCATION,
-            "force_location": settings.REGISTER_FORCE_LOCATION,
-            "bg": firebase.background_color,
-            "fg": firebase.foreground_color,
-            "webview": firebase.webview,
+            "token": firebase.token,
+            "webViewUrl": firebase.webview,
+            "themeColor": firebase.background_color,
+            "mqttHost": settings.MQTT_EXTERNAL_BROKER,
+            "mqttPort": 443,
+            "mqttUsername": token["user"],
+            "mqttPassword": token["token"],
+            "mqttTopic": f'{mqtt.get_topic("terminal", firebase.name)}/action',
+            "squareApplicationId": settings.SQUARE_APPLICATION_ID,
+            "squareLocationId": settings.REGISTER_SQUARE_LOCATION,
         }
-        document.update(kwargs)
-
-        return json.dumps(document)
 
     @staticmethod
     def get_qrcode(data):
@@ -154,7 +144,7 @@ class FirebaseAdmin(admin.ModelAdmin):
 
     def provision_view(self, request, pk):
         obj = Firebase.objects.get(id=pk)
-        provisioning = self.get_provisioning(obj)
+        provisioning = json.dumps(self.get_provisioning(obj))
         token = mqtt.get_client_token(obj)
 
         context = {
@@ -176,6 +166,10 @@ admin.site.register(BanList, BanListAdmin)
 
 
 def send_staff_token_email(modeladmin, request, queryset):
+    if queryset.count() == 0:
+        messages.error("Invalid token selected")
+        return
+
     for token in queryset:
         registration.emails.send_new_staff_email(token)
         token.sent = True
@@ -185,7 +179,7 @@ def send_staff_token_email(modeladmin, request, queryset):
             request, "Successfully sent emails to %d staff members" % queryset.count()
         )
     else:
-        messages.success(request, "Successfully sent email to %s" % queryset[0])
+        messages.success(request, "Successfully sent email to %s" % queryset[0].email)
 
 
 send_staff_token_email.short_description = "Send New Staff registration email"
@@ -540,6 +534,7 @@ class EventAdmin(admin.ModelAdmin):
                 "fields": (
                     "default",
                     "name",
+                    "websiteUrl",
                     "eventStart",
                     "eventEnd",
                     "venue",
@@ -1070,9 +1065,11 @@ class BadgeInline(NestedTabularInline):
 
     def get_age_range(self, obj):
         born = obj.attendee.birthdate
-        today = date.today()
+        event_start = obj.event.eventStart
         age = (
-            today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+            event_start.year
+            - born.year
+            - ((event_start.month, event_start.day) < (born.month, born.day))
         )
         if age >= 18:
             return format_html("<span>18+</span>")
@@ -1206,11 +1203,11 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
     def get_age_range(self, obj):
         try:
             born = obj.attendee.birthdate
-            today = date.today()
+            event_start = obj.event.eventStart
             age = (
-                today.year
+                event_start.year
                 - born.year
-                - ((today.month, today.day) < (born.month, born.day))
+                - ((event_start.month, event_start.day) < (born.month, born.day))
             )
             if age >= 18:
                 return format_html("<span>18+</span>")
@@ -1239,7 +1236,7 @@ class AttendeeAdmin(NestedModelAdmin):
     save_on_top = True
     actions = [make_staff]
     search_fields = ["email", "lastName", "firstName", "preferredName"]
-    list_display = ("getFirst", "lastName", "email", "get_age_range")
+    list_display = ("getFirst", "lastName", "email", "phone")
     fieldsets = (
         (
             None,
@@ -1269,18 +1266,6 @@ class AttendeeAdmin(NestedModelAdmin):
             },
         ),
     )
-
-    def get_age_range(self, obj):
-        born = obj.birthdate
-        today = date.today()
-        age = (
-            today.year - born.year - ((today.month, today.day) < (born.month, born.day))
-        )
-        if age >= 18:
-            return format_html("<span>18+</span>")
-        return format_html('<span style="color:red">MINOR FORM<br/>REQUIRED</span>')
-
-    get_age_range.short_description = "Age Group"
 
 
 admin.site.register(Attendee, AttendeeAdmin)
@@ -1466,7 +1451,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
             form = self.RefundForm(request.POST)
 
             if form.is_valid():
-                amount = Decimal(form.cleaned_data["amount"]).quantize(TWOPLACES)
+                amount = Decimal(form.cleaned_data["amount"]).quantize(registration.views.onsite_admin.TWOPLACES)
                 reason = form.cleaned_data.get("reason")
 
                 if amount > order.total:
@@ -1514,7 +1499,7 @@ admin.site.register(Order, OrderAdmin)
 
 
 class PriceLevelAdmin(admin.ModelAdmin):
-    list_display = ("name", "basePrice", "startDate", "endDate", "public", "group")
+    list_display = ("name", "basePrice", "get_level_active_status", "min_age", "max_age", "public", "available_to_attendee", "available_to_marketplace", "available_to_staff", "group")
 
 
 admin.site.register(PriceLevel, PriceLevelAdmin)
@@ -1670,3 +1655,45 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
     )
 
 admin.site.register(BadgeTemplate, BadgeTemplateAdmin)
+
+class SquareDeviceAdmin(admin.ModelAdmin):
+    list_display = ("name", "device_type", "device_id")
+    change_list_template = "admin/square_devices_list.html"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_urls(self):
+        urls = super(SquareDeviceAdmin, self).get_urls()
+        my_urls = [
+            path(r"sync/", self.sync_view),
+        ]
+        return my_urls + urls
+
+    def sync_view(self, request):
+        existing_devices = SquareDevice.objects.all()
+        current_devices = payments.get_terminals()
+
+        keep_ids = set()
+        for device in current_devices:
+            SquareDevice.objects.update_or_create(
+                device_id=device["id"], defaults={
+                    "name": device["attributes"]["name"],
+                    "device_type": device["attributes"]["type"],
+                },
+            )
+            keep_ids.add(device["id"])
+
+        for existing in existing_devices:
+            if existing.device_id not in keep_ids:
+                existing.delete()
+
+        return HttpResponseRedirect("../")
+
+admin.site.register(SquareDevice, SquareDeviceAdmin)

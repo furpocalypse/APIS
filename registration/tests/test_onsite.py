@@ -3,9 +3,9 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.test.utils import override_settings
 
 from registration.models import *
-from registration.tests import common
 from registration.tests.common import *
 from registration.views import onsite_admin
 
@@ -179,6 +179,16 @@ class TestOnsiteCart(OnsiteBaseTestCase):
         self.assertEqual(response.status_code, 200)
 
 
+@override_settings(**{
+    "MQTT_BROKER": {
+        "host": "localhost",
+        "port": 1883,
+    },
+    "MQTT_JWT_SECRET": "secret==",
+    "MQTT_JWT_ALGORITHM": "HS256",
+    "REGISTER_KEY": "",
+    "REGISTER_PRINTER_URI": "",
+})
 class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_login_required(self):
         self.client.logout()
@@ -196,29 +206,24 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertContains(response, "are not authorized to access this page")
         self.client.logout()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    def test_onsite_admin(self, mock_sendPushNotification):
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_onsite_admin(self, mock_send_mqtt_message):
         self.client.logout()
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(reverse("registration:onsite_admin"), follow=True)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context["errors"]), 0)
-        self.assertEqual(len(response.context["terminals"]), 1)
+        settings = json.loads(response.context["settings"])
+        self.assertEqual(len(settings["errors"]), 0)
+        self.assertEqual(len(settings["terminals"]["available"]), 1)
 
         self.terminal.delete()
         response = self.client.get(reverse("registration:onsite_admin"))
         self.assertEqual(response.status_code, 200)
-        errors = [e["code"] for e in response.context["errors"]]
+        errors = [e["code"] for e in json.loads(response.context["settings"])["errors"]]
         self.assertTrue("ERROR_NO_TERMINAL" in errors)
 
         self.terminal = Firebase(token="test", name="Terminal 1")
         self.terminal.save()
-        response = self.client.get(
-            reverse("registration:onsite_admin"), {"search": "doesntexist"}
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue("results" in list(response.context.keys()))
-        self.assertEqual(len(response.context["results"]), 0)
 
         response = self.client.get(
             reverse("registration:onsite_admin"),
@@ -234,44 +239,25 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
         self.client.logout()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_admin_cart_not_initialized(
-        self, mock_send_mqtt_message, mock_send_push_notification
-    ):
-        self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(reverse("registration:onsite_admin_cart"))
-        message = response.json()
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(message["success"])
-        self.assertEqual(message["message"], "Cart not initialized")
-
     def test_onsite_admin_search_no_query(self):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.post(
+        response = self.client.get(
             reverse("registration:onsite_admin_search"),
         )
         self.assertEqual(response.status_code, 302)
 
     def test_onsite_admin_search_no_result(self):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.post(
+        response = self.client.get(
             reverse("registration:onsite_admin_search"),
             {"search": "Somethingthatcantpossiblyexistyet"},
         )
-        expected_errors = [
-            {
-                "type": "warning",
-                "text": 'No results for query "Somethingthatcantpossiblyexistyet"',
-            },
-        ]
-        self.assertEqual(response.context["errors"], expected_errors)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["results"]), 0)
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
     @patch("registration.mqtt.send_mqtt_message")
     def test_onsite_admin_cart_no_donations(
-        self, mock_send_mqtt_message, mock_send_push_notification
+        self, mock_send_mqtt_message
     ):
         # Stage registration
         options = [
@@ -284,30 +270,30 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertTrue(self.client.login(username="admin", password="admin"))
 
         # Do search
-        response = self.client.post(
+        response = self.client.get(
             reverse("registration:onsite_admin_search"),
             {"search": "Christian"},
         )
         self.assertEqual(response.status_code, 200)
-        attendee = response.context["results"][0].attendee
+        attendee = Badge.objects.get(pk=response.json()["results"][0]["id"]).attendee
         attendee.holdType = self.boogeyman_hold
         attendee.save()
 
         response = self.client.get(
-            reverse("registration:onsite_admin"),
+            reverse("registration:onsite_admin_search"),
             {"search": "Christian", "terminal": self.terminal.id},
         )
         self.assertEqual(response.status_code, 200)
 
         # Add to cart
-        badge_id = response.context["results"][0].id
+        badge_id = response.json()["results"][0]["id"]
 
         response = self.client.get(
             reverse("registration:onsite_add_to_cart"),
             {"id": badge_id},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.client.session["cart"], [str(badge_id)])
+        self.assertEqual(self.client.session["cart"], [badge_id])
 
         response = self.client.get(reverse("registration:onsite_admin_cart"))
         message = response.json()
@@ -320,109 +306,71 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             float(self.price_45.basePrice + self.option_shirt.optionPrice),
         )
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
     @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_admin_cart_with_donations(
-        self, mock_send_mqtt_message, mock_send_push_notification
-    ):
-        pass
-
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_close_terminal_no_terminal(
-        self, mock_send_mqtt_message, mock_send_push_notification
-    ):
-        self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(reverse("registration:close_terminal"))
-        self.assertEqual(response.status_code, 400)
-        mock_send_push_notification.assert_not_called()
-        mock_send_mqtt_message.assert_not_called()
-
-    @patch("paho.mqtt.publish.single")
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    def test_onsite_close_terminal_happy_path(
-        self, mock_send_push_notification, mock_send_mqtt_single
+    def test_onsite_set_terminal_status(
+        self, mock_send_mqtt_single
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:close_terminal"),
-            {"terminal": self.terminal.id},
-        )
-        self.assertEqual(response.status_code, 200)
-        mock_send_push_notification.assert_called_once()
-        mock_send_mqtt_single.assert_called_once()
-
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("paho.mqtt.publish.single")
-    def test_onsite_open_terminal(
-        self, mock_send_mqtt_single, mock_send_push_notification
-    ):
-        self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(
-            reverse("registration:open_terminal"),
-            {"terminal": self.terminal.id},
+            reverse("registration:terminal_status"),
+            {"terminal": self.terminal.id, "status": "open"},
         )
 
         self.assertEqual(response.status_code, 200)
-        mock_send_push_notification.assert_called_once()
-        mock_send_mqtt_single.assert_called_once()
+        self.assertEqual(mock_send_mqtt_single.call_count, 2)
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    def test_onsite_invalid_terminal(self, mock_sendPushNotification):
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_onsite_set_invalid_terminal_status(self, mock_send_mqtt_message):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
-            {"terminal": "notanint"},
+            reverse("registration:terminal_status"),
+            {"terminal": "notanint", "status": "open"},
         )
 
         message = response.json()
         self.assertEqual(response.status_code, 400)
         self.assertFalse(message["success"])
-        self.assertEqual(message["message"], "Invalid terminal specified")
-        mock_sendPushNotification.assert_not_called()
+        self.assertEqual(message["reason"], "No terminal associated with request")
+        mock_send_mqtt_message.assert_not_called()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
     @patch("registration.mqtt.send_mqtt_message")
     def test_onsite_terminal_dne(
-        self, mock_send_mqtt_message, mock_send_push_notification
+        self, mock_send_mqtt_message
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
+            reverse("registration:terminal_status"),
             {"terminal": 1000},
         )
 
         message = response.json()
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 400)
         self.assertFalse(message["success"])
         self.assertEqual(
-            message["message"],
-            "The payment terminal specified has not registered with the server",
+            message["reason"],
+            "No terminal associated with request",
         )
-        mock_send_push_notification.assert_not_called()
         mock_send_mqtt_message.assert_not_called()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
     @patch("registration.mqtt.send_mqtt_message")
     def test_onsite_terminal_bad_request(
-        self, mock_send_mqtt_message, mock_send_push_notification
+        self, mock_send_mqtt_message
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
+            reverse("registration:terminal_status"),
         )
 
         message = response.json()
         self.assertEqual(response.status_code, 400)
         self.assertFalse(message["success"])
         self.assertEqual(
-            message["message"], "No terminal specified and none in session"
+            message["reason"], "No terminal associated with request"
         )
-        mock_send_push_notification.assert_not_called()
         mock_send_mqtt_message.assert_not_called()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    def test_onsite_enabled_terminal(self, mock_send_push_notification):
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_onsite_enabled_terminal(self, mock_send_mqtt_message):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
             reverse("registration:enable_payment"),
@@ -489,12 +437,14 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.terminal = Firebase.objects.get(name=self.terminal.name)
         self.assertEqual(self.terminal.token, new_token)
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_complete_cash_transaction(
-        self, mock_send_mqtt_message, mock_sendPushNotification
+        self, mock_send_mqtt_message
     ):
         self.test_onsite_admin_cart_no_donations()
+        self.client.get(
+            reverse("registration:onsite_admin"), {"terminal": self.terminal.name}
+        )
         order = Order.objects.last()
         args = {
             "reference": order.reference,
@@ -513,22 +463,20 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         drawer = Cashdrawer.objects.last()
         self.assertEqual(drawer.total, order.total)
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("registration.mqtt.send_mqtt_message")
     @patch("registration.payments.refresh_payment")
     def test_complete_square_transaction(
-        self, mock_refresh_payment, mock_sendPushNotification, mock_send_mqtt_message
+        self, mock_refresh_payment, mock_send_mqtt_message
     ):
         mock_refresh_payment.return_value = (True, None)
         self.test_onsite_admin_cart_no_donations()
         order = Order.objects.last()
         args = {
-            "key": settings.REGISTER_KEY,
             "reference": order.reference,
-            "clientTransactionId": "JUNK",
+            "paymentId": "JUNK",
         }
-        response = self.client.get(
-            reverse("registration:complete_square_transaction"), args
+        response = self.client.post(
+            reverse("registration:complete_square_transaction"), json.dumps(args), content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {self.terminal.token}"
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()
@@ -536,8 +484,14 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         order.refresh_from_db()
         self.assertEqual(order.billingType, Order.CREDIT)
         self.assertEqual(order.status, Order.COMPLETED)
+        mock_refresh_payment.assert_called_once()
 
 
+@override_settings(
+    MQTT_JWT_SECRET="secret==",
+    MQTT_JWT_ALGORITHM="HS256",
+    REGISTER_PRINTER_URI="",
+)
 class TestDrawers(OnsiteBaseTestCase):
     def setUp(self):
         super().setUp()
@@ -579,7 +533,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(message["status"], "SHORT")
         self.assertEqual(Decimal(message["total"]), Decimal("-20.00"))
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_open_drawer(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:open_drawer"), {"amount": "200"}
@@ -592,7 +546,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, 200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_cash_deposit(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:cash_deposit"), {"amount": "200"}
@@ -605,7 +559,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, 200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_safe_drop(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:safe_drop"), {"amount": "200"}
@@ -618,7 +572,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, -200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_cash_pickup(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:cash_pickup"), {"amount": "200"}
@@ -631,7 +585,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, -200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_close_drawer(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:close_drawer"), {"amount": "200"}
@@ -644,10 +598,32 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, -200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("registration.mqtt.send_mqtt_message")
     def test_no_sale(self, mock_send_mqtt_message):
         response = self.client.post(reverse("registration:no_sale"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
         mock_send_mqtt_message.assert_called_once()
+
+class TestSearchFields(OnsiteBaseTestCase):
+    def test_search_fields_parse(self):
+        fields = onsite_admin.SearchFields.parse("")
+        self.assertEqual(fields.query, "")
+        self.assertIsNone(fields.birthday)
+        self.assertIsNone(fields.badge_ids)
+
+        fields = onsite_admin.SearchFields.parse(" test query ")
+        self.assertEqual(fields.query, "test query")
+        self.assertIsNone(fields.birthday)
+        self.assertIsNone(fields.badge_ids)
+
+        fields = onsite_admin.SearchFields.parse(" test query birthday:1990-01-01 ")
+        self.assertEqual(fields.query, "test query")
+        self.assertEqual(fields.birthday, "1990-01-01")
+        self.assertIsNone(fields.badge_ids)
+
+        fields = onsite_admin.SearchFields.parse("num:123,456")
+        self.assertEqual(fields.query, "")
+        self.assertIsNone(fields.birthday)
+        self.assertEqual(fields.badge_ids, [123, 456])

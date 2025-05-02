@@ -1,21 +1,30 @@
-import json
 import logging
 import uuid
 from datetime import datetime
+from typing import Any, List, Optional
 
 from django.conf import settings
+from prometheus_client import Histogram
 from square.client import Client
 
 from . import emails
 from .models import *
 
+SQUARE_REQUESTS = Histogram("square_requests", "HTTP requests to Square API", ["endpoint"])
+
 client = Client(
+    timeout=10,
+    max_retries=5,
+    retry_methods=["GET", "POST"],
     access_token=settings.SQUARE_ACCESS_TOKEN,
     environment=settings.SQUARE_ENVIRONMENT,
 )
+
+devices_api = client.devices
+orders_api = client.orders
 payments_api = client.payments
 refunds_api = client.refunds
-orders_api = client.orders
+terminals_api = client.terminal
 
 logger = logging.getLogger("registration.payments")
 
@@ -78,7 +87,8 @@ def charge_payment(order, cc_data, request=None):
     logger.debug("---- Begin Transaction ----")
     logger.debug(body)
 
-    api_response = payments_api.create_payment(body)
+    with SQUARE_REQUESTS.labels(endpoint="create_payment").time():
+        api_response = payments_api.create_payment(body)
 
     logger.debug("---- Charge Submitted ----")
     logger.debug(api_response)
@@ -130,7 +140,8 @@ def refresh_payment(order, store_api_data=None):
     except KeyError:
         logger.warning("Refresh payment: MISSING_PAYMENT_ID")
         return False, "MISSING_PAYMENT_ID"
-    payments_response = payments_api.get_payment(payment_id)
+    with SQUARE_REQUESTS.labels(endpoint="get_payment").time():
+        payments_response = payments_api.get_payment(payment_id)
 
     payment = payments_response.body.get("payment")
     if payments_response.is_success():
@@ -158,7 +169,8 @@ def refresh_payment(order, store_api_data=None):
         refund_ids.extend(stored_refund_ids)
 
     for refund_id in refund_ids:
-        refunds_response = refunds_api.get_payment_refund(refund_id)
+        with SQUARE_REQUESTS.labels(endpoint="get_payment_refund").time():
+            refunds_response = refunds_api.get_payment_refund(refund_id)
 
         if refunds_response.is_success():
             refund = refunds_response.body.get("refund")
@@ -284,7 +296,8 @@ def refund_card_payment(order, amount, reason=None, request=None):
     if reason:
         body["reason"] = reason
 
-    result = refunds_api.refund_payment(body)
+    with SQUARE_REQUESTS.labels(endpoint="refund_payment").time():
+        result = refunds_api.refund_payment(body)
     logger.debug(result.body)
 
     if result.is_error():
@@ -324,42 +337,6 @@ def refund_card_payment(order, amount, reason=None, request=None):
     message = "Square refund has been submitted and is {0}".format(status)
     logger.debug(message)
     return True, message
-
-
-def get_payments_from_order_id(order_id):
-    """
-    Returns a list of payment IDs (tenders) from the serverTransactionId
-    returned from the POS SDK.
-
-    :param order_id:
-    :return: list of payment IDs, or None if there was an error
-    """
-
-    body = {
-        "order_ids": [
-            order_id,
-        ],
-        "location_id": settings.SQUARE_LOCATION_ID,
-    }
-
-    result = orders_api.batch_retrieve_orders(body)
-
-    if result.is_success():
-        if result.body:
-            tenders = result.body["orders"][0]["tenders"]
-            payment_ids = [payment["id"] for payment in tenders]
-            return payment_ids
-        else:
-            return []
-
-    elif result.is_error():
-        logger.error(
-            "There was a problem while fetching order id {0} from Square:".format(
-                order_id
-            )
-        )
-        logger.error(format_errors(result.errors))
-        return None
 
 
 def process_webhook_refund_update(notification) -> bool:
@@ -509,3 +486,166 @@ def process_webhook_dispute_created_or_updated(
             emails.send_chargeback_notice_email(order)
 
     return True
+
+
+def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
+    discounts = []
+    line_items = []
+
+    for badge in data["result"]:
+        badge_applied_discounts = []
+
+        if badge["discount"]:
+            discount = badge["discount"]
+            uid = f"discount-{badge['id']}"
+
+            if discount["percent_off"] > 0:
+                discounts.append({
+                    "uid": uid,
+                    "name": f"Discount {discount['name']}",
+                    "type": "FIXED_PERCENTAGE",
+                    "scope": "LINE_ITEM",
+                    "percentage": str(discount["percent_off"]),
+                })
+            elif discount["amount_off"] > 0:
+                discounts.append({
+                    "uid": uid,
+                    "name": f"Discount {discount['name']}",
+                    "type": "FIXED_AMOUNT",
+                    "scope": "LINE_ITEM",
+                    "amount_money": {
+                        "amount": int(discount["amount_off"] * 100),
+                        "currency": settings.SQUARE_CURRENCY,
+                    },
+                })
+
+            badge_applied_discounts.append({
+                "discount_uid": uid,
+            })
+
+        line_items.append({
+            "uid": f"badge-{badge['id']}",
+            "name": f"{badge['effectiveLevel']['name']} Badge",
+            "note": f"Badge Name - {badge['badgeName']}",
+            "quantity": "1",
+            "item_type": "ITEM",
+            "base_price_money": {
+                "amount": int(badge['level_subtotal'] * 100),
+                "currency": settings.SQUARE_CURRENCY,
+            },
+            "applied_discounts": badge_applied_discounts,
+        })
+
+    if data["charityDonation"] > 0 or data["orgDonation"] > 0:
+        event = Event.objects.get(default=True)
+
+        if data["charityDonation"] > 0:
+            line_items.append({
+                "uid": "donation-charity",
+                "name": f"Donation to {{ event.charity }}",
+                "quantity": "1",
+                "item_type": "ITEM",
+                "base_price_money": {
+                    "amount": int(data["charityDonation"] * 100),
+                    "currency": settings.SQUARE_CURRENCY,
+                }
+            })
+
+        if data["orgDonation"] > 0:
+            line_items.append({
+                "uid": "donation-organization",
+                "name": f"Donation to {{ event }}",
+                "quantity": "1",
+                "item_type": "ITEM",
+                "base_price_money": {
+                    "amount": int(data["orgDonation"] * 100),
+                    "currency": settings.SQUARE_CURRENCY,
+                }
+            })
+
+    order_data = {
+        "order": {
+            "location_id": settings.SQUARE_LOCATION_ID,
+            "reference_id": data["reference"],
+            "source": {
+                "name": terminal_name,
+            },
+            "discounts": discounts,
+            "line_items": line_items,
+            "note": f"Reference: {data['reference']}"
+        }
+    }
+
+    with SQUARE_REQUESTS.labels(endpoint="create_order").time():
+        result = orders_api.create_order(order_data)
+
+    if result.is_success():
+        return result.body["order"]["id"]
+    else:
+        logger.error("failed to create order: %s", result.errors)
+        return None
+
+
+def print_payment_receipt(request, square_device: SquareDevice, payment_id: str) -> bool:
+    data = {
+        "idempotency_key": get_idempotency_key(request),
+        "action": {
+            "device_id": square_device.device_id,
+            "type": "RECEIPT",
+            "receipt_options": {
+                "payment_id": payment_id,
+                "print_only": True,
+            },
+        },
+    }
+
+    with SQUARE_REQUESTS.labels(endpoint="create_terminal_action").time():
+        result = terminals_api.create_terminal_action(data)
+
+    if result.is_error():
+        logger.error("could not print receipt: %s", result.errors)
+
+    return result.is_success()
+
+
+def get_terminals() -> List[dict]:
+    terminals = []
+
+    cursor = None
+    while True:
+        result = devices_api.list_devices(cursor=cursor)
+        if result.is_error():
+            raise Exception("Unable to get Square devices")
+
+        for device in result.body["devices"]:
+            terminals.append(device)
+
+        if "cursor" in result.body:
+            cursor = result.body["cursor"]
+        else:
+            break
+
+    return terminals
+
+
+def prompt_terminal_payment(request, device_id: str, total: int, reference: str, note: str, order_id: Optional[str]) -> Any:
+    data = {
+        "idempotency_key": get_idempotency_key(request),
+        "checkout": {
+            "amount_money": {
+                "amount": total,
+                "currency": settings.SQUARE_CURRENCY,
+            },
+            "reference_id": reference,
+            "device_options": {
+                "device_id": device_id,
+            },
+        }
+    }
+
+    if order_id:
+        data["checkout"]["order_id"] = order_id
+    else:
+        data["checkout"]["note"] = note
+
+    return terminals_api.create_terminal_checkout(data)

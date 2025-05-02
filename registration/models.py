@@ -1,6 +1,8 @@
 import random
 import string
 from decimal import Decimal
+from datetime import datetime
+import uuid
 
 from django.conf import settings
 from django.db import models
@@ -78,7 +80,11 @@ def content_file_name(instance, filename):
 class PriceLevelOption(models.Model):
     optionName = models.CharField(max_length=200)
     optionPrice = models.DecimalField(max_digits=6, decimal_places=2)
-    optionExtraType = models.CharField(max_length=100, blank=True)
+    optionExtraType = models.CharField(
+        max_length=100,
+        blank=True,
+        choices=[("int", "Quantity"), ("bool", "Yes/No"), ("ShirtSizes", "Shirt Size"), ("string", "String")],
+    )
     optionExtraType2 = models.CharField(max_length=100, blank=True)
     optionExtraType3 = models.CharField(max_length=100, blank=True)
     optionImage = models.ImageField(upload_to=content_file_name, blank=True, null=True)
@@ -126,12 +132,28 @@ class PriceLevel(models.Model):
     emailVIP = models.BooleanField(default=False)
     emailVIPEmails = models.CharField(max_length=400, blank=True, default="")
     isMinor = models.BooleanField(default=False)
+    min_age = models.IntegerField(default=0)
+    max_age = models.IntegerField(blank=True, null=True,
+                                  help_text="Leave blank for no limit")
+    accompanied = models.BooleanField(default=False)
+    available_to_attendee = models.BooleanField(default=False, verbose_name="Attendee")
+    available_to_marketplace = models.BooleanField(default=False, verbose_name="Marketplace")
+    available_to_staff = models.BooleanField(default=False, verbose_name="Staff")
 
     class Meta:
         db_table = "registration_price_level"
 
     def __str__(self):
         return self.name
+
+    def get_level_active_status(self):
+        tz = timezone.get_current_timezone()
+        today = tz.localize(datetime.now())
+        if self.startDate <= today <= self.endDate:
+            return True
+        return False
+    get_level_active_status.boolean = True
+    get_level_active_status.short_description = "Active"
 
 
 class Charity(LookupTable):
@@ -305,6 +327,12 @@ class Event(LookupTable):
         help_text="Link to code of conduct agreement",
         blank=True,
         default="/code-of-conduct",
+    )
+    websiteUrl = models.CharField(
+        max_length=500,
+        verbose_name="Website URL",
+        help_text="URL to the homepage for the convention's primary website.",
+        blank=True,
     )
     charity = models.ForeignKey(
         Charity, null=True, blank=True, on_delete=models.SET_NULL
@@ -505,9 +533,9 @@ class Badge(models.Model):
 
     @property
     def abandoned(self):
-        if Staff.objects.filter(attendee=self.attendee).exists():
+        if Staff.objects.filter(attendee=self.attendee, event=self.event).exists():
             return Badge.STAFF
-        if Dealer.objects.filter(attendee=self.attendee).exists():
+        if Dealer.objects.filter(attendee=self.attendee, event=self.event).exists():
             return Badge.DEALER
         if self.paidTotal() > 0:
             return Badge.PAID
@@ -901,20 +929,59 @@ class BanList(models.Model):
         verbose_name_plural = "Ban list"
 
 
+class SquareDevice(models.Model):
+    device_id = models.CharField(primary_key=True, max_length=100)
+    device_type = models.CharField(max_length=100, blank=False, null=False)
+    name = models.CharField(max_length=200, blank=False, null=False)
+
+    def __str__(self):
+        return f"{self.name} ({self.device_id})"
+
+
 class Firebase(models.Model):
-    token = models.CharField(max_length=500, help_text="Use 'none' to disable push")
+    MQTT_REGISTER_APP = "mqtt-app"
+    SQUARE_TERMINAL = "square-terminal"
+    PAYMENT_CHOICES = (
+        (MQTT_REGISTER_APP, "iPad"),
+        (SQUARE_TERMINAL, "Square Terminal"),
+    )
+    token = models.CharField(max_length=500, default=uuid.uuid4)
     name = models.CharField(max_length=100)
     closed = models.BooleanField(default=False)
-    cashdrawer = models.BooleanField(default=False)
+    cashdrawer = models.BooleanField(default=False, verbose_name="Cash drawer")
+    print_via_mqtt = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        verbose_name="Print via MQTT",
+        help_text="Which terminal to use for printing via MQTT, if it should be used at this terminal."
+    )
     printer_url = models.CharField(max_length=500, null=True, blank=True)
     background_color = models.CharField(max_length=10, default="#0099cc")
     foreground_color = models.CharField(max_length=10, default="#ffffff")
     webview = models.CharField(
-        max_length=500, null=True, blank=True, default=settings.REGISTER_DEFAULT_WEBVIEW
+        max_length=500,
+        null=True,
+        blank=True,
+        default=settings.REGISTER_DEFAULT_WEBVIEW,
+        verbose_name="Web view URL"
     )
+    square_terminal_id = models.ForeignKey(
+        SquareDevice,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Square Terminal"
+    )
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True)
 
     def __str__(self):
-        return self.name
+        return str(self.name)
+
+    class Meta:
+        verbose_name = "Terminal"
+        verbose_name_plural = "Terminals"
 
 
 class Cashdrawer(models.Model):
