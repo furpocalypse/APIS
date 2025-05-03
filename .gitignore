@@ -29,3 +29,4 @@ node_modules/
 /registration/static/admin.js.map
 /registration/static/fa-solid-900-5ZUYHGA7.woff2
 /registration/static/fa-solid-900-PJNKLK6W.ttf
+.direnv/
