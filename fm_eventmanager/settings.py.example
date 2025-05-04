@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     'nested_inline',
     'import_export',
     'django_extensions',
-    'django_u2f',
     'maintenance_mode',
     'registration',
     'debug_toolbar',
@@ -148,11 +147,11 @@ USE_TZ = True
 SITE_ID = 1
 
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
-MAINTENANCE_MODE_IGNORE_URLS = ("^/u2f/",)
+MAINTENANCE_MODE_IGNORE_URLS = ()
 
 # Login handling for 2-Factor authentication
-LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
-LOGIN_URL = 'u2f:login'
+# LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
+# LOGIN_URL = 'u2f:login'
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/1.9/howto/static-files/

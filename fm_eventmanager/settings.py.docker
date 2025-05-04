@@ -123,7 +123,6 @@ INSTALLED_APPS = [
     'mathfilters',
     'import_export',
     'django_extensions',
-    'django_u2f',
     'maintenance_mode',
     'registration',
     'nested_inline',
@@ -320,10 +319,10 @@ IDEMPOTENCY_KEY = {
 
 MAINTENANCE_MODE_STATE_FILE_PATH = "/app/fm_eventmanager/maintenance_mode_state.txt"
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
-MAINTENANCE_MODE_IGNORE_URLS = ("^/u2f/",)
+MAINTENANCE_MODE_IGNORE_URLS = ()
 
-LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
-LOGIN_URL = 'u2f:login'
+# LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
+# LOGIN_URL = 'u2f:login'
 
 if DEBUG:
     # Adds docker NAT routers and any internal upstream proxies as internal IPs to enable the debug toolbar

@@ -567,17 +567,17 @@ class TestTwoFactorAdmin(TestCase):
     def test_two_factor_disabled(self):
         self.assertFalse(self.user_profile_admin.two_factor_enabled(self.user_1))
 
-    def test_two_factor_enabled(self):
-        self.user_2.u2f_keys.create(
-            key_handle="bbavVvfXPz2w8S3IwIS0LkE1SkC3MQuXSYjAYHVPFqUJIRQTIEyM3D34Lv2G4a_PuAZkZIQ6XV3ocwp47cPYjg",
-            public_key="BFp3EHDcpm5HxA4XYuCKlnNPZ3tphVzRvXsX2_J33REPU0bgFgWsUoyZHz6RGxdA84VgxDNI4lvUudr7JGmFdDk",
-            app_id="http://localhost:8000",
-        )
-        self.assertTrue(self.user_profile_admin.two_factor_enabled(self.user_2))
+    # def test_two_factor_enabled(self):
+    #     self.user_2.u2f_keys.create(
+    #         key_handle="bbavVvfXPz2w8S3IwIS0LkE1SkC3MQuXSYjAYHVPFqUJIRQTIEyM3D34Lv2G4a_PuAZkZIQ6XV3ocwp47cPYjg",
+    #         public_key="BFp3EHDcpm5HxA4XYuCKlnNPZ3tphVzRvXsX2_J33REPU0bgFgWsUoyZHz6RGxdA84VgxDNI4lvUudr7JGmFdDk",
+    #         app_id="http://localhost:8000",
+    #     )
+    #     self.assertTrue(self.user_profile_admin.two_factor_enabled(self.user_2))
 
-    def test_disable_two_factor(self):
-        query_set = [self.user_1, self.user_2]
-        admin.disable_two_factor(None, None, query_set)
+    # def test_disable_two_factor(self):
+    #     query_set = [self.user_1, self.user_2]
+    #     admin.disable_two_factor(None, None, query_set)
 
 
 class TestOrderItemAdmin(OrdersTestCase):

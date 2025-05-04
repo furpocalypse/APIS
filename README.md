@@ -24,7 +24,6 @@ Stack:
     [browser worker](https://github.com/rechner/py-aamva).
   + Print badges on the fly with a custom template on any compatible card
     or label printer, with Unicode-supported fonts (Emoji!)
-  + Protect admin and volunteer logins with TOTP 2-Factor or FIDO U2F.
 
 ![Screenshot of Cash Register Position](/docs/admin-onsite.png)
 
@@ -119,10 +118,6 @@ The following was tested on a fresh installation of Ubuntu 20.04.
 
     python manage.py migrate
     python manage.py createsuperuser
-
-    # Create a self-signed certificate if you want to test or hack on U2F
-    openssl req -x509 -nodes -sha256 -days 365 -newkey rsa:2048 \
-      -keyout localhost.key -out localhost.crt -subj /CN=localhost
 
     # Get it running (omit --cert localhost for HTTP)
     python manage.py runserver_plus --cert localhost.crt
