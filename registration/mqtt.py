@@ -69,7 +69,7 @@ def get_token(sub, exp=None, subs=None, publ=None):
 
     claims = {
         "sub": sub,
-        "iat": datetime.now(tz=timezone.utc),
+        "iat": datetime.datetime.now(tz=timezone.utc),
         "exp": exp,
         "subs": subs,
         "publ": publ,
