@@ -2,7 +2,8 @@ import base64
 import json
 import logging
 import re
-from datetime import datetime, timezone
+import datetime
+from datetime import timezone
 from decimal import Decimal
 
 import jwt
