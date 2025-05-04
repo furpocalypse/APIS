@@ -58,10 +58,15 @@ jobs:
           python -m pip install --upgrade pip wheel
           python -m pip install coveralls
           pip install -r requirements.txt
+      - name: Enable Postgres Trigram Extension and make root user
+        run: |
+          PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432:5432 -d testdb -tc "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432:5432 -d testdb -tc "CREATE ROLE root WITH LOGIN PASSWORD 'postgres';"
+          PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432:5432 -d testdb -tc "ALTER ROLE root WITH SUPERUSER;"
       - name: Run Tests
         run: |
           cp fm_eventmanager/settings.py.travis fm_eventmanager/settings.py
-          coverage run ./manage.py test registration
+          coverage run --branch ./manage.py test registration
         env:
           SQUARE_APPLICATION_ID: ${{ secrets.SQUARE_APPLICATION_ID }}
           SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}
