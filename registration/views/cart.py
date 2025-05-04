@@ -214,7 +214,7 @@ def add_to_cart(request):
         return common.abort(400, "Required parameters not found in POST body")
 
     try:
-        datetime.strptime(pda["birthdate"], "%Y-%m-%d")
+        datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d")
     except ValueError:
         return common.abort(
             400,

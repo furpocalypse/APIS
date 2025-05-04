@@ -163,7 +163,7 @@ class InfluxDBReporter(CronReporterABC):
     @staticmethod
     def timestamp(now=None):
         if now is None:
-            now = datetime.utcnow()
+            now = datetime.datetime.utcnow()
         return now.isoformat("T") + "Z"
 
     def batch(self, event, topic, value, **kwargs):
