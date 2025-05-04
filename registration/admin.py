@@ -7,7 +7,7 @@ from io import BytesIO
 
 import qrcode
 from django import forms
-from django.conf.urls import url
+from django.urls import re_path
 from django.contrib import admin, auth, messages
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
@@ -77,7 +77,7 @@ class FirebaseAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super(FirebaseAdmin, self).get_urls()
         my_urls = [
-            url(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
+            re_path(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
         ]
         return my_urls + urls
 
