@@ -1214,20 +1214,7 @@ class AttendeeAdmin(NestedModelAdmin):
     save_on_top = True
     actions = [make_staff]
     search_fields = ["email", "lastName", "firstName", "preferredName"]
-    list_display = ("getFirst", "lastName", "email", "phone")
-    fieldsets = (
-        (
-            None,
-            {
-                "fields": (
-                    ("preferredName", "firstName", "lastName"),
-                    ("address1", "address2"),
-                    ("city", "state", "postalCode", "country"),
-                    ("email", "phone", "emailsOk", "surveyOk"),
-                    "birthdate",
-                )
-            },
-        ),
+    list_display = ("geturl
         (
             "Other Con Info",
             {"fields": ("aslRequest", "volunteerDepts", "holdType", "notes")},
@@ -1406,8 +1393,8 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
     def get_urls(self):
         urls = super(OrderAdmin, self).get_urls()
         my_urls = [
-            url(r"^(.+)/refund/$", self.refund_view, name="order_refund"),
-            url(r"^(.+)/refresh/$", self.refresh_view, name="order_refresh"),
+            re_path(r"^(.+)/refund/$", self.refund_view, name="order_refund"),
+            re_path(r"^(.+)/refresh/$", self.refresh_view, name="order_refresh"),
         ]
         return my_urls + urls
 
