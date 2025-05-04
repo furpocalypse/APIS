@@ -1,7 +1,8 @@
 import json
 import logging
-from datetime import datetime
+import datetime
 from time import timezone
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.forms import model_to_dict
@@ -29,8 +30,7 @@ form_type = "staff"
 def new_staff(request, guid):
     event = Event.objects.get(default=True)
     invite = TempToken.objects.get(token=guid)
-    tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
     context = {"token": guid, "event": event, "form_type": form_type}
     if event.staffRegStart <= today <= event.staffRegEnd or invite.ignore_time_window is True:
         return render(request, "registration/staff/staff-new.html", context)
@@ -164,8 +164,7 @@ def add_new_staff(request):
 
 def staff_index(request, guid):
     event = Event.objects.get(default=True)
-    tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
     context = {"token": guid, "event": event, "form_type": form_type}
     if event.staffRegStart <= today <= event.staffRegEnd:
         return render(request, "registration/staff/staff-locate.html", context)

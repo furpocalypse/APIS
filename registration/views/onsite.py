@@ -1,7 +1,8 @@
 import json
 import logging
-from datetime import datetime
+import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.shortcuts import render
 from django.urls import reverse
@@ -24,8 +25,7 @@ form_type = "attendee"
 
 def onsite(request):
     event = Event.objects.get(default=True)
-    tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
     context = {"event": event, "form_type": form_type}
 
     if event.websiteUrl:

@@ -1,7 +1,8 @@
 import json
 import logging
-from datetime import datetime
+import datetime
 from json import JSONDecodeError
+from zoneinfo import ZoneInfo
 
 from django.forms import model_to_dict
 from django.http import (
@@ -72,8 +73,7 @@ def done_asst_dealer(request):
 def new_dealer(request):
     event = Event.objects.get(default=True)
     venue = event.venue
-    tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
     context = {"event": event, "venue": venue, "form_type": form_type}
     if event.dealerRegStart <= today <= event.dealerRegEnd:
         return render(request, "registration/dealer/dealer-form.html", context)

@@ -1,13 +1,13 @@
 import random
 import string
 from decimal import Decimal
-from datetime import datetime
+import datetime
 import uuid
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
-
 
 # Lookup and supporting tables.
 class LookupTable(models.Model):
@@ -147,8 +147,7 @@ class PriceLevel(models.Model):
         return self.name
 
     def get_level_active_status(self):
-        tz = timezone.get_current_timezone()
-        today = tz.localize(datetime.now())
+        today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
         if self.startDate <= today <= self.endDate:
             return True
         return False
