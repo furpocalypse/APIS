@@ -57,7 +57,8 @@ jobs:
           sudo apt-get -y -f install
           python -m pip install --upgrade pip wheel
           python -m pip install coveralls
-          pip install -r requirements.txt
+          wget -qO- https://astral.sh/uv/install.sh | sh
+          uv sync
       - name: Run Tests
         run: |
           cp fm_eventmanager/settings.py.travis fm_eventmanager/settings.py
