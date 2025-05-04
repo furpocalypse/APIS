@@ -525,9 +525,8 @@ def addNewDealer(request):
     pdd = postData["dealer"]
     evt = postData["event"]
 
-    tz = timezone.get_current_timezone()
     try:
-        birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+        birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
     except ValueError as e:
         logger.warning(f"Unable to parse birthdate: {pda['birthdate']} - {e}")
         return common.abort(400, f"Unable to parse birthdate: {pda['birthdate']}")

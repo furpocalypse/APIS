@@ -10,7 +10,6 @@ from registration.models import *
 from registration.tests.common import OrdersTestCase
 from registration.views import staff
 
-tz = timezone.get_current_timezone()
 now = timezone.now()
 one_hour = timedelta(hours=1)
 one_day = timedelta(days=1)

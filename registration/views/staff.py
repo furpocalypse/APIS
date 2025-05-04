@@ -109,8 +109,7 @@ def add_new_staff(request):
     else:
         event = Event.objects.get(default=True)
 
-    tz = timezone.get_current_timezone()
-    birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
 
     attendee = Attendee(
         firstName=pda["firstName"],
@@ -256,8 +255,7 @@ def add_staff(request):
     if not attendee:
         return JsonResponse({"success": False, "message": "Attendee not found"})
 
-    tz = timezone.get_current_timezone()
-    birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
 
     attendee.preferredName = pda.get("preferredName", "")
     attendee.firstName = pda["firstName"]

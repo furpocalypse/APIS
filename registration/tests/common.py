@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 logging.disable(logging.NOTSET)
 logger.setLevel(logging.DEBUG)
 
-tz = timezone.get_current_timezone()
 now = timezone.now()
 ten_days = timedelta(days=10)
 one_day = timedelta(days=1)

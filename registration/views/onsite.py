@@ -69,11 +69,10 @@ def onsite_cart(request):
             except Event.DoesNotExist:
                 event = Event.objects.get(default=True)
             evt = event.eventStart
-            tz = timezone.get_current_timezone()
             try:
-                birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+                birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
             except ValueError:
-                birthdate = tz.localize(datetime.strptime("2000-01-01", "%Y-%m-%d"))
+                birthdate = datetime.datetime.strptime("2000-01-01", "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
 
             age_at_event = (
                 evt.year
