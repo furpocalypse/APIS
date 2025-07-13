@@ -68,7 +68,7 @@ class TestStaffEmails(EmailTestCase):
         self.staff = Staff(attendee=self.attendee, event=self.event)
         self.staff.save()
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_new_staff_email(self, mock_send_email):
         emails.send_new_staff_email(self.token)
         mock_send_email.assert_called_once()
@@ -79,7 +79,7 @@ class TestStaffEmails(EmailTestCase):
         self.assertIn(self.token.token, html_text)
         self.assertEqual(recipients, [self.attendee.email])
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_staff_promotion_email(self, mock_send_email):
         emails.send_staff_promotion_email(self.staff)
         mock_send_email.assert_called_once()
@@ -90,7 +90,7 @@ class TestStaffEmails(EmailTestCase):
         self.assertIn(self.staff.registrationToken, html_text)
         self.assertEqual(recipients, [self.attendee.email])
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_staff_registration_email(self, mock_send_email):
         emails.send_staff_registration_email(self.order.pk)
         mock_send_email.assert_called_once()
@@ -123,7 +123,7 @@ class TestDealerEmails(EmailTestCase):
         )
         self.assistant.save()
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_dealer_application_email(self, mock_send_email):
         emails.send_dealer_application_email(self.dealer.pk)
         self.assertEqual(mock_send_email.call_count, 2)
@@ -133,7 +133,7 @@ class TestDealerEmails(EmailTestCase):
         recipients = second_call[0][1]
         self.assertEqual(recipients, [self.event.dealerEmail])
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_dealer_approval_email(self, mock_send_email):
         emails.send_dealer_approval_email([self.dealer])
         mock_send_email.assert_called_once()
@@ -144,7 +144,7 @@ class TestDealerEmails(EmailTestCase):
         self.assertIn(self.dealer.registrationToken, plain_text)
         self.assertIn(self.dealer.registrationToken, html_text)
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_dealer_assistant_form_email(self, mock_send_email):
         emails.send_dealer_assistant_form_email(self.dealer)
         mock_send_email.assert_called_once()
@@ -155,14 +155,14 @@ class TestDealerEmails(EmailTestCase):
         self.assertIn(self.dealer.registrationToken, plain_text)
         self.assertIn(self.dealer.registrationToken, html_text)
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_dealer_assistant_email(self, mock_send_email):
         emails.send_dealer_assistant_email(self.dealer.pk)
         mock_send_email.assert_called_once()
         recipients = mock_send_email.call_args[0][1]
         self.assertEqual(recipients, [self.attendee.email])
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_dealer_payment_email(self, mock_send_email):
         # TODO: test the payment receipt formatting better
         emails.send_dealer_payment_email(self.dealer, self.order)
@@ -173,7 +173,7 @@ class TestDealerEmails(EmailTestCase):
         self.assertIn(self.order.reference, plain_text)
         self.assertIn(self.order.reference, html_text)
 
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_dealer_assistant_registration_invite(self, mock_send_email):
         self.assertFalse(self.assistant.sent)
         emails.send_dealer_assistant_registration_invite(self.assistant)
@@ -189,7 +189,7 @@ class TestDealerEmails(EmailTestCase):
 
 
 class TestChargebackEmail(EmailTestCase):
-    @patch("registration.emails.send_email")
+    @patch("furpocalypse_registration.emails.send_email")
     def test_send_chargeback_notice_email(self, mock_send_email):
         order = Order(
             total="88.04",

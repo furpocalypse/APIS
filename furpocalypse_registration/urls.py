@@ -40,16 +40,16 @@ urlpatterns = [
         furpocalypse_registration.views.upgrade.add_upgrade,
         name="add_upgrade",
     ),
-    re_path(
-        r"^upgrade/invoice/?$",
-        furpocalypse_registration.views.upgrade.invoice_upgrade,
-        name="invoice_upgrade",
-    ),
-    re_path(
-        r"^upgrade/checkout/?$",
-        furpocalypse_registration.views.upgrade.checkout_upgrade,
-        name="checkout_upgrade",
-    ),
+    # re_path(
+    #     r"^upgrade/invoice/?$",
+    #     furpocalypse_registration.views.upgrade.invoice_upgrade,
+    #     name="invoice_upgrade",
+    # ),
+    # re_path(
+    #     r"^upgrade/checkout/?$",
+    #     furpocalypse_registration.views.upgrade.checkout_upgrade,
+    #     name="checkout_upgrade",
+    # ),
     re_path(
         r"^upgrade/done/?$",
         furpocalypse_registration.views.upgrade.done_upgrade,
@@ -141,16 +141,16 @@ urlpatterns = [
         furpocalypse_registration.views.dealers.info_dealer,
         name="info_dealer",
     ),
-    re_path(
-        r"^dealer/invoice/?$",
-        furpocalypse_registration.views.dealers.invoice_dealer,
-        name="invoice_dealer",
-    ),
-    re_path(
-        r"^dealer/checkout/?$",
-        furpocalypse_registration.views.dealers.checkout_dealer,
-        name="checkout_dealer",
-    ),
+    # re_path(
+    #     r"^dealer/invoice/?$",
+    #     furpocalypse_registration.views.dealers.invoice_dealer,
+    #     name="invoice_dealer",
+    # ),
+    # re_path(
+    #     r"^dealer/checkout/?$",
+    #     furpocalypse_registration.views.dealers.checkout_dealer,
+    #     name="checkout_dealer",
+    # ),
     re_path(
         r"^dealer/(?P<guid>\w+)/?$",
         furpocalypse_registration.views.dealers.dealers,
@@ -171,11 +171,11 @@ urlpatterns = [
         furpocalypse_registration.views.dealers.add_assistants,
         name="add_assistants",
     ),
-    re_path(
-        r"^dealer/assistants/checkout/?$",
-        furpocalypse_registration.views.dealers.add_assistants_checkout,
-        name="add_assistants_checkout",
-    ),
+    # re_path(
+    #     r"^dealer/assistants/checkout/?$",
+    #     furpocalypse_registration.views.dealers.add_assistants_checkout,
+    #     name="add_assistants_checkout",
+    # ),
     re_path(
         r"^dealerassistant/(?P<guid>\w+)/?$",
         furpocalypse_registration.views.dealers.dealer_asst,
@@ -262,6 +262,14 @@ urlpatterns = [
         furpocalypse_registration.views.onsite_admin.onsite_print_badges,
         name="onsite_print_badges",
     ),
+    # TODO: PayPal Integration - Remove Square-specific URLs (Phase 3 - Cleanup)
+    # DECISION: Complete Square removal, online-only payments
+    # The following Square-related URLs will be removed entirely:
+    # - complete_square_transaction (POS integration - not needed)
+    # - square_webhook (commented out - remove completely)
+    # References:
+    # - views/onsite_admin.py (complete_square_transaction function - remove)
+    # - views/webhooks.py (square_webhook function - remove)
     re_path(
         r"^onsite/square/complete/?$",
         furpocalypse_registration.views.onsite_admin.complete_square_transaction,
@@ -409,9 +417,35 @@ urlpatterns = [
         furpocalypse_registration.views.onsite_admin.firebase_lookup,
         name="firebase_lookup",
     ),
+    # TODO: PayPal Integration - Remove Square webhook URL (Phase 3 - Cleanup)
+    # DECISION: Complete Square removal
+    # This Square webhook URL is commented out and will be completely removed.
+    # re_path(
+    #     r"webhook/square/v2",
+    #     furpocalypse_registration.views.webhooks.square_webhook,
+    #     name="square_webhook",
+    # ),
+    # TODO: PayPal Integration - Add comprehensive PayPal webhook endpoints (Phase 1-2)
+    # DECISION: Online-only PayPal webhooks, complete Square replacement
+    # Current PayPal webhook endpoints are basic and only handle order creation/capture.
+    # Need to add endpoints for online payment processing:
+    # 1. PAYMENT.CAPTURE.COMPLETED - Online payment successfully captured (Phase 1)
+    # 2. PAYMENT.CAPTURE.DENIED - Online payment was denied (Phase 1)
+    # 3. PAYMENT.CAPTURE.REFUNDED - Online payment was refunded (Phase 1)
+    # 4. CUSTOMER.DISPUTE.CREATED - Dispute initiated (Phase 2)
+    # 5. CUSTOMER.DISPUTE.RESOLVED - Dispute resolved (Phase 2)
+    # 6. Generic PayPal webhook endpoint with signature verification (Phase 1)
+    # References:
+    # - PayPal Webhook Events: https://developer.paypal.com/docs/api/webhooks/v1/
+    # - views/webhooks.py (webhook endpoint implementations needed)
     re_path(
-        r"webhook/square/v2",
-        furpocalypse_registration.views.webhooks.square_webhook,
-        name="square_webhook",
+        r"webhook/paypal/v1/create-order",
+        furpocalypse_registration.views.webhooks.paypal_create_order,
+        name="paypal_create_order",
+    ),
+    re_path(
+        r"webhook/paypal/v1/capture-order",
+        furpocalypse_registration.views.webhooks.paypal_capture_order,
+        name="paypal_capture_order",
     ),
 ]

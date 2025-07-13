@@ -1486,6 +1486,19 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                         reason = "[{0}]".format(request.user)
                     else:
                         reason += " [{0}]".format(request.user)
+                    # TODO: Refund payment was removed as part of PayPal transition.  It needs to be re-implemented.
+                    # Critical functionality missing: The refund_payment function in payments.py
+                    # is commented out, breaking admin refund capability.
+                    # Required implementation:
+                    # 1. PayPal Refunds API integration in payments.py
+                    # 2. Update refund_payment function to handle PayPal refunds
+                    # 3. Map PayPal refund statuses to Order status choices
+                    # 4. Handle partial and full refunds through PayPal
+                    # References:
+                    # - PayPal Refunds API: https://developer.paypal.com/docs/api/payments/v2/#captures_refund
+                    # - payments.py (refund_payment function - currently commented out)
+                    # - models.py (Order.STATUS_CHOICES for refund statuses)
+                    # Related files: payments.py (refund_card_payment, refund_payment functions)
                     result, msg = payments.refund_payment(order, amount, reason)
                     if result:
                         messages.success(

@@ -756,6 +756,16 @@ class Order(models.Model):
         (DISPUTE_LOST, "Dispute Lost"),
         (DISPUTE_ACCEPTED, "Dispute Accepted"),
     )
+    # TODO: PayPal Integration - Update dispute status mapping for PayPal (Phase 2)
+    # DECISION: Replace Square dispute handling with PayPal dispute processing
+    # PayPal dispute statuses are different from Square. This mapping needs to be
+    # updated to handle PayPal dispute lifecycle for online payments:
+    # PayPal dispute statuses: OPEN, WAITING_FOR_BUYER_RESPONSE, WAITING_FOR_SELLER_RESPONSE,
+    # UNDER_REVIEW, RESOLVED, OTHER
+    # Priority: Phase 2 (after core payment processing is restored)
+    # References:
+    # - PayPal Disputes API: https://developer.paypal.com/docs/api/customer-disputes/v1/#definition-dispute_status
+    # Related files: payments.py (process_webhook_dispute_created_or_updated)
     # Maps Square dispute status to above status choices
     DISPUTE_STATUS_MAP = {
         "EVIDENCE_REQUIRED": DISPUTE_EVIDENCE_REQUIRED,
@@ -818,6 +828,19 @@ class Order(models.Model):
         verbose_name="Billing Type",
     )
     lastFour = models.CharField(max_length=4, blank=True, verbose_name="Last 4")
+    # TODO: PayPal Integration - Update apiData field for PayPal structure (Phase 1-2)
+    # DECISION: Replace Square data structure with PayPal structure
+    # This field stores payment processor API response data. PayPal API responses
+    # have different structure than Square. Key differences for online payments:
+    # 1. PayPal uses order creation → capture structure instead of Square's payment structure
+    # 2. PayPal capture data structure is different
+    # 3. PayPal refund data structure differs from Square (essential for admin)
+    # 4. PayPal dispute data structure is different (Phase 2)
+    # Impact: All code that reads/writes apiData needs to handle PayPal structure
+    # References:
+    # - PayPal Order Object: https://developer.paypal.com/docs/api/orders/v2/#definition-order
+    # - PayPal Capture Object: https://developer.paypal.com/docs/api/orders/v2/#definition-capture
+    # Related files: payments.py (all payment processing functions), admin.py (order display)
     apiData = models.JSONField(null=True)
     onsite_reference = models.UUIDField(null=True, blank=True)
 
@@ -836,6 +859,18 @@ class Order(models.Model):
 
 
 class PaymentWebhookNotification(models.Model):
+    # TODO: PayPal Integration - Update webhook model for PayPal (Phase 1-2)
+    # DECISION: Replace Square webhook handling with PayPal webhook processing
+    # This model was designed for Square webhooks and needs updates for PayPal:
+    # 1. PayPal webhook event structure is different from Square (online payments focus)
+    # 2. PayPal event types are different (e.g., PAYMENT.CAPTURE.COMPLETED vs payment.updated)
+    # 3. PayPal webhook signature verification fields may be needed
+    # 4. Consider adding PayPal-specific fields for better tracking
+    # 5. Update integration field default from "square" to "paypal"
+    # References:
+    # - PayPal Webhook Events: https://developer.paypal.com/docs/api/webhooks/v1/
+    # - PayPal Event Types: https://developer.paypal.com/docs/integration-guides/webhooks/
+    # Related files: views/webhooks.py (webhook processing)
     integration = models.CharField(max_length=50, default="square")
     event_id = models.UUIDField(unique=True)
     event_type = models.CharField(max_length=50, default="")

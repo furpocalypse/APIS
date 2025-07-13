@@ -1,3 +1,19 @@
+# TODO: PayPal Integration - Update email templates for PayPal payment data (Phase 2)
+# DECISION: Replace Square payment data with PayPal transaction data
+# Payment-related email templates need updates to handle PayPal online transaction data:
+# 1. Payment receipt emails reference order.apiData structure (replace Square with PayPal)
+# 2. Transaction references and payment method display need updates for PayPal
+# 3. Templates may reference Square-specific payment information (remove/replace)
+# 4. Dispute emails need updates for PayPal dispute process (Phase 2)
+# Key templates to review for online payment receipts:
+# - registration/emails/registration-payment.txt/html (online payment receipts)
+# - registration/emails/dealer/payment.txt/html (dealer online payments)
+# - registration/emails/chargeback-notice.txt/html (PayPal dispute notifications)
+# References:
+# - PayPal Order Object: https://developer.paypal.com/docs/api/orders/v2/#definition-order
+# - PayPal Transaction Data: differs from Square payment structure
+# Related files: templates/registration/emails/ (email templates), models.py (Order.apiData)
+
 import logging
 
 from django.core.mail import EmailMultiAlternatives
@@ -28,6 +44,14 @@ def send_registration_email(order, email, send_vip=True):
             oi.badge.event
         )
         if oi.badge.attendee.email == email:
+            # TODO: PayPal Integration - Update payment receipt template data (Phase 2)
+            # DECISION: Replace Square transaction data with PayPal transaction data
+            # Payment receipt emails need updates to handle PayPal online transaction data.
+            # The order.apiData structure will be different for PayPal vs Square.
+            # Templates need to display PayPal-specific payment information.
+            # References:
+            # - templates/registration/emails/registration-payment.txt/html
+            # - PayPal transaction data structure differs from Square
             # send payment receipt to the payor
             data = {
                 "reference": order.reference,
@@ -311,6 +335,19 @@ def send_dealer_approval_email(dealerQueryset):
 
 
 def send_chargeback_notice_email(order):
+    # TODO: PayPal Integration - Update dispute notice for PayPal disputes (Phase 2)
+    # DECISION: Replace Square chargeback handling with PayPal dispute processing
+    # PayPal disputes have different process and terminology than Square chargebacks.
+    # This email template and data need updates for online payment disputes:
+    # 1. PayPal dispute terminology vs. Square chargeback terminology
+    # 2. Different dispute resolution processes between PayPal and Square
+    # 3. PayPal-specific dispute information and next steps
+    # 4. Updated dispute data structure in order.apiData (PayPal format)
+    # Priority: Phase 2 (after core payment processing is restored)
+    # References:
+    # - PayPal Disputes API: https://developer.paypal.com/docs/api/customer-disputes/v1/
+    # - templates/registration/emails/chargeback-notice.txt/html
+    # Related files: payments.py (process_webhook_dispute_created_or_updated)
     event = Event.objects.get(default=True)
     data = {
         "event": event,

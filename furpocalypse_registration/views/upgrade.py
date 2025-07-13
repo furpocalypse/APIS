@@ -21,7 +21,8 @@ from .common import (
     handler,
     logger,
 )
-from .ordering import do_checkout, doZeroCheckout, get_total
+# from .ordering import do_checkout, doZeroCheckout, get_total
+# NOTE: These imports are commented out because the functions are not yet implemented for PayPal
 
 logger = logging.getLogger(__name__)
 
@@ -129,32 +130,15 @@ def add_upgrade(request):
 
 
 def invoice_upgrade(request):
-    sessionItems = request.session.get("order_items", [])
-    if not sessionItems:
-        context = {"orderItems": [], "total": 0, "discount": {}}
-        clear_session(request)
-    else:
-        attendeeId = request.session.get("attendee_id", -1)
-        badgeId = request.session.get("badge_id", -1)
-        if attendeeId == -1 or badgeId == -1:
-            context = {"orderItems": [], "total": 0, "discount": {}}
-            clear_session(request)
-        else:
-            badge = Badge.objects.get(id=badgeId)
-            attendee = Attendee.objects.get(id=attendeeId)
-            lvl = badge.effectiveLevel()
-            lvl_dict = {"basePrice": lvl.basePrice}
-            orderItems = list(OrderItem.objects.filter(id__in=sessionItems))
-            total, total_discount = get_total([], orderItems)
-            context = {
-                "orderItems": orderItems,
-                "total": total,
-                "total_discount": total_discount,
-                "attendee": attendee,
-                "prevLevel": lvl_dict,
-                "event": badge.event,
-            }
-    return render(request, "registration/upgrade-checkout.html", context)
+    """
+    Handle upgrade invoicing - NOT IMPLEMENTED.
+    
+    TODO: PayPal Integration - Implement upgrade invoicing
+    This function was disabled during Square removal and needs to be rewritten
+    for PayPal integration. Depends on get_total function from ordering.py
+    which requires PayPal order processing to be fully implemented.
+    """
+    raise NotImplementedError("Upgrade invoicing not implemented - requires PayPal integration completion")
 
 
 def done_upgrade(request):
@@ -185,44 +169,12 @@ def send_upgrade_email(request, attendee, order):
 
 
 def checkout_upgrade(request):
-    session_items = request.session.get("order_items", [])
-    order_items = list(OrderItem.objects.filter(id__in=session_items))
-    if "attendee_id" not in request.session:
-        return HttpResponseBadRequest("Session expired")
-
-    attendee = Attendee.objects.get(id=request.session.get("attendee_id"))
-    try:
-        post_data = json.loads(request.body)
-    except ValueError:
-        logger.error("Unable to decode JSON for checkout_upgrade()")
-        return common.abort(400, "Unable to parse input options")
-
-    subtotal, total_discount = get_total([], order_items)
-
-    if subtotal == 0:
-        status, message, order = doZeroCheckout(None, None, order_items)
-
-        if not status:
-            return common.abort(400, message)
-
-        return send_upgrade_email(request, attendee, order)
-
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
-
-    total = subtotal + porg + pcharity
-
-    pbill = post_data["billingData"]
-    status, message, order = do_checkout(
-        pbill, total, None, [], order_items, porg, pcharity
-    )
-
-    if status:
-        return send_upgrade_email(request, attendee, order)
-    else:
-        order.delete()
-        return common.abort(400, message)
+    """
+    Handle upgrade checkout - NOT IMPLEMENTED.
+    
+    TODO: PayPal Integration - Implement upgrade checkout
+    This function was disabled during Square removal and needs to be rewritten
+    for PayPal integration. Depends on get_total, doZeroCheckout, and do_checkout
+    functions from ordering.py which require PayPal order processing to be fully implemented.
+    """
+    raise NotImplementedError("Upgrade checkout not implemented - requires PayPal integration completion")

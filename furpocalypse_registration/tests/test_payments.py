@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from django.test import TestCase, tag
 
-from registration import payments
+from furpocalypse_registration import payments
 
 TEST_ORDER_RESULT = {
     "orders": [
@@ -88,7 +88,7 @@ class MockSquareResultFailure(object):
 
 
 class TestSquareOrders(TestCase):
-    @patch("registration.payments.orders_api.batch_retrieve_orders")
+    @patch("furpocalypse_registration.payments.orders_api.batch_retrieve_orders")
     def test_get_payments_from_order_id(self, mock_get_payments):
         mock_get_payments.return_value = MockSquareResultSuccess()
         result = payments.get_payments_from_order_id(
@@ -96,7 +96,7 @@ class TestSquareOrders(TestCase):
         )
         self.assertEqual(result, ["7VceHkRWU2iFztahpbYt1AUCvaB"])
 
-    @patch("registration.payments.orders_api.batch_retrieve_orders")
+    @patch("furpocalypse_registration.payments.orders_api.batch_retrieve_orders")
     def test_get_payments_from_order_id_failure(self, mock_get_payments):
         mock_get_payments.return_value = MockSquareResultFailure()
         result = payments.get_payments_from_order_id(

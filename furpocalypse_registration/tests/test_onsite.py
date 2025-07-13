@@ -193,7 +193,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertContains(response, "are not authorized to access this page")
         self.client.logout()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_onsite_admin(self, mock_sendPushNotification):
         self.client.logout()
         self.assertTrue(self.client.login(username="admin", password="admin"))
@@ -231,8 +231,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
         self.client.logout()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.mqtt.send_mqtt_message")
     def test_onsite_admin_cart_not_initialized(
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
@@ -265,8 +265,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertEqual(response.context["errors"], expected_errors)
         self.assertEqual(response.status_code, 200)
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.mqtt.send_mqtt_message")
     def test_onsite_admin_cart_no_donations(
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
@@ -317,15 +317,15 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             float(self.price_45.basePrice + self.option_shirt.optionPrice),
         )
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.mqtt.send_mqtt_message")
     def test_onsite_admin_cart_with_donations(
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
         pass
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.mqtt.send_mqtt_message")
     def test_onsite_close_terminal_no_terminal(
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
@@ -336,7 +336,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_mqtt_message.assert_not_called()
 
     @patch("paho.mqtt.publish.single")
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_onsite_close_terminal_happy_path(
         self, mock_send_push_notification, mock_send_mqtt_single
     ):
@@ -349,7 +349,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_push_notification.assert_called_once()
         mock_send_mqtt_single.assert_called_once()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     @patch("paho.mqtt.publish.single")
     def test_onsite_open_terminal(
         self, mock_send_mqtt_single, mock_send_push_notification
@@ -364,7 +364,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_push_notification.assert_called_once()
         mock_send_mqtt_single.assert_called_once()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_onsite_invalid_terminal(self, mock_sendPushNotification):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
@@ -378,8 +378,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertEqual(message["message"], "Invalid terminal specified")
         mock_sendPushNotification.assert_not_called()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.mqtt.send_mqtt_message")
     def test_onsite_terminal_dne(
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
@@ -399,8 +399,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_push_notification.assert_not_called()
         mock_send_mqtt_message.assert_not_called()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.mqtt.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.mqtt.send_mqtt_message")
     def test_onsite_terminal_bad_request(
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
@@ -418,7 +418,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_push_notification.assert_not_called()
         mock_send_mqtt_message.assert_not_called()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_onsite_enabled_terminal(self, mock_send_push_notification):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
@@ -486,8 +486,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.terminal = Firebase.objects.get(name=self.terminal.name)
         self.assertEqual(self.terminal.token, new_token)
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_complete_cash_transaction(
         self, mock_send_mqtt_message, mock_sendPushNotification
     ):
@@ -510,9 +510,9 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         drawer = Cashdrawer.objects.last()
         self.assertEqual(drawer.total, order.total)
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
-    @patch("registration.pushy.PushyAPI.send_push_notification")
-    @patch("registration.payments.refresh_payment")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.payments.refresh_payment")
     def test_complete_square_transaction(
         self, mock_refresh_payment, mock_sendPushNotification, mock_send_mqtt_message
     ):
@@ -576,7 +576,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(message["status"], "SHORT")
         self.assertEqual(Decimal(message["total"]), Decimal("-20.00"))
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_open_drawer(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:open_drawer"), {"amount": "200"}
@@ -589,7 +589,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, 200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_cash_deposit(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:cash_deposit"), {"amount": "200"}
@@ -602,7 +602,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, 200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_safe_drop(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:safe_drop"), {"amount": "200"}
@@ -615,7 +615,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, -200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_cash_pickup(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:cash_pickup"), {"amount": "200"}
@@ -628,7 +628,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, -200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_close_drawer(self, mock_send_mqtt_message):
         response = self.client.post(
             reverse("registration:close_drawer"), {"amount": "200"}
@@ -641,7 +641,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(drawer.total, -200)
         mock_send_mqtt_message.assert_called_once()
 
-    @patch("registration.views.onsite_admin.send_mqtt_message")
+    @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_no_sale(self, mock_send_mqtt_message):
         response = self.client.post(reverse("registration:no_sale"))
         message = response.json()

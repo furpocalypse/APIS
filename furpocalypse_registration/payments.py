@@ -3,18 +3,26 @@ import uuid
 from datetime import datetime
 
 from django.conf import settings
-from square.client import Client
+# from square.client import Client
 
 from . import emails
 from .models import *
 
-client = Client(
-    access_token=settings.SQUARE_ACCESS_TOKEN,
-    environment=settings.SQUARE_ENVIRONMENT,
-)
-payments_api = client.payments
-refunds_api = client.refunds
-orders_api = client.orders
+# TODO: PayPal Integration - Remove Square client, implement PayPal client
+# DECISION: Online-only payments, complete Square removal
+# Replace Square client initialization with PayPal SDK client for online payments only.
+# No POS integration needed.
+# References:
+# - PayPal Orders API: https://developer.paypal.com/docs/api/orders/v2/
+# - PayPal Server SDK: https://github.com/paypal/PayPal-server-sdk-python
+# Related files: views/webhooks.py (PayPal client setup), models.py (Order model)
+# client = Client(
+#     access_token=settings.SQUARE_ACCESS_TOKEN,
+#     environment=settings.SQUARE_ENVIRONMENT,
+# )
+# payments_api = client.payments
+# refunds_api = client.refunds
+# orders_api = client.orders
 
 logger = logging.getLogger("registration.payments")
 
@@ -27,83 +35,104 @@ def get_idempotency_key(request=None):
     return str(uuid.uuid4())
 
 
+# TODO: PayPal Integration - Implement PayPal charge_payment function
+# This function was the main payment processing function for Square and needs to be
+# completely rewritten for PayPal. Key requirements:
+# 1. Create PayPal order using orders_controller.create_order() with OrderRequest
+# 2. Handle PayPal payment capture flow using orders_controller.capture_order()
+# 3. Update Order model with PayPal transaction data in apiData field
+# 4. Map PayPal payment statuses to our Order.STATUS_CHOICES
+# 5. Handle PayPal-specific error responses
+# References:
+# - PayPal Orders API: https://developer.paypal.com/docs/api/orders/v2/#orders_create
+# - PayPal Capture API: https://developer.paypal.com/docs/api/orders/v2/#orders_capture
+# - PayPal Server SDK: https://github.com/paypal/PayPal-server-sdk-python
+# - Current PayPal implementation: views/webhooks.py (paypal_create_order, paypal_capture_order)
+# Related files: views/ordering.py (checkout function), admin.py (order management)
 def charge_payment(order, cc_data, request=None):
     """
-    Returns two variabies:
-        success - general success flag
-        message - type of failure.
+    Process PayPal payment for an order.
+    
+    Args:
+        order: Django Order model instance
+        cc_data: Payment data including PayPal order ID and billing info
+        request: HTTP request object (optional)
+    
+    Returns:
+        tuple: (success_bool, response_data)
     """
-
-    idempotency_key = get_idempotency_key(request)
-    converted_total = int(order.total * 100)
-
-    amount = {"amount": converted_total, "currency": settings.SQUARE_CURRENCY}
-
-    order.billingPostal = cc_data["postal"]
-    billing_address = {
-        "postal_code": cc_data["postal"],
-    }
-
+    from .views.webhooks import get_orders_controller
+    
     try:
-        billing_address.update(
-            {
-                "address_line_1": cc_data["address1"],
-                "address_line_2": cc_data["address2"],
-                "locality": cc_data["city"],
-                "administrative_district_level_1": cc_data["state"],
-                "postal_code": cc_data["postal"],
-                "country": cc_data["country"],
-                "buyer_email_address": cc_data["email"],
-                "first_name": cc_data["cc_firstname"],
-                "last_name": cc_data["cc_lastname"],
-            }
-        )
-    except KeyError:
-        logger.debug("One or more billing address field omited - skipping")
-
-    body = {
-        "idempotency_key": idempotency_key,
-        "source_id": cc_data["source_id"],
-        "autocomplete": True,
-        "amount_money": amount,
-        "reference_id": order.reference,
-        "billing_address": billing_address,
-        "location_id": settings.SQUARE_LOCATION_ID,
-    }
-
-    if "verificationToken" in cc_data:
-        body["verificationToken"] = cc_data["verificationToken"]
-
-    logger.debug("---- Begin Transaction ----")
-    logger.debug(body)
-
-    api_response = payments_api.create_payment(body)
-
-    logger.debug("---- Charge Submitted ----")
-    logger.debug(api_response)
-
-    # Square still returns data for failed payments
-    order.apiData = api_response.body
-
-    if "payment" in api_response.body:
-        order.lastFour = api_response.body["payment"]["card_details"]["card"]["last_4"]
-
-    if api_response.is_success():
-        order.status = Order.COMPLETED
-        order.notes = "Square: #" + api_response.body["payment"]["id"][:4]
-        order.save()
-
-    elif api_response.is_error():
-        logger.debug(api_response.errors)
-        message = api_response.errors
-        logger.debug("---- Transaction Failed ----")
+        orders_controller = get_orders_controller()
+        if not orders_controller:
+            logger.error("PayPal orders controller not available")
+            return False, {"errors": [{"detail": "PayPal service unavailable"}]}
+        
+        # Extract PayPal order ID from payment data
+        paypal_order_id = cc_data.get("paypal_order_id")
+        if not paypal_order_id:
+            logger.error("Missing PayPal order ID in payment data")
+            return False, {"errors": [{"detail": "Missing PayPal order ID"}]}
+        
+        # Store billing information
+        order.billingPostal = cc_data.get("postal", "")
+        
+        # Capture the PayPal order
+        logger.debug(f"Capturing PayPal order: {paypal_order_id}")
+        capture_response = orders_controller.capture_order({
+            "id": paypal_order_id,
+            "prefer": "return=representation"
+        })
+        
+        if capture_response.is_success():
+            capture_data = capture_response.body
+            order.apiData = capture_data
+            
+            # Extract payment information
+            purchase_units = capture_data.get("purchase_units", [])
+            if purchase_units:
+                payments = purchase_units[0].get("payments", {})
+                captures = payments.get("captures", [])
+                
+                if captures:
+                    capture = captures[0]
+                    capture_status = capture.get("status")
+                    
+                    # Map PayPal capture status to Order status
+                    if capture_status == "COMPLETED":
+                        order.status = Order.COMPLETED
+                        order.notes = f"PayPal: #{capture.get('id', '')[:8]}"
+                    elif capture_status == "PENDING":
+                        order.status = Order.CAPTURED
+                        order.notes = f"PayPal Pending: #{capture.get('id', '')[:8]}"
+                    elif capture_status == "DECLINED":
+                        order.status = Order.FAILED
+                        order.notes = f"PayPal Declined: #{capture.get('id', '')[:8]}"
+                    
+                    # Store last 4 digits if available
+                    payment_source = capture.get("payment_source", {})
+                    if "card" in payment_source:
+                        card_info = payment_source["card"]
+                        order.lastFour = card_info.get("last_digits", "")
+            
+            order.save()
+            logger.debug(f"PayPal order captured successfully: {paypal_order_id}")
+            return True, capture_data
+            
+        else:
+            # Handle capture failure
+            logger.error(f"PayPal capture failed for order {paypal_order_id}: {capture_response.errors}")
+            order.status = Order.FAILED
+            order.apiData = {"errors": capture_response.errors}
+            order.save()
+            return False, {"errors": capture_response.errors}
+            
+    except Exception as e:
+        logger.exception(f"Exception in PayPal charge_payment: {e}")
         order.status = Order.FAILED
         order.save()
-        return False, {"errors": message}
-
-    logger.debug("---- End Transaction ----")
-
-    return True, api_response.body
+        return False, {"errors": [{"detail": str(e)}]}
 
 
 def format_errors(errors):
@@ -114,133 +143,119 @@ def format_errors(errors):
 
 
 def refresh_payment(order, store_api_data=None):
-    # Function raises ValueError if there's a problem decoding the stored data
-    if store_api_data:
-        api_data = store_api_data
-    else:
-        api_data = order.apiData
-        if not api_data:
-            logger.warning("No order data yet for {0}".format(order.reference))
-            return False, "No order data yet for {0}".format(order.reference)
-    order_total = 0
-
-    try:
-        payment_id = api_data["payment"]["id"]
-    except KeyError:
-        logger.warning("Refresh payment: MISSING_PAYMENT_ID")
-        return False, "MISSING_PAYMENT_ID"
-    payments_response = payments_api.get_payment(payment_id)
-
-    payment = payments_response.body.get("payment")
-    if payments_response.is_success():
-        api_data["payment"] = payment
-        order_total = update_order_payment_data(order, order_total, payment)
-    else:
-        return False, format_errors(payments_response.errors)
-
-    # FIXME: Payments API call includes references to any refunds associated with that payment in `refund_ids`
-    # We should use that here instead.
-    refunds = []
-    refund_errors = []
-    refunded_money = payment.get("refunded_money")
-
-    if refunded_money:
-        order_total -= refunded_money["amount"]
-    refund_ids = payment.get("refund_ids", [])
-
-    stored_refunds = api_data.get("refunds")
-    # Keep any potentially pending refunds that may fail (which wouldn't show up in payment.refund_ids)
-    if stored_refunds:
-        stored_refund_ids = [
-            refund["id"] for refund in stored_refunds if refund["id"] not in refund_ids
-        ]
-        refund_ids.extend(stored_refund_ids)
-
-    for refund_id in refund_ids:
-        refunds_response = refunds_api.get_payment_refund(refund_id)
-
-        if refunds_response.is_success():
-            refund = refunds_response.body.get("refund")
-            if refund:
-                refunds.append(refund)
-                status = refund.get("status")
-                if status == "COMPLETED":
-                    order.status = Order.REFUNDED
-                elif status == "PENDING":
-                    order.status = Order.REFUND_PENDING
-        else:
-            refund_errors.append(format_errors(payments_response.errors))
-
-    api_data["refunds"] = refunds
-
-    if refund_errors:
-        return False, "; ".join(refund_errors)
-
-    order.apiData = api_data
-    order.total = Decimal(order_total) / 100
-
-    if order.orgDonation + order.charityDonation > order.total:
-        order.orgDonation = 0
-        order.charityDonation = order.total
-        message = "Refunded order has caused charity and organization donation amounts to reset."
-        logger.warning(message)
-        order.notes += "\n{0}: {1}".format(timezone.now(), message)
-        order.save()
-        return False, message
-
-    order.save()
-    return True, None
+    """
+    Refresh payment information from PayPal API.
+    
+    TODO: PayPal Integration - Implement PayPal refresh_payment function
+    This function refreshes payment information from the payment processor API.
+    For PayPal, this needs to:
+    1. Use PayPal Orders API to get current order status
+    2. Use PayPal Payments API to get payment details
+    3. Handle PayPal-specific refund information
+    4. Update Order model with current PayPal data
+    References:
+    - PayPal Get Order: https://developer.paypal.com/docs/api/orders/v2/#orders_get
+    - PayPal Payments API: https://developer.paypal.com/docs/api/payments/v2/
+    Related files: admin.py (refresh_view function), models.py (Order.apiData)
+    """
+    raise NotImplementedError("PayPal refresh_payment function not yet implemented - Phase 2 feature")
 
 
+# TODO: PayPal Integration - Update payment data mapping for PayPal
+# This function maps payment processor data to our Order model fields.
+# Needs to be updated to handle PayPal capture object structure instead of Square.
+# PayPal uses capture.status (COMPLETED, PENDING, DECLINED) vs Square payment.status.
+# References:
+# - PayPal Capture Object: https://developer.paypal.com/docs/api/orders/v2/#definition-capture
+# - PayPal Order Status: https://developer.paypal.com/docs/api/orders/v2/#definition-order_status
+# - PayPal Capture Status: https://developer.paypal.com/docs/api/orders/v2/#definition-capture_status
+# Related files: models.py (Order.STATUS_CHOICES)
 def update_order_payment_data(order, order_total, payment):
+    """
+    Update order with PayPal payment data.
+    
+    Args:
+        order: Django Order model instance
+        order_total: Current order total (for Square compatibility, may be None)
+        payment: PayPal payment/capture data
+    
+    Returns:
+        Updated order total or None
+    """
+    # Handle PayPal capture data structure
     try:
-        order.lastFour = payment["card_details"]["card"]["last_4"]
-    except KeyError:
-        logger.warning("Unable to update last_4 details for order")
+        # Try to extract card last 4 digits from PayPal payment source
+        payment_source = payment.get("payment_source", {})
+        if "card" in payment_source:
+            card_info = payment_source["card"]
+            order.lastFour = card_info.get("last_digits", "")
+        elif "paypal" in payment_source:
+            # PayPal wallet payments don't have card details
+            order.lastFour = ""
+    except (KeyError, AttributeError):
+        logger.warning("Unable to update last_4 details for PayPal order")
+    
+    # Map PayPal capture status to Order status
     status = payment.get("status")
     if status == "COMPLETED":
         order.status = Order.COMPLETED
-        order_total = payment["total_money"]["amount"]
-    elif status == "FAILED":
-        order.status = Order.FAILED
-    elif status == "APPROVED":
-        # Payment was only captured, approved, and never settled (not usually what we do)
-        # https://developer.squareup.com/docs/payments-api/overview#payments-api-workflow
+        # Extract amount from PayPal capture
+        try:
+            amount_value = payment["amount"]["value"]
+            order_total = int(float(amount_value) * 100)  # Convert to cents
+        except (KeyError, ValueError):
+            logger.warning("Unable to extract amount from PayPal capture")
+    elif status == "PENDING":
         order.status = Order.CAPTURED
-        order_total = payment["total_money"]["amount"]
-    elif status == "CANCELED":
+        try:
+            amount_value = payment["amount"]["value"]
+            order_total = int(float(amount_value) * 100)  # Convert to cents
+        except (KeyError, ValueError):
+            logger.warning("Unable to extract amount from PayPal capture")
+    elif status == "DECLINED":
         order.status = Order.FAILED
+    elif status == "CANCELLED":
+        order.status = Order.FAILED
+    
     return order_total
 
 
+# TODO: PayPal Integration - Update webhook processing for PayPal
+# This function processes PayPal webhook notifications instead of Square.
+# PayPal webhook structure and event types are different from Square.
+# References:
+# - PayPal Webhooks: https://developer.paypal.com/docs/api/webhooks/v1/
+# - PayPal Event Types: https://developer.paypal.com/docs/api/webhooks/v1/#webhooks_post
+# Related files: views/webhooks.py (webhook endpoints), models.py (PaymentWebhookNotification)
 def process_webhook_refund_updated(notification):
-    # Find matching order, if any:
-    payment_id = notification.body["data"]["object"]["payment_id"]
-    try:
-        order = Order.objets.get(apiData__payment__id=payment_id)
-    except Order.DoesNotExist:
-        logger.warning(
-            f"Got webhook for refund.update on payment.id = {payment_id}, but found no corresponding payment."
-        )
-        return False
-
-    stored_refunds = order.apiData["refunds"]
-    refund = notification.body["data"]["object"]["refund"]
-    if refund:
-        # Check if refund has already been stored (Refund created internally), and update in-place
-        order.apiData["refunds"].append(refund)
-        status = refund.get("status")
-        if status == "COMPLETED":
-            order.status = Order.REFUNDED
-        elif status == "PENDING":
-            order.status = Order.REFUND_PENDING
+    """
+    Process Square-style refund.updated webhook - NOT IMPLEMENTED for PayPal.
+    
+    TODO: PayPal Integration - Remove Square webhook processing
+    This function processes Square refund.updated webhooks which don't exist in PayPal.
+    PayPal uses PAYMENT.CAPTURE.REFUNDED webhooks instead.
+    This function should be removed during Phase 3 cleanup.
+    """
+    raise NotImplementedError("Square refund.updated webhook processing not implemented for PayPal - use PayPal webhooks instead")
 
 
 def refund_payment(order, amount, reason=None, request=None):
+    """
+    Process refund for an order based on billing type.
+    
+    Args:
+        order: Django Order model instance
+        amount: Decimal amount to refund
+        reason: Optional reason for refund
+        request: HTTP request object (optional)
+    
+    Returns:
+        tuple: (success_bool, message)
+    """
     if order.status == Order.FAILED:
         return False, "Failed orders cannot be refunded."
     if order.billingType == Order.CREDIT:
-        result, message = refund_card_payment(order, amount, reason, request=None)
+        result, message = refund_card_payment(order, amount, reason, request)
         return result, message
     if order.billingType == Order.CASH:
         result, message = refund_cash_payment(order, amount, reason)
@@ -267,99 +282,137 @@ def refund_cash_payment(order, amount, reason=None):
     return True, None
 
 
+# TODO: PayPal Integration - Implement PayPal refund_card_payment function
+# This function handles credit card refunds through PayPal instead of Square.
+# Key requirements:
+# 1. Extract PayPal capture ID from order.apiData["purchase_units"][0]["payments"]["captures"][0]["id"]
+# 2. Use payments_controller.refunds().refund_capture() to process refund
+# 3. Handle PayPal refund response and status (COMPLETED, PENDING, FAILED)
+# 4. Update order with refund data in apiData["refunds"]
+# 5. Map PayPal refund statuses to our Order status choices
+# References:
+# - PayPal Refunds API: https://developer.paypal.com/docs/api/payments/v2/#captures_refund
+# - PayPal Refund Status: https://developer.paypal.com/docs/api/payments/v2/#definition-refund_status
+# - PayPal Server SDK: https://github.com/paypal/PayPal-server-sdk-python
+# Related files: admin.py (refund_view), models.py (Order.STATUS_CHOICES)
 def refund_card_payment(order, amount, reason=None, request=None):
-    api_data = order.apiData
-    payment_id = api_data["payment"]["id"]
-    converted_amount = int(amount * 100)
-
-    body = {
-        "payment_id": payment_id,
-        "idempotency_key": str(uuid.uuid4()),
-        "amount_money": {
-            "amount": converted_amount,
-            "currency": settings.SQUARE_CURRENCY,
-        },
-    }
-    if reason:
-        body["reason"] = reason
-
-    result = refunds_api.refund_payment(body)
-    logger.debug(result.body)
-
-    if result.is_error():
-        errors = format_errors(result.errors)
-        logger.error("Error in square refund: {0}".format(errors))
-        return False, errors
-
-    stored_refunds = api_data.get("refunds")
-    if stored_refunds is None:
-        stored_refunds = []
-
-    status = result.body["refund"]["status"]
-    stored_refunds.append(result.body["refund"])
-    api_data["refunds"] = stored_refunds
-    order.apiData = api_data
-
-    if status == "COMPLETED":
-        order.status = Order.REFUNDED
-    if status == "PENDING":
-        order.status = Order.REFUND_PENDING
-
-    if status in ("COMPLETED", "PENDING"):
-        order.total -= amount
-        # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
-            order.orgDonation = 0
-            order.charityDonation = order.total
-            logger.warning(
-                "Refunded order has caused charity and organization donation amounts to reset."
-            )
-            order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
-
-    if status in ("REJECTED", "FAILED"):
-        order.status = Order.COMPLETED
-
-    order.save()
-    message = "Square refund has been submitted and is {0}".format(status)
-    logger.debug(message)
-    return True, message
-
-
-def get_payments_from_order_id(order_id):
     """
-    Returns a list of payment IDs (tenders) from the serverTransactionId
-    returned from the POS SDK.
-
-    :param order_id:
-    :return: list of payment IDs, or None if there was an error
+    Process PayPal credit card refund.
+    
+    Args:
+        order: Django Order model instance
+        amount: Decimal amount to refund
+        reason: Optional reason for refund
+        request: HTTP request object (optional)
+    
+    Returns:
+        tuple: (success_bool, message)
     """
-
-    body = {
-        "order_ids": [
-            order_id,
-        ],
-        "location_id": settings.SQUARE_LOCATION_ID,
-    }
-
-    result = orders_api.batch_retrieve_orders(body)
-
-    if result.is_success():
-        if result.body:
-            tenders = result.body["orders"][0]["tenders"]
-            payment_ids = [payment["id"] for payment in tenders]
-            return payment_ids
-        else:
-            return []
-
-    elif result.is_error():
-        logger.error(
-            "There was a problem while fetching order id {0} from Square:".format(
-                order_id
-            )
+    from .views.webhooks import get_payments_controller
+    from paypalserversdk.models.refund_request import RefundRequest
+    from paypalserversdk.models.money import Money
+    from paypalserversdk.exceptions.error_exception import ErrorException
+    
+    try:
+        payments_controller = get_payments_controller()
+        if not payments_controller:
+            logger.error("PayPal payments controller not available")
+            return False, "PayPal service unavailable"
+        
+        api_data = order.apiData
+        if not api_data:
+            logger.error("No PayPal data available for refund")
+            return False, "No payment data available for refund"
+        
+        # Extract PayPal capture ID
+        try:
+            capture_id = api_data["purchase_units"][0]["payments"]["captures"][0]["id"]
+        except (KeyError, IndexError):
+            logger.error("Unable to extract PayPal capture ID from order data")
+            return False, "Unable to find PayPal capture ID"
+        
+        # Convert amount to cents for PayPal
+        converted_amount = "{:.2f}".format(amount)
+        
+        # Create refund request
+        refund_request = RefundRequest(
+            amount=Money(
+                currency_code="USD",
+                value=converted_amount
+            ),
+            note_to_payer=reason or "Refund processed"
         )
-        logger.error(format_errors(result.errors))
-        return None
+        
+        logger.debug(f"Processing PayPal refund for capture {capture_id}, amount {converted_amount}")
+        
+        # Process refund through PayPal
+        result = payments_controller.refunds().refund_capture(
+            capture_id=capture_id,
+            body=refund_request
+        )
+        
+        if result.is_success():
+            refund_data = result.body
+            logger.debug(f"PayPal refund successful: {refund_data}")
+            
+            # Store refund data
+            stored_refunds = api_data.get("refunds", [])
+            stored_refunds.append(refund_data)
+            api_data["refunds"] = stored_refunds
+            order.apiData = api_data
+            
+            # Map PayPal refund status to Order status
+            refund_status = refund_data.get("status")
+            if refund_status == "COMPLETED":
+                order.status = Order.REFUNDED
+            elif refund_status == "PENDING":
+                order.status = Order.REFUND_PENDING
+            elif refund_status in ("CANCELLED", "FAILED"):
+                order.status = Order.COMPLETED
+                order.save()
+                return False, f"PayPal refund failed with status: {refund_status}"
+            
+            # Update order total and donations for successful refunds
+            if refund_status in ("COMPLETED", "PENDING"):
+                order.total -= amount
+                # Reset org & charity donations if the remaining total isn't enough to cover them
+                if order.orgDonation + order.charityDonation > order.total:
+                    order.orgDonation = 0
+                    order.charityDonation = order.total
+                    logger.warning(
+                        "Refunded order has caused charity and organization donation amounts to reset."
+                    )
+                    order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
+            
+            order.save()
+            message = f"PayPal refund has been submitted and is {refund_status}"
+            logger.debug(message)
+            return True, message
+            
+        else:
+            # Handle refund failure
+            logger.error(f"PayPal refund failed: {result.errors}")
+            return False, f"PayPal refund failed: {result.errors}"
+            
+    except ErrorException as e:
+        logger.exception(f"PayPal refund error: {e}")
+        return False, f"PayPal refund error: {str(e)}"
+    except Exception as e:
+        logger.exception(f"Exception in PayPal refund_card_payment: {e}")
+        return False, f"Refund processing error: {str(e)}"
 
+
+
+# TODO: PayPal Integration - Replace Square webhook processing with PayPal
+# DECISION: Complete Square removal, PayPal webhooks only
+# Square webhook functions will be removed and replaced with PayPal webhook processing.
+# PayPal webhook event structure uses event_type field vs Square's type field.
+# Focus on: PAYMENT.CAPTURE.COMPLETED, PAYMENT.CAPTURE.REFUNDED for online payments.
+# References:
+# - PayPal Webhook Events: https://developer.paypal.com/docs/api/webhooks/v1/#webhooks_post
+# - PayPal Event Types: https://developer.paypal.com/docs/integration-guides/webhooks/
+# - PayPal Webhook Structure: https://developer.paypal.com/docs/api/webhooks/v1/#definition-event
+# Related files: views/webhooks.py (webhook endpoints)
 
 def process_webhook_refund_update(notification) -> bool:
     # Find matching order based on refund ID:
@@ -455,6 +508,15 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
     return True
 
 
+# TODO: PayPal Integration - Implement PayPal dispute processing (Phase 2)
+# DECISION: Replace Square dispute handling with PayPal dispute processing
+# PayPal disputes use different statuses: OPEN, WAITING_FOR_BUYER_RESPONSE, etc.
+# This function will be rewritten for PayPal dispute webhook events.
+# Priority: Phase 2 (after core payment processing is restored)
+# References:
+# - PayPal Disputes API: https://developer.paypal.com/docs/api/customer-disputes/v1/
+# - PayPal Dispute Webhooks: https://developer.paypal.com/docs/integration-guides/webhooks/
+# Related files: models.py (Order.DISPUTE_STATUS_MAP), emails.py (chargeback notifications)
 def process_webhook_dispute_created_or_updated(
     notification: PaymentWebhookNotification,
 ) -> bool:

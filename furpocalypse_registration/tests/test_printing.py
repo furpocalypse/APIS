@@ -1,7 +1,7 @@
 import os
 from unittest import TestCase
 
-from registration import printing
+from furpocalypse_registration import printing
 
 TAGS = [
     {

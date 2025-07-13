@@ -49,7 +49,7 @@ class TestFirebaseAdmin(TestCase):
 
         self.assertEqual(provision_dict, expected_result)
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_save_model(self, mock_send_push_notification):
         self.client.logout()
         self.assertTrue(self.client.login(username="admin", password="admin"))
@@ -74,7 +74,7 @@ class TestFirebaseAdmin(TestCase):
         self.assertEqual(terminal_red.name, "Red")
         mock_send_push_notification.assert_called_once()
 
-    @patch("registration.pushy.PushyAPI.send_push_notification")
+    @patch("furpocalypse_registration.pushy.PushyAPI.send_push_notification")
     def test_save_model_pushy_exception(self, mock_send_push_notification):
         self.client.logout()
         self.assertTrue(self.client.login(username="admin", password="admin"))

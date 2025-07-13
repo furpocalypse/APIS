@@ -7,6 +7,13 @@ from idempotency_key.decorators import idempotency_key
 
 import furpocalypse_registration.emails
 from furpocalypse_registration.models import *
+# TODO: PayPal Integration - Re-enable charge_payment import (Phase 1 - Critical)
+# DECISION: Online-only PayPal payments, complete Square removal
+# The charge_payment function import is commented out and needs to be re-enabled once
+# charge_payment is implemented for PayPal online order creation flow.
+# References:
+# - payments.py (charge_payment function - needs complete rewrite for PayPal)
+# - PayPal Orders API: https://developer.paypal.com/docs/api/orders/v2/
 from furpocalypse_registration.payments import charge_payment
 
 from . import cart, common
@@ -14,6 +21,23 @@ from . import cart, common
 logger = logging.getLogger(__name__)
 
 
+# TODO: PayPal Integration - Implement PayPal do_checkout function (Phase 1 - Critical)
+# DECISION: Online-only checkout, complete Square removal
+# This critical function was commented out during Square removal and needs to be
+# completely rewritten for PayPal online integration. Key requirements:
+# 1. Create PayPal order using orders_controller.create_order() with OrderRequest
+# 2. Handle billing address collection if required by event settings  
+# 3. Process payment through PayPal order creation → approval → capture flow
+# 4. Create Order record with PayPal response data in apiData field
+# 5. Associate OrderItems with the completed Order
+# 6. Handle discount usage tracking
+# 7. Return success/failure status with appropriate messages
+# References:
+# - PayPal Orders API: https://developer.paypal.com/docs/api/orders/v2/#orders_create
+# - PayPal Server SDK OrderRequest: https://github.com/paypal/PayPal-server-sdk-python
+# - payments.py (charge_payment function - needs complete rewrite)
+# - models.py (Order, OrderItem models)
+# Related files: views/webhooks.py (paypal_create_order, paypal_capture_order)
 def do_checkout(
     billingData,
     total,
@@ -24,6 +48,22 @@ def do_checkout(
     donationCharity,
     request=None,
 ):
+    """
+    Process PayPal checkout for online orders.
+    
+    Args:
+        billingData: Payment data including PayPal order ID
+        total: Total order amount
+        discount: Discount object (if applicable)
+        cartItems: List of cart items
+        orderItems: List of order items
+        donationOrg: Organization donation amount
+        donationCharity: Charity donation amount
+        request: HTTP request object (optional)
+    
+    Returns:
+        tuple: (success_bool, message, order)
+    """
     event = Event.objects.get(default=True)
     reference = common.get_unique_confirmation_token(Order)
 
@@ -33,6 +73,7 @@ def do_checkout(
         discount=discount,
         orgDonation=donationOrg,
         charityDonation=donationCharity,
+        billingType=Order.CREDIT,  # PayPal is always credit card processing
     )
 
     # Address collection is marked as required by event
@@ -56,11 +97,13 @@ def do_checkout(
                 ),
             )
 
+    # Process payment through PayPal
     status, response = charge_payment(order, billingData, request)
 
     if status:
         order.save()
 
+        # Associate cart items with the order
         if cartItems:
             for item in cartItems:
                 order_item = cart.saveCart(item)
@@ -71,9 +114,11 @@ def do_checkout(
                 order_item.order = order
                 order_item.save()
 
+        # Update discount usage
         if discount:
             discount.used = discount.used + 1
             discount.save()
+        
         return True, "", order
 
     return False, response, order
