@@ -203,7 +203,7 @@ def invoice_dealer(request):
     """
     Handle dealer invoicing - NOT IMPLEMENTED.
     
-    TODO: PayPal Integration - Implement dealer invoicing
+    PAYPAL_TODO - Implement dealer invoicing
     This function was disabled during Square removal and needs to be rewritten
     for PayPal integration. Depends on get_dealer_total function which is also
     commented out and requires PayPal order processing to be fully implemented.
@@ -242,7 +242,7 @@ def add_assistants_checkout(request):
     """
     Handle assistant checkout - NOT IMPLEMENTED.
     
-    TODO: PayPal Integration - Implement assistant checkout
+    PAYPAL_TODO - Implement assistant checkout
     This function was disabled during Square removal and needs to be rewritten
     for PayPal integration. Depends on do_checkout function from ordering.py
     which requires PayPal order processing to be fully implemented.
@@ -343,7 +343,7 @@ def checkout_dealer(request):
     """
     Handle dealer checkout - NOT IMPLEMENTED.
     
-    TODO: PayPal Integration - Implement dealer checkout
+    PAYPAL_TODO - Implement dealer checkout
     This function was disabled during Square removal and needs to be rewritten
     for PayPal integration. Depends on get_dealer_total, doZeroCheckout, and
     do_checkout functions which require PayPal order processing to be fully implemented.
@@ -497,7 +497,7 @@ def get_dealer_total(orderItems, discount, dealer):
     """
     Calculate dealer total - NOT IMPLEMENTED.
     
-    TODO: PayPal Integration - Implement dealer total calculation
+    PAYPAL_TODO - Implement dealer total calculation
     This function was disabled during Square removal and needs to be rewritten
     for PayPal integration. Depends on get_discount_total function from ordering.py
     which requires PayPal order processing to be fully implemented.

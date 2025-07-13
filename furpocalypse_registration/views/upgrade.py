@@ -133,7 +133,7 @@ def invoice_upgrade(request):
     """
     Handle upgrade invoicing - NOT IMPLEMENTED.
     
-    TODO: PayPal Integration - Implement upgrade invoicing
+    PAYPAL_TODO - Implement upgrade invoicing
     This function was disabled during Square removal and needs to be rewritten
     for PayPal integration. Depends on get_total function from ordering.py
     which requires PayPal order processing to be fully implemented.
@@ -172,7 +172,7 @@ def checkout_upgrade(request):
     """
     Handle upgrade checkout - NOT IMPLEMENTED.
     
-    TODO: PayPal Integration - Implement upgrade checkout
+    PAYPAL_TODO - Implement upgrade checkout
     This function was disabled during Square removal and needs to be rewritten
     for PayPal integration. Depends on get_total, doZeroCheckout, and do_checkout
     functions from ordering.py which require PayPal order processing to be fully implemented.

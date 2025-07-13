@@ -8,7 +8,7 @@ from django.conf import settings
 from . import emails
 from .models import *
 
-# TODO: PayPal Integration - Remove Square client, implement PayPal client
+# PAYPAL_TODO - Remove Square client, implement PayPal client
 # DECISION: Online-only payments, complete Square removal
 # Replace Square client initialization with PayPal SDK client for online payments only.
 # No POS integration needed.
@@ -35,7 +35,7 @@ def get_idempotency_key(request=None):
     return str(uuid.uuid4())
 
 
-# TODO: PayPal Integration - Implement PayPal charge_payment function
+# PAYPAL_TODO - Implement PayPal charge_payment function
 # This function was the main payment processing function for Square and needs to be
 # completely rewritten for PayPal. Key requirements:
 # 1. Create PayPal order using orders_controller.create_order() with OrderRequest
@@ -146,7 +146,7 @@ def refresh_payment(order, store_api_data=None):
     """
     Refresh payment information from PayPal API.
     
-    TODO: PayPal Integration - Implement PayPal refresh_payment function
+    PAYPAL_TODO - Implement PayPal refresh_payment function
     This function refreshes payment information from the payment processor API.
     For PayPal, this needs to:
     1. Use PayPal Orders API to get current order status
@@ -161,7 +161,7 @@ def refresh_payment(order, store_api_data=None):
     raise NotImplementedError("PayPal refresh_payment function not yet implemented - Phase 2 feature")
 
 
-# TODO: PayPal Integration - Update payment data mapping for PayPal
+# PAYPAL_TODO - Update payment data mapping for PayPal
 # This function maps payment processor data to our Order model fields.
 # Needs to be updated to handle PayPal capture object structure instead of Square.
 # PayPal uses capture.status (COMPLETED, PENDING, DECLINED) vs Square payment.status.
@@ -220,7 +220,7 @@ def update_order_payment_data(order, order_total, payment):
     return order_total
 
 
-# TODO: PayPal Integration - Update webhook processing for PayPal
+# PAYPAL_TODO - Update webhook processing for PayPal
 # This function processes PayPal webhook notifications instead of Square.
 # PayPal webhook structure and event types are different from Square.
 # References:
@@ -231,7 +231,7 @@ def process_webhook_refund_updated(notification):
     """
     Process Square-style refund.updated webhook - NOT IMPLEMENTED for PayPal.
     
-    TODO: PayPal Integration - Remove Square webhook processing
+    PAYPAL_TODO - Remove Square webhook processing
     This function processes Square refund.updated webhooks which don't exist in PayPal.
     PayPal uses PAYMENT.CAPTURE.REFUNDED webhooks instead.
     This function should be removed during Phase 3 cleanup.
@@ -282,7 +282,7 @@ def refund_cash_payment(order, amount, reason=None):
     return True, None
 
 
-# TODO: PayPal Integration - Implement PayPal refund_card_payment function
+# PAYPAL_TODO - Implement PayPal refund_card_payment function
 # This function handles credit card refunds through PayPal instead of Square.
 # Key requirements:
 # 1. Extract PayPal capture ID from order.apiData["purchase_units"][0]["payments"]["captures"][0]["id"]
@@ -403,7 +403,7 @@ def refund_card_payment(order, amount, reason=None, request=None):
 
 
 
-# TODO: PayPal Integration - Replace Square webhook processing with PayPal
+# PAYPAL_TODO - Replace Square webhook processing with PayPal
 # DECISION: Complete Square removal, PayPal webhooks only
 # Square webhook functions will be removed and replaced with PayPal webhook processing.
 # PayPal webhook event structure uses event_type field vs Square's type field.
@@ -508,7 +508,7 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
     return True
 
 
-# TODO: PayPal Integration - Implement PayPal dispute processing (Phase 2)
+# PAYPAL_TODO - Implement PayPal dispute processing (Phase 2)
 # DECISION: Replace Square dispute handling with PayPal dispute processing
 # PayPal disputes use different statuses: OPEN, WAITING_FOR_BUYER_RESPONSE, etc.
 # This function will be rewritten for PayPal dispute webhook events.

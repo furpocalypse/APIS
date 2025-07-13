@@ -1,4 +1,4 @@
-# TODO: PayPal Integration - Complete PayPal webhook integration (Phase 1-2)
+# PAYPAL_TODO - Complete PayPal webhook integration (Phase 1-2)
 # DECISION: Online-only PayPal payments, complete Square removal
 # Current PayPal implementation only includes basic order creation and capture.
 # Missing critical components for online payment processing:
@@ -21,10 +21,6 @@ from django.conf import settings
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-# TODO: PayPal Integration - Remove Square webhook imports (Phase 3 - Cleanup)
-# DECISION: Complete Square removal
-# Square webhook validation is no longer needed and should be removed entirely.
-# from square.utilities.webhooks_helper import is_valid_webhook_event_signature
 
 from paypalserversdk.http.auth.o_auth_2 import ClientCredentialsAuthCredentials
 
@@ -97,7 +93,7 @@ def get_paypal_client():
     if not client_id or not client_secret:
         raise ValueError("PayPal credentials not configured. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET environment variables.")
     
-    # TODO: PayPal Integration - Add PayPal environment configuration
+    # PAYPAL_TODO - Add PayPal environment configuration
     # Currently hardcoded to use default environment. Should support sandbox/production
     # configuration through Django settings or environment variables.
     # Use Environment.SANDBOX or Environment.PRODUCTION parameter.
@@ -138,7 +134,7 @@ def get_payments_controller():
 @require_POST
 @csrf_exempt
 def paypal_create_order(request):
-    # TODO: PayPal Integration - Integrate with Django Order model (Phase 1 - Critical)
+    # PAYPAL_TODO - Integrate with Django Order model (Phase 1 - Critical)
     # DECISION: Online-only checkout integration
     # Current implementation uses hardcoded cart data. Needs to:
     # 1. Extract cart information from Django session or request
@@ -176,7 +172,7 @@ def paypal_create_order(request):
         if not orders_controller:
             return JsonResponse({"error": "PayPal client not available"}, status=503)
         
-        # TODO: PayPal Integration - Add reference_id and custom_id
+        # PAYPAL_TODO - Add reference_id and custom_id
         # PayPal orders should include reference_id (our order reference) and
         # custom_id for tracking and webhook processing.
         # References:
@@ -228,7 +224,7 @@ Capture payment for the created order to complete the transaction.
 @require_POST
 @csrf_exempt
 def paypal_capture_order(request, order_id):
-    # TODO: PayPal Integration - Integrate with Django Order processing (Phase 1 - Critical)
+    # PAYPAL_TODO - Integrate with Django Order processing (Phase 1 - Critical)
     # DECISION: Online-only order processing, complete Square replacement
     # Current implementation only captures PayPal order but doesn't:
     # 1. Update Django Order model with capture data (replace Square structure)
@@ -258,7 +254,7 @@ def paypal_capture_order(request, order_id):
         return JsonResponse({"error": "Payment capture failed"}, status=400)
 
 
-# TODO: PayPal Integration - Implement PayPal webhook endpoints (Phase 1-2)
+# PAYPAL_TODO - Implement PayPal webhook endpoints (Phase 1-2)
 # DECISION: Online-only payment webhooks, complete Square removal
 # PayPal webhooks are essential for handling asynchronous online payment updates.
 # Required webhook endpoints for online payments:
@@ -305,7 +301,7 @@ def paypal_webhook(request):
     if existing.count() > 0:
         return common.abort(409, f"Conflict: event_id {event_id} already exists")
 
-    # TODO: PayPal Integration - Implement PayPal webhook signature verification
+    # PAYPAL_TODO - Implement PayPal webhook signature verification
     # PayPal webhooks should be verified for authenticity to prevent fraudulent requests.
     # PayPal provides webhook signature verification similar to Square.
     # References:
@@ -455,7 +451,7 @@ def process_paypal_capture_refunded(notification):
 
 def process_paypal_dispute_created(notification):
     """Process CUSTOMER.DISPUTE.CREATED webhook."""
-    # TODO: PayPal Integration - Implement PayPal dispute processing (Phase 2)
+    # PAYPAL_TODO - Implement PayPal dispute processing (Phase 2)
     # DECISION: Replace Square dispute handling with PayPal dispute processing
     # PayPal disputes use different statuses: OPEN, WAITING_FOR_BUYER_RESPONSE, etc.
     # This function will be rewritten for PayPal dispute webhook events.
@@ -469,5 +465,5 @@ def process_paypal_dispute_created(notification):
 
 def process_paypal_dispute_resolved(notification):
     """Process CUSTOMER.DISPUTE.RESOLVED webhook."""
-    # TODO: PayPal Integration - Implement PayPal dispute processing (Phase 2)
+    # PAYPAL_TODO - Implement PayPal dispute processing (Phase 2)
     raise NotImplementedError("PayPal dispute processing not yet implemented - Phase 2 feature")

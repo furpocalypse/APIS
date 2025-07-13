@@ -262,19 +262,6 @@ urlpatterns = [
         furpocalypse_registration.views.onsite_admin.onsite_print_badges,
         name="onsite_print_badges",
     ),
-    # TODO: PayPal Integration - Remove Square-specific URLs (Phase 3 - Cleanup)
-    # DECISION: Complete Square removal, online-only payments
-    # The following Square-related URLs will be removed entirely:
-    # - complete_square_transaction (POS integration - not needed)
-    # - square_webhook (commented out - remove completely)
-    # References:
-    # - views/onsite_admin.py (complete_square_transaction function - remove)
-    # - views/webhooks.py (square_webhook function - remove)
-    re_path(
-        r"^onsite/square/complete/?$",
-        furpocalypse_registration.views.onsite_admin.complete_square_transaction,
-        name="complete_square_transaction",
-    ),
     re_path(
         r"^onsite/cash/complete/?$",
         furpocalypse_registration.views.onsite_admin.complete_cash_transaction,
@@ -417,15 +404,7 @@ urlpatterns = [
         furpocalypse_registration.views.onsite_admin.firebase_lookup,
         name="firebase_lookup",
     ),
-    # TODO: PayPal Integration - Remove Square webhook URL (Phase 3 - Cleanup)
-    # DECISION: Complete Square removal
-    # This Square webhook URL is commented out and will be completely removed.
-    # re_path(
-    #     r"webhook/square/v2",
-    #     furpocalypse_registration.views.webhooks.square_webhook,
-    #     name="square_webhook",
-    # ),
-    # TODO: PayPal Integration - Add comprehensive PayPal webhook endpoints (Phase 1-2)
+    # PAYPAL_TODO - Add comprehensive PayPal webhook endpoints (Phase 1-2)
     # DECISION: Online-only PayPal webhooks, complete Square replacement
     # Current PayPal webhook endpoints are basic and only handle order creation/capture.
     # Need to add endpoints for online payment processing:

@@ -1,4 +1,4 @@
-# TODO: PayPal Integration - Update email templates for PayPal payment data (Phase 2)
+# PAYPAL_TODO - Update email templates for PayPal payment data (Phase 2)
 # DECISION: Replace Square payment data with PayPal transaction data
 # Payment-related email templates need updates to handle PayPal online transaction data:
 # 1. Payment receipt emails reference order.apiData structure (replace Square with PayPal)
@@ -44,7 +44,7 @@ def send_registration_email(order, email, send_vip=True):
             oi.badge.event
         )
         if oi.badge.attendee.email == email:
-            # TODO: PayPal Integration - Update payment receipt template data (Phase 2)
+            # PAYPAL_TODO - Update payment receipt template data (Phase 2)
             # DECISION: Replace Square transaction data with PayPal transaction data
             # Payment receipt emails need updates to handle PayPal online transaction data.
             # The order.apiData structure will be different for PayPal vs Square.
@@ -335,7 +335,7 @@ def send_dealer_approval_email(dealerQueryset):
 
 
 def send_chargeback_notice_email(order):
-    # TODO: PayPal Integration - Update dispute notice for PayPal disputes (Phase 2)
+    # PAYPAL_TODO - Update dispute notice for PayPal disputes (Phase 2)
     # DECISION: Replace Square chargeback handling with PayPal dispute processing
     # PayPal disputes have different process and terminology than Square chargebacks.
     # This email template and data need updates for online payment disputes:

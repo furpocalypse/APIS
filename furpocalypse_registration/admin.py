@@ -1486,7 +1486,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                         reason = "[{0}]".format(request.user)
                     else:
                         reason += " [{0}]".format(request.user)
-                    # TODO: Refund payment was removed as part of PayPal transition.  It needs to be re-implemented.
+                    # PAYPAL_TODO: Refund payment was removed as part of PayPal transition.  It needs to be re-implemented.
                     # Critical functionality missing: The refund_payment function in payments.py
                     # is commented out, breaking admin refund capability.
                     # Required implementation:

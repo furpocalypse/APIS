@@ -756,7 +756,7 @@ class Order(models.Model):
         (DISPUTE_LOST, "Dispute Lost"),
         (DISPUTE_ACCEPTED, "Dispute Accepted"),
     )
-    # TODO: PayPal Integration - Update dispute status mapping for PayPal (Phase 2)
+    # PAYPAL_TODO - Update dispute status mapping for PayPal (Phase 2)
     # DECISION: Replace Square dispute handling with PayPal dispute processing
     # PayPal dispute statuses are different from Square. This mapping needs to be
     # updated to handle PayPal dispute lifecycle for online payments:
@@ -828,7 +828,7 @@ class Order(models.Model):
         verbose_name="Billing Type",
     )
     lastFour = models.CharField(max_length=4, blank=True, verbose_name="Last 4")
-    # TODO: PayPal Integration - Update apiData field for PayPal structure (Phase 1-2)
+    # PAYPAL_TODO - Update apiData field for PayPal structure (Phase 1-2)
     # DECISION: Replace Square data structure with PayPal structure
     # This field stores payment processor API response data. PayPal API responses
     # have different structure than Square. Key differences for online payments:
@@ -859,7 +859,7 @@ class Order(models.Model):
 
 
 class PaymentWebhookNotification(models.Model):
-    # TODO: PayPal Integration - Update webhook model for PayPal (Phase 1-2)
+    # PAYPAL_TODO - Update webhook model for PayPal (Phase 1-2)
     # DECISION: Replace Square webhook handling with PayPal webhook processing
     # This model was designed for Square webhooks and needs updates for PayPal:
     # 1. PayPal webhook event structure is different from Square (online payments focus)

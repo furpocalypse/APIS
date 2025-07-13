@@ -7,7 +7,7 @@ from idempotency_key.decorators import idempotency_key
 
 import furpocalypse_registration.emails
 from furpocalypse_registration.models import *
-# TODO: PayPal Integration - Re-enable charge_payment import (Phase 1 - Critical)
+# PAYPAL_TODO - Re-enable charge_payment import (Phase 1 - Critical)
 # DECISION: Online-only PayPal payments, complete Square removal
 # The charge_payment function import is commented out and needs to be re-enabled once
 # charge_payment is implemented for PayPal online order creation flow.
@@ -21,7 +21,7 @@ from . import cart, common
 logger = logging.getLogger(__name__)
 
 
-# TODO: PayPal Integration - Implement PayPal do_checkout function (Phase 1 - Critical)
+# PAYPAL_TODO - Implement PayPal do_checkout function (Phase 1 - Critical)
 # DECISION: Online-only checkout, complete Square removal
 # This critical function was commented out during Square removal and needs to be
 # completely rewritten for PayPal online integration. Key requirements:
