@@ -957,12 +957,12 @@ def print_badges(modeladmin, request, queryset):
             }
         )
 
-        pdf_path = reverse("registration:pdf") + f"?data={data}"
+        pdf_path = reverse("furpocalypse_registration:pdf") + f"?data={data}"
     else:
         pdf_name = generate_badge_labels(queryset, request)
-        pdf_path = reverse("registration:pdf") + f"?file={pdf_name}"
+        pdf_path = reverse("furpocalypse_registration:pdf") + f"?file={pdf_name}"
 
-    response = HttpResponseRedirect(reverse("registration:print"))
+    response = HttpResponseRedirect(reverse("furpocalypse_registration:print"))
     url_params = {"file": pdf_path, "next": request.get_full_path()}
     response["Location"] += "?{}".format(urlencode(url_params))
     return response

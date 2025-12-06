@@ -90,7 +90,7 @@ class StaffTestCase(OrdersTestCase):
 
 class TestFindStaff(TestCase):
     def test_find_staff_empty(self):
-        response = self.client.post(reverse("registration:find_staff"))
+        response = self.client.post(reverse("furpocalypse_registration:find_staff"))
         self.assertEqual(response.status_code, 400)
 
     def test_find_staff_404(self):
@@ -99,7 +99,7 @@ class TestFindStaff(TestCase):
             "token": "bar",
         }
         response = self.client.post(
-            reverse("registration:find_staff"),
+            reverse("furpocalypse_registration:find_staff"),
             json.dumps(body),
             content_type="application/json",
         )
@@ -113,7 +113,7 @@ class TestNewStaff(StaffTestCase):
             "token": self.token.token,
         }
         response = self.client.post(
-            reverse("registration:new_staff", args=(self.token.token,)),
+            reverse("furpocalypse_registration:new_staff", args=(self.token.token,)),
             json.dumps(body),
             content_type="application/json",
         )
@@ -127,7 +127,7 @@ class TestNewStaff(StaffTestCase):
             "token": self.token.token,
         }
         response = self.client.post(
-            reverse("registration:new_staff", args=(self.token.token,)),
+            reverse("furpocalypse_registration:new_staff", args=(self.token.token,)),
             json.dumps(body),
             content_type="application/json",
         )
@@ -141,7 +141,7 @@ class TestNewStaff(StaffTestCase):
             "token": self.token.token,
         }
         response = self.client.post(
-            reverse("registration:new_staff", args=(self.token.token,)),
+            reverse("furpocalypse_registration:new_staff", args=(self.token.token,)),
             json.dumps(body),
             content_type="application/json",
         )
@@ -155,7 +155,7 @@ class TestNewStaff(StaffTestCase):
             "token": self.token_override.token,
         }
         response = self.client.post(
-            reverse("registration:new_staff", args=(self.token_override.token,)),
+            reverse("furpocalypse_registration:new_staff", args=(self.token_override.token,)),
             json.dumps(body),
             content_type="application/json",
         )
@@ -165,7 +165,7 @@ class TestNewStaff(StaffTestCase):
 
 class TestFindNewStaff(StaffTestCase):
     def test_find_new_staff_empty(self):
-        response = self.client.post(reverse("registration:find_new_staff"))
+        response = self.client.post(reverse("furpocalypse_registration:find_new_staff"))
         self.assertEqual(response.status_code, 400)
 
     def test_find_new_staff_404(self):
@@ -174,7 +174,7 @@ class TestFindNewStaff(StaffTestCase):
             "token": "bar",
         }
         response = self.client.post(
-            reverse("registration:find_new_staff"),
+            reverse("furpocalypse_registration:find_new_staff"),
             json.dumps(body),
             content_type="application/json",
         )
@@ -186,7 +186,7 @@ class TestFindNewStaff(StaffTestCase):
             "token": self.token.token,
         }
         response = self.client.post(
-            reverse("registration:find_new_staff"),
+            reverse("furpocalypse_registration:find_new_staff"),
             json.dumps(body),
             content_type="application/json",
         )
@@ -199,7 +199,7 @@ class TestFindNewStaff(StaffTestCase):
             "token": self.token_used.token,
         }
         response = self.client.post(
-            reverse("registration:find_new_staff"),
+            reverse("furpocalypse_registration:find_new_staff"),
             json.dumps(body),
             content_type="application/json",
         )
@@ -212,7 +212,7 @@ class TestFindNewStaff(StaffTestCase):
             "token": self.token_expired.token,
         }
         response = self.client.post(
-            reverse("registration:find_new_staff"),
+            reverse("furpocalypse_registration:find_new_staff"),
             json.dumps(body),
             content_type="application/json",
         )
@@ -222,14 +222,14 @@ class TestFindNewStaff(StaffTestCase):
 
 class TestInfoNewStaff(StaffTestCase):
     def test_info_new_staff_404(self):
-        result = self.client.get(reverse("registration:info_new_staff"))
+        result = self.client.get(reverse("furpocalypse_registration:info_new_staff"))
         self.assertEqual(result.status_code, 404)
 
     def test_info_new_staff(self):
         session = self.client.session
         session["new_staff"] = self.token.token
         session.save()
-        result = self.client.get(reverse("registration:info_new_staff"))
+        result = self.client.get(reverse("furpocalypse_registration:info_new_staff"))
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.context["token"].token, self.token.token)
 
@@ -274,7 +274,7 @@ class TestAddNewStaff(StaffTestCase):
             "event": self.event.name,
         }
         result = self.client.post(
-            reverse("registration:add_new_staff"),
+            reverse("furpocalypse_registration:add_new_staff"),
             json.dumps(body),
             content_type="application/json",
         )
@@ -282,37 +282,37 @@ class TestAddNewStaff(StaffTestCase):
 
 class TestStaffIndex(StaffTestCase):
     def test_staff_index(self):
-        response = self.client.get(reverse("registration:staff", args=("foo",)))
+        response = self.client.get(reverse("furpocalypse_registration:staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"not yet open", response.content)
 
     @freeze_time(timezone.now() - timedelta(days=20))
     def test_staff_index_closed_upcoming(self):
-        response = self.client.get(reverse("registration:staff", args=("foo",)))
+        response = self.client.get(reverse("furpocalypse_registration:staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"not yet open", response.content)
 
     @freeze_time(timezone.now() + timedelta(days=20))
     def test_staff_index_closed_ended(self):
-        response = self.client.get(reverse("registration:staff", args=("foo",)))
+        response = self.client.get(reverse("furpocalypse_registration:staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"has ended", response.content)
 
     def test_staff_done(self):
-        response = self.client.get(reverse("registration:staff_done"))
+        response = self.client.get(reverse("furpocalypse_registration:staff_done"))
         self.assertEqual(response.status_code, 200)
 
 
 class TestInfoStaff(StaffTestCase):
     def test_info_staff_blank(self):
-        result = self.client.get(reverse("registration:info_staff"))
+        result = self.client.get(reverse("furpocalypse_registration:info_staff"))
         self.assertEqual(result.status_code, 200)
 
     def test_info_staff(self):
         session = self.client.session
         session["staff_id"] = self.staff.id
         session.save()
-        result = self.client.get(reverse("registration:info_staff"))
+        result = self.client.get(reverse("furpocalypse_registration:info_staff"))
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.context["staff"], self.staff)
         self.assertEqual(result.context["paid_total"], 0)
@@ -327,7 +327,7 @@ class TestAddStaff(StaffTestCase):
             "token": self.staff.registrationToken,
         }
         response = self.client.post(
-            reverse("registration:find_staff"),
+            reverse("furpocalypse_registration:find_staff"),
             json.dumps(postData),
             content_type="application/json",
         )
@@ -340,7 +340,7 @@ class TestAddStaff(StaffTestCase):
         # Regular staff reg
         postData = {"email": self.attendee.email, "token": self.staff.registrationToken}
         response = self.client.post(
-            reverse("registration:find_staff"),
+            reverse("furpocalypse_registration:find_staff"),
             json.dumps(postData),
             content_type="application/json",
         )
@@ -389,12 +389,12 @@ class TestAddStaff(StaffTestCase):
             "event": self.event.name,
         }
         response = self.client.post(
-            reverse("registration:add_staff"),
+            reverse("furpocalypse_registration:add_staff"),
             json.dumps(postData),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
-        response = self.client.get(reverse("registration:cart"))
+        response = self.client.get(reverse("furpocalypse_registration:cart"))
         self.assertEqual(response.status_code, 200)
         cart = response.context["orderItems"]
         self.assertEqual(len(cart), 1)
@@ -417,7 +417,7 @@ class TestAddStaff(StaffTestCase):
         self.assertEqual(order.charityDonation, 0)
         self.assertEqual(order.discount.used, discountUsed + 1)
 
-        response = self.client.get(reverse("registration:flush"))
+        response = self.client.get(reverse("furpocalypse_registration:flush"))
         self.assertEqual(response.status_code, 200)
 
         # Staff zero-sum
@@ -426,7 +426,7 @@ class TestAddStaff(StaffTestCase):
             "token": self.staff2.registrationToken,
         }
         response = self.client.post(
-            reverse("registration:find_staff"),
+            reverse("furpocalypse_registration:find_staff"),
             json.dumps(postData),
             content_type="application/json",
         )
@@ -475,13 +475,13 @@ class TestAddStaff(StaffTestCase):
             "event": self.event.name,
         }
         response = self.client.post(
-            reverse("registration:add_staff"),
+            reverse("furpocalypse_registration:add_staff"),
             json.dumps(postData),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
 
-        response = self.client.get(reverse("registration:cart"))
+        response = self.client.get(reverse("furpocalypse_registration:cart"))
         self.assertEqual(response.status_code, 200)
         cart = response.context["orderItems"]
         self.assertEqual(len(cart), 1)
@@ -502,7 +502,7 @@ class TestAddStaff(StaffTestCase):
         self.assertEqual(order.total, 0)
         self.assertEqual(order.discount.used, discountUsed + 1)
 
-        response = self.client.get(reverse("registration:flush"))
+        response = self.client.get(reverse("furpocalypse_registration:flush"))
         self.assertEqual(response.status_code, 200)
 
 

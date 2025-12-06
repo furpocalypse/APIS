@@ -7,7 +7,7 @@
       <h3>Thank you for your registering!</h3>
       <hr>
       <p>Please wait for the next available cashier to pay and pick up your badge.</p>
-      <a href="{% url 'registration:onsite' %}"><h3>Start a new registration</h3></a>
+      <a href="{% url 'furpocalypse_registration:onsite' %}"><h3>Start a new registration</h3></a>
     </div>
   </div>
 {% endblock %}
@@ -15,7 +15,7 @@
 {% block javascript %}
   <script type="text/javascript">
       setTimeout(function () {
-          window.location = "{% url 'registration:onsite' %}";
+          window.location = "{% url 'furpocalypse_registration:onsite' %}";
       }, 5000);
   </script>
 

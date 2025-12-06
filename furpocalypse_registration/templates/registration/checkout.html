@@ -220,19 +220,20 @@
                 </div>
                 <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
               </div>
-              <div class="form-group">
+              <!-- <div class="form-group">
                 <label for="city" class="col-sm-3 control-label">City/State<span style="color:red;">*</span></label>
                 <div class="col-sm-4">
                   <input type="text" name="city" id="city" placeholder="City" class="form-control validate" required
                          data-error="City is required."/>
                 </div>
                 <div class="col-sm-5">
-                  <select class="form-control bfh-states" id="state" data-country="country" data-state="VA"
-                          name="state"></select>
+                  <input type="text" id="text" placeholder="state">state</input>
+                  <input type="text" class="form-control validate" id="state-text" placeholder="State/Province" 
+                         name="state" required data-error="State is required." />
                 </div>
 
                 <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
-              </div>
+              </div> -->
               <div class="form-group">
                 <label for="country" class="col-sm-3 control-label">Country<span style="color:red;">*</span></label>
                 <div class="col-sm-9">
@@ -243,13 +244,7 @@
               <hr/>
             {% endif %}
 
-            <!--Squarespace payment-->
-            <!--<div>
-              <form id="payment-form">
-                <div id="card-container"></div>
-              </form>
-              <div id="payment-status-container"></div>
-            </div>-->
+
             <!--Paypal payment-->
             <div id="paypal-button-container"></div>
             <p id="result-message"></p>
@@ -264,14 +259,6 @@
 
           </form>
         </div>
-      {% else %}
-
-        {% csrf_token %}
-        <div class="container-fluid">
-          <div class="row">
-            <button class="btn btn-primary col-sm-3 col-sm-offset-9 col-xs-12" id="checkout">Checkout</button>
-          </div>
-        </div>
 
       {% endif %}
 
@@ -282,7 +269,7 @@
         <h1>Checkout</h1>
         <h3>There are no attendees in your order</h3>
         <hr>
-        <a class="btn btn-primary" href="{% url 'registration:index' %}">Add Attendee</a>
+        <a class="btn btn-primary" href="{% url 'furpocalypse_registration:index' %}">Add Attendee</a>
 
 
       </div>
@@ -294,15 +281,10 @@
 
 {% block javascript %}
   {% if total > 0 %}
-    <script src="https://www.paypal.com/sdk/js?client-id=AV1NSG_rl1uXazYS7aFAMFkN54cPLKqNC0VvlOieZaUg--BB3JqtFhts4TtJuQO-RQ5hwhKXj-E08-ly&buyer-country=US&currency=USD&components=buttons&enable-funding=venmo,paylater,card" data-sdk-integration-source="developer-studio">
+    
+    <script src="https://www.paypal.com/sdk/js?client-id={{ settings.PAYPAL_CLIENT_ID }}&buyer-country=US&currency=USD&components=buttons&enable-funding=venmo,paylater,card" data-sdk-integration-source="developer-studio">
     </script>
 
-    <script src="app.js"></script>
-    {% if SQUARE_ENVIRONMENT == "sandbox" %}
-      <script type="text/javascript" src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
-    {% else %}
-      <script type="text/javascript" src="https://web.squarecdn.com/v1/square.js"></script>
-    {% endif %}
   {% endif %}
   <script type="text/javascript">
       /* Square & Payments constants */
@@ -310,13 +292,13 @@
       //const LOCATION_ID = "{% settings_value 'SQUARE_LOCATION_ID' %}";
 
       /* APIS URLs */
-      const URL_REGISTRATION_CHECKOUT = "{% url 'registration:checkout' %}";
-      const URL_REGISTRATION_INDEX = "{% url 'registration:index' %}";
-      const URL_REGISTRATION_DONE = "{% url 'registration:done' %}";
-      const URL_REGISTRATION_DISCOUNT = "{% url 'registration:discount' %}";
-      const URL_REGISTRATION_ADDRESSES = "{% url 'registration:addresses' %}";
-      const URL_REGISTRATION_REMOVE_FROM_CART = "{% url 'registration:remove_from_cart' %}";
-      const URL_REGISTRATION_CANCEL_ORDER = "{% url 'registration:cancel_order' %}";
+      const URL_REGISTRATION_CHECKOUT = "{% url 'furpocalypse_registration:checkout' %}";
+      const URL_REGISTRATION_INDEX = "{% url 'furpocalypse_registration:index' %}";
+      const URL_REGISTRATION_DONE = "{% url 'furpocalypse_registration:done' %}";
+      const URL_REGISTRATION_DISCOUNT = "{% url 'furpocalypse_registration:discount' %}";
+      const URL_REGISTRATION_ADDRESSES = "{% url 'furpocalypse_registration:addresses' %}";
+      const URL_REGISTRATION_REMOVE_FROM_CART = "{% url 'furpocalypse_registration:remove_from_cart' %}";
+      const URL_REGISTRATION_CANCEL_ORDER = "{% url 'furpocalypse_registration:cancel_order' %}";
 
       /* Application data */
       let cart_total = {{ total|default:0 }};
@@ -349,7 +331,7 @@
                     );
                 }
             } catch (e) {
-                alert(`Sorry, an error occurred while submitting your registration:\n\n${e}`);
+                alert(`Sorry, an error occurred while submitting your furpocalypse_registration:\n\n${e}`);
             }
 
             checkoutButton.disabled = false;

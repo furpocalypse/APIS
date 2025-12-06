@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='event',
             name='onsiteRegStart',
-            field=models.DateTimeField(help_text='Start time for /registration/onsite form', verbose_name='On-Site Registration Start'),
+            field=models.DateTimeField(help_text='Start time for /furpocalypse_registration/onsite form', verbose_name='On-Site Registration Start'),
         ),
         migrations.AlterField(
             model_name='event',

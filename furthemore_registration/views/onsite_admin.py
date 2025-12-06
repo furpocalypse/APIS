@@ -143,7 +143,7 @@ def onsite_admin_search(request):
     terminals = list(Firebase.objects.all())
     query = request.POST.get("search", None)
     if query is None:
-        return redirect("registration:onsite_admin")
+        return redirect("furpocalypse_registration:onsite_admin")
 
     errors = []
     results = Badge.objects.filter(
@@ -356,18 +356,18 @@ def onsite_print_badges(request):
             }
         )
 
-        pdf_path = reverse("registration:pdf") + f"?data={data}"
+        pdf_path = reverse("furpocalypse_registration:pdf") + f"?data={data}"
     else:
         queryset = Badge.objects.filter(id__in=badge_list)
         pdf_name = admin.generate_badge_labels(queryset, request)
 
-        pdf_path = reverse("registration:pdf") + f"?file={pdf_name}"
+        pdf_path = reverse("furpocalypse_registration:pdf") + f"?file={pdf_name}"
 
         # Async notify the frontend to refresh the cart
         logger.info("Refreshing admin cart")
         admin_push_cart_refresh(request)
 
-    print_url = reverse("registration:print") + "?" + urlencode({"file": pdf_path})
+    print_url = reverse("furpocalypse_registration:print") + "?" + urlencode({"file": pdf_path})
 
     return JsonResponse(
         {

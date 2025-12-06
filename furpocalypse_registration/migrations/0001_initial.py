@@ -286,7 +286,7 @@ class Migration(migrations.Migration):
                 ('staffRegEnd', models.DateTimeField(verbose_name='Staff Registration End')),
                 ('attendeeRegStart', models.DateTimeField(verbose_name='Online Attendee Registration Start')),
                 ('attendeeRegEnd', models.DateTimeField(verbose_name='Online Attendee Registration End')),
-                ('onsiteRegStart', models.DateTimeField(help_text='Start time for /registration/onsite form', verbose_name='On-Site Registration Start')),
+                ('onsiteRegStart', models.DateTimeField(help_text='Start time for /furpocalypse_registration/onsite form', verbose_name='On-Site Registration Start')),
                 ('onsiteRegEnd', models.DateTimeField(verbose_name='On-Site Registration End')),
                 ('eventStart', models.DateField(verbose_name='Event Start Date')),
                 ('eventEnd', models.DateField(verbose_name='Event End Date')),

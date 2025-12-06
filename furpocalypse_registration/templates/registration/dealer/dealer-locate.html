@@ -88,7 +88,7 @@
           $.ajax({
               "type": "POST",
               "dataType": "json",
-              "url": "{% url 'registration:find_dealer' %}",
+              "url": "{% url 'furpocalypse_registration:find_dealer' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -102,7 +102,7 @@
                   }
               },
               "success": function () {
-                  window.location = "{% url 'registration:info_dealer' %}";
+                  window.location = "{% url 'furpocalypse_registration:info_dealer' %}";
               }
           });
       }

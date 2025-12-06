@@ -116,7 +116,7 @@
         <h1>Checkout</h1>
         <h3>There are no attendees in your order</h3>
         <hr>
-        <a class="btn btn-primary" href="{% url 'registration:onsite' %}">Add Attendee</a>
+        <a class="btn btn-primary" href="{% url 'furpocalypse_registration:onsite' %}">Add Attendee</a>
 
 
       </div>
@@ -151,7 +151,7 @@
               "type": "POST",
               "dataType": "json",
               "contentType": "application/json; charset=utf-8",
-              "url": "{% url 'registration:checkout' %}",
+              "url": "{% url 'furpocalypse_registration:checkout' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -163,7 +163,7 @@
               },
               "success": function (result, status) {
                   if (result.success) {
-                      window.location = "{% url 'registration:onsite_done' %}";
+                      window.location = "{% url 'furpocalypse_registration:onsite_done' %}";
                   } else {
                       alert("An error has occurred: " + result.message + " If this error continues, please contact {{event.registrationEmail}} for assistance.");
                       $("#checkout").one('click', checkout_click).removeAttr("disabled");
@@ -187,7 +187,7 @@
                   "type": "POST",
                   "dataType": "json",
                   "contentType": "application/json; charset=utf-8",
-                  "url": "{% url 'registration:remove_from_cart' %}",
+                  "url": "{% url 'furpocalypse_registration:remove_from_cart' %}",
                   "data": JSON.stringify(data),
                   "beforeSend": function (xhr, settings) {
                       console.log("Before Send");
@@ -207,7 +207,7 @@
           });
 
           $("#addAnother").click(function () {
-              window.location = "{% url 'registration:onsite' %}";
+              window.location = "{% url 'furpocalypse_registration:onsite' %}";
           });
 
           $("#cancel").click(function () {
@@ -216,8 +216,8 @@
                   return;
               }
 
-              $.getJSON("{% url 'registration:cancel_order' %}", function (data) {
-                  window.location = "{% url 'registration:onsite' %}";
+              $.getJSON("{% url 'furpocalypse_registration:cancel_order' %}", function (data) {
+                  window.location = "{% url 'furpocalypse_registration:onsite' %}";
               });
           });
       });

@@ -201,7 +201,7 @@ class Event(LookupTable):
     )
     onsiteRegStart = models.DateTimeField(
         "On-Site Registration Start",
-        help_text="Start time for /registration/onsite form",
+        help_text="Start time for /furpocalypse_registration/onsite form",
     )
     onsiteRegEnd = models.DateTimeField(verbose_name="On-Site Registration End")
     eventStart = models.DateField(verbose_name="Event Start Date")

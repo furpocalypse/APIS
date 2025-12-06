@@ -73,7 +73,7 @@ class TestRegistrationPrinting(TestCase):
         self.assertTrue(self.client.login(username="admin", password="admin"))
 
         response = self.client.get(
-            reverse("registration:onsite_print_badges") + f"?id={self.badge.pk}"
+            reverse("furpocalypse_registration:onsite_print_badges") + f"?id={self.badge.pk}"
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()

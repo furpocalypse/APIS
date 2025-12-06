@@ -206,7 +206,7 @@ def index(request):
         if discount.count() > 0:
             discount = discount.first()
 
-    template_path_prefix = event.htmlTemplatePath + "/registration/"
+    template_path_prefix = event.htmlTemplatePath + "/furpocalypse_registration/"
     context = {"event": event, "discount": discount}
     if event.attendeeRegStart <= today <= event.attendeeRegEnd:
         return render(request, template_path_prefix + "registration-form.html", context)

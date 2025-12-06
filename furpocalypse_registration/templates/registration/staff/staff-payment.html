@@ -152,7 +152,7 @@
           $.ajax({
               "type": "POST",
               "dataType": "json",
-              "url": "{% url 'registration:add_staff' %}",
+              "url": "{% url 'furpocalypse_registration:add_staff' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -168,7 +168,7 @@
               },
               "success": function (result, status) {
                   if (result.success) {
-                      window.location = "{% url 'registration:cart' %}";
+                      window.location = "{% url 'furpocalypse_registration:cart' %}";
                   } else {
                       alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.registrationEmail }} for assistance.")
                   }

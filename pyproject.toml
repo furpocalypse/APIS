@@ -41,6 +41,7 @@ paho-mqtt = "^2.1.0"
 psycopg = "^3.2.3"
 cups = "^0.0.6"
 paypal-server-sdk = "^1.1.0"
+djlint = "^1.36.4"
 
 
 [build-system]

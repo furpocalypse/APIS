@@ -162,7 +162,7 @@
 
       $(document).ready(function () {
           $("body").ready(function () {
-              $.getJSON("{% url 'registration:pricelevels' %}", function (data) {
+              $.getJSON("{% url 'furpocalypse_registration:pricelevels' %}", function (data) {
                   levelData = data;
                   var prevLevel = 50;
                   if (currentLevel && currentLevel.hasOwnProperty("basePrice")) {
@@ -185,7 +185,7 @@
                   }
 
               });
-              $.getJSON("{% url 'registration:shirtsizes' %}", function (data) {
+              $.getJSON("{% url 'furpocalypse_registration:shirtsizes' %}", function (data) {
                   shirtSizes = data;
                   if (levelTemplateData.length > 0) {
                       $(".selectLevel")[0].click();
@@ -373,7 +373,7 @@
               "type": "POST",
               "dataType": "json",
               "contentType": "application/json; charset=utf-8",
-              "url": "{% url 'registration:add_upgrade' %}",
+              "url": "{% url 'furpocalypse_registration:add_upgrade' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -389,7 +389,7 @@
               },
               "success": function (result, status) {
                   if (result.success) {
-                      window.location = "{% url 'registration:invoice_upgrade' %}";
+                      window.location = "{% url 'furpocalypse_registration:invoice_upgrade' %}";
                   } else {
                       $("#checkout").removeAttr("disabled").one('click', doRegister);
                       alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{ event.registrationEmail }} for assistance.");

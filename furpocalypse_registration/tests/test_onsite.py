@@ -91,7 +91,7 @@ class OnsiteBaseTestCase(TestCase):
         }
 
         response = self.client.post(
-            reverse("registration:add_to_cart"),
+            reverse("furpocalypse_registration:add_to_cart"),
             json.dumps(form_data),
             content_type="application/json",
         )
@@ -107,7 +107,7 @@ class OnsiteBaseTestCase(TestCase):
         }
 
         response = self.client.post(
-            reverse("registration:checkout"),
+            reverse("furpocalypse_registration:checkout"),
             json.dumps(post_data),
             content_type="application/json",
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
@@ -123,7 +123,7 @@ class TestOnsiteCart(OnsiteBaseTestCase):
     def test_onsite_open(self):
         self.event.onsiteRegStart = now - one_day
         self.event.save()
-        response = self.client.get(reverse("registration:onsite"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["event"], self.event)
         self.assertIn(b"Onsite Registration", response.content)
@@ -131,7 +131,7 @@ class TestOnsiteCart(OnsiteBaseTestCase):
     def test_onsite_closed_upcoming(self):
         self.event.onsiteRegStart = now + one_day
         self.event.save()
-        response = self.client.get(reverse("registration:onsite"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["event"], self.event)
         self.assertIn(b"not yet open", response.content)
@@ -139,7 +139,7 @@ class TestOnsiteCart(OnsiteBaseTestCase):
     def test_onsite_closed_ended(self):
         self.event.onsiteRegEnd = now - one_day
         self.event.save()
-        response = self.client.get(reverse("registration:onsite"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["event"], self.event)
         self.assertIn(b"has ended", response.content)
@@ -151,7 +151,7 @@ class TestOnsiteCart(OnsiteBaseTestCase):
         ]
         self.add_to_cart(self.price_45, options)
 
-        response = self.client.get(reverse("registration:onsite_cart"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite_cart"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.event, response.context["event"])
         self.assertEqual(
@@ -172,23 +172,23 @@ class TestOnsiteCart(OnsiteBaseTestCase):
         pass
 
     def test_onsite_done(self):
-        response = self.client.get(reverse("registration:onsite_done"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite_done"))
         self.assertEqual(response.status_code, 200)
 
 
 class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_login_required(self):
         self.client.logout()
-        response = self.client.get(reverse("registration:onsite_admin"), follow=True)
+        response = self.client.get(reverse("furpocalypse_registration:onsite_admin"), follow=True)
         self.assertRedirects(
             response,
-            "/admin/login/?next={0}".format(reverse("registration:onsite_admin")),
+            "/admin/login/?next={0}".format(reverse("furpocalypse_registration:onsite_admin")),
         )
 
     def test_onsite_admin_required(self):
         self.client.logout()
         self.assertTrue(self.client.login(username="john", password="john"))
-        response = self.client.get(reverse("registration:onsite_admin"), follow=True)
+        response = self.client.get(reverse("furpocalypse_registration:onsite_admin"), follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "are not authorized to access this page")
         self.client.logout()
@@ -197,13 +197,13 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_admin(self, mock_sendPushNotification):
         self.client.logout()
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(reverse("registration:onsite_admin"), follow=True)
+        response = self.client.get(reverse("furpocalypse_registration:onsite_admin"), follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.context["errors"]), 0)
         self.assertEqual(len(response.context["terminals"]), 1)
 
         self.terminal.delete()
-        response = self.client.get(reverse("registration:onsite_admin"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite_admin"))
         self.assertEqual(response.status_code, 200)
         errors = [e["code"] for e in response.context["errors"]]
         self.assertTrue("ERROR_NO_TERMINAL" in errors)
@@ -211,20 +211,20 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.terminal = Firebase(token="test", name="Terminal 1")
         self.terminal.save()
         response = self.client.get(
-            reverse("registration:onsite_admin"), {"search": "doesntexist"}
+            reverse("furpocalypse_registration:onsite_admin"), {"search": "doesntexist"}
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue("results" in list(response.context.keys()))
         self.assertEqual(len(response.context["results"]), 0)
 
         response = self.client.get(
-            reverse("registration:onsite_admin"),
+            reverse("furpocalypse_registration:onsite_admin"),
             {"search": "Christian", "terminal": "1000"},
         )
         self.assertEqual(response.status_code, 200)
 
         response = self.client.get(
-            reverse("registration:onsite_admin"),
+            reverse("furpocalypse_registration:onsite_admin"),
             {"search": "Christian", "terminal": "notastring"},
         )
         self.assertEqual(response.status_code, 200)
@@ -237,7 +237,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(reverse("registration:onsite_admin_cart"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite_admin_cart"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertFalse(message["success"])
@@ -246,14 +246,14 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_admin_search_no_query(self):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.post(
-            reverse("registration:onsite_admin_search"),
+            reverse("furpocalypse_registration:onsite_admin_search"),
         )
         self.assertEqual(response.status_code, 302)
 
     def test_onsite_admin_search_no_result(self):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.post(
-            reverse("registration:onsite_admin_search"),
+            reverse("furpocalypse_registration:onsite_admin_search"),
             {"search": "Somethingthatcantpossiblyexistyet"},
         )
         expected_errors = [
@@ -282,7 +282,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
         # Do search
         response = self.client.post(
-            reverse("registration:onsite_admin_search"),
+            reverse("furpocalypse_registration:onsite_admin_search"),
             {"search": "Christian"},
         )
         self.assertEqual(response.status_code, 200)
@@ -291,7 +291,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         attendee.save()
 
         response = self.client.get(
-            reverse("registration:onsite_admin"),
+            reverse("furpocalypse_registration:onsite_admin"),
             {"search": "Christian", "terminal": self.terminal.id},
         )
         self.assertEqual(response.status_code, 200)
@@ -300,13 +300,13 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         badge_id = response.context["results"][0].id
 
         response = self.client.get(
-            reverse("registration:onsite_add_to_cart"),
+            reverse("furpocalypse_registration:onsite_add_to_cart"),
             {"id": badge_id},
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.session["cart"], [str(badge_id)])
 
-        response = self.client.get(reverse("registration:onsite_admin_cart"))
+        response = self.client.get(reverse("furpocalypse_registration:onsite_admin_cart"))
         message = response.json()
 
         self.assertEqual(message["result"][0]["holdType"], self.boogeyman_hold.name)
@@ -330,7 +330,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self, mock_send_mqtt_message, mock_send_push_notification
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(reverse("registration:close_terminal"))
+        response = self.client.get(reverse("furpocalypse_registration:close_terminal"))
         self.assertEqual(response.status_code, 400)
         mock_send_push_notification.assert_not_called()
         mock_send_mqtt_message.assert_not_called()
@@ -342,7 +342,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:close_terminal"),
+            reverse("furpocalypse_registration:close_terminal"),
             {"terminal": self.terminal.id},
         )
         self.assertEqual(response.status_code, 200)
@@ -356,7 +356,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
+            reverse("furpocalypse_registration:open_terminal"),
             {"terminal": self.terminal.id},
         )
 
@@ -368,7 +368,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_invalid_terminal(self, mock_sendPushNotification):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
+            reverse("furpocalypse_registration:open_terminal"),
             {"terminal": "notanint"},
         )
 
@@ -385,7 +385,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
+            reverse("furpocalypse_registration:open_terminal"),
             {"terminal": 1000},
         )
 
@@ -406,7 +406,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     ):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:open_terminal"),
+            reverse("furpocalypse_registration:open_terminal"),
         )
 
         message = response.json()
@@ -422,14 +422,14 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_enabled_terminal(self, mock_send_push_notification):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(
-            reverse("registration:enable_payment"),
+            reverse("furpocalypse_registration:enable_payment"),
             {"terminal": self.terminal.id},
         )
         self.assertEqual(response.status_code, 200)
 
     def test_firebase_register_bad_key(self):
         response = self.client.get(
-            reverse("registration:firebase_register"),
+            reverse("furpocalypse_registration:firebase_register"),
             {
                 "key": "garbedygook",
                 "token": str(uuid.uuid4()),
@@ -444,7 +444,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
     def test_firebase_register_bad_request(self):
         response = self.client.get(
-            reverse("registration:firebase_register"),
+            reverse("furpocalypse_registration:firebase_register"),
             {"key": settings.REGISTER_KEY},
         )
         message = response.json()
@@ -455,7 +455,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
     def test_firebase_register_new_token(self):
         response = self.client.get(
-            reverse("registration:firebase_register"),
+            reverse("furpocalypse_registration:firebase_register"),
             {
                 "key": settings.REGISTER_KEY,
                 "token": str(uuid.uuid4()),
@@ -471,7 +471,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_firebase_register_update_token(self):
         new_token = str(uuid.uuid4())
         response = self.client.get(
-            reverse("registration:firebase_register"),
+            reverse("furpocalypse_registration:firebase_register"),
             {
                 "key": settings.REGISTER_KEY,
                 "token": new_token,
@@ -499,7 +499,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             "tendered": order.total,
         }
         response = self.client.get(
-            reverse("registration:complete_cash_transaction"), args
+            reverse("furpocalypse_registration:complete_cash_transaction"), args
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()
@@ -525,7 +525,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             "clientTransactionId": "JUNK",
         }
         response = self.client.get(
-            reverse("registration:complete_square_transaction"), args
+            reverse("furpocalypse_registration:complete_square_transaction"), args
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()
@@ -539,10 +539,10 @@ class TestDrawers(OnsiteBaseTestCase):
     def setUp(self):
         super().setUp()
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        self.client.get(reverse("registration:onsite_admin"))
+        self.client.get(reverse("furpocalypse_registration:onsite_admin"))
 
     def test_drawerStatusClosed_no_transactions(self):
-        response = self.client.get(reverse("registration:drawer_status"))
+        response = self.client.get(reverse("furpocalypse_registration:drawer_status"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertFalse(message["success"])
@@ -550,7 +550,7 @@ class TestDrawers(OnsiteBaseTestCase):
     def test_drawerStatusClosed(self):
         Cashdrawer(total=100, action=Cashdrawer.OPEN).save()
         Cashdrawer(total=-100, action=Cashdrawer.CLOSE).save()
-        response = self.client.get(reverse("registration:drawer_status"))
+        response = self.client.get(reverse("furpocalypse_registration:drawer_status"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -559,7 +559,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     def test_drawerStatusOpen(self):
         Cashdrawer(total=100, action=Cashdrawer.OPEN).save()
-        response = self.client.get(reverse("registration:drawer_status"))
+        response = self.client.get(reverse("furpocalypse_registration:drawer_status"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -569,7 +569,7 @@ class TestDrawers(OnsiteBaseTestCase):
     def test_drawerStatusShort(self):
         Cashdrawer(total=100, action=Cashdrawer.OPEN).save()
         Cashdrawer(total=-120, action=Cashdrawer.CLOSE).save()
-        response = self.client.get(reverse("registration:drawer_status"))
+        response = self.client.get(reverse("furpocalypse_registration:drawer_status"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -579,7 +579,7 @@ class TestDrawers(OnsiteBaseTestCase):
     @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_open_drawer(self, mock_send_mqtt_message):
         response = self.client.post(
-            reverse("registration:open_drawer"), {"amount": "200"}
+            reverse("furpocalypse_registration:open_drawer"), {"amount": "200"}
         )
         message = response.json()
         self.assertEqual(response.status_code, 200)
@@ -592,7 +592,7 @@ class TestDrawers(OnsiteBaseTestCase):
     @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_cash_deposit(self, mock_send_mqtt_message):
         response = self.client.post(
-            reverse("registration:cash_deposit"), {"amount": "200"}
+            reverse("furpocalypse_registration:cash_deposit"), {"amount": "200"}
         )
         message = response.json()
         self.assertEqual(response.status_code, 200)
@@ -605,7 +605,7 @@ class TestDrawers(OnsiteBaseTestCase):
     @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_safe_drop(self, mock_send_mqtt_message):
         response = self.client.post(
-            reverse("registration:safe_drop"), {"amount": "200"}
+            reverse("furpocalypse_registration:safe_drop"), {"amount": "200"}
         )
         message = response.json()
         self.assertEqual(response.status_code, 200)
@@ -618,7 +618,7 @@ class TestDrawers(OnsiteBaseTestCase):
     @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_cash_pickup(self, mock_send_mqtt_message):
         response = self.client.post(
-            reverse("registration:cash_pickup"), {"amount": "200"}
+            reverse("furpocalypse_registration:cash_pickup"), {"amount": "200"}
         )
         message = response.json()
         self.assertEqual(response.status_code, 200)
@@ -631,7 +631,7 @@ class TestDrawers(OnsiteBaseTestCase):
     @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_close_drawer(self, mock_send_mqtt_message):
         response = self.client.post(
-            reverse("registration:close_drawer"), {"amount": "200"}
+            reverse("furpocalypse_registration:close_drawer"), {"amount": "200"}
         )
         message = response.json()
         self.assertEqual(response.status_code, 200)
@@ -643,7 +643,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("furpocalypse_registration.views.onsite_admin.send_mqtt_message")
     def test_no_sale(self, mock_send_mqtt_message):
-        response = self.client.post(reverse("registration:no_sale"))
+        response = self.client.post(reverse("furpocalypse_registration:no_sale"))
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])

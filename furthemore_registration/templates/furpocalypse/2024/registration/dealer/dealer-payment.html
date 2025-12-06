@@ -378,7 +378,7 @@
           $.ajax({
               "type": "POST",
               "dataType": "json",
-              "url": "{% url 'registration:add_dealer' %}",
+              "url": "{% url 'furpocalypse_registration:add_dealer' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -394,7 +394,7 @@
               },
               "success": function (result, status) {
                   if (result.success) {
-                      window.location = "{% url 'registration:invoice_dealer' %}";
+                      window.location = "{% url 'furpocalypse_registration:invoice_dealer' %}";
                   } else {
                       $("#checkout").removeAttr("disabled");
                       alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{event.dealerEmail}} for assistence.");

@@ -26,7 +26,7 @@
           python3Full
           (poetry.override { python3 = python; })
           direnv
-          gcc-unwrapped
+          gcc14
           stdenv
           wkhtmltopdf
           postgresql
@@ -37,7 +37,7 @@
 
         # Getting the library paths needed for Python to be put into
         # LD_LIBRARY_PATH
-        pythonldlibpath = "${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.stdenv.cc.cc.lib.outPath}/lib:${pkgs.lib.makeLibraryPath packages}";
+        pythonldlibpath = "${pkgs.gcc14.cc.lib}/lib:${pkgs.gcc14.cc.lib.outPath}/lib:${pkgs.lib.makeLibraryPath packages}";
 
         # Run the following on the shell, which builds up LD_LIBRARY_PATH.
         shellHook = ''

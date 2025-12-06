@@ -1,0 +1,10 @@
+{% include "common/contact/primary_physical_address.html" with class_name="physical-address"  %}
+<input type="checkbox" id="billing-address-is-same-as-physical-address">Is your billing address the same as your physical address?
+<script>
+    chkBox = document.getElementById("billing-address-is-same-as-physical-address");
+    
+    chkBox.addEventListener('click', function (){
+        document.querySelectorAll(".billing-address").forEach(function(item){ item.hidden = Boolean(chkBox.checked); });
+    });
+</script>
+{% include "common/contact/primary_physical_address.html" with class_name="billing-address"  %}

@@ -38,7 +38,7 @@ class TestSquareRefundWebhooks(TestCase):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE=self.SHA256_SIGNATURE,
@@ -56,7 +56,7 @@ class TestSquareRefundWebhooks(TestCase):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE="iGNztY3PcgdIv2MD86jZ7oOpcSk5FnyLdPnmn2MRx64=",
@@ -75,7 +75,7 @@ class TestSquareRefundWebhooks(TestCase):
         mock_is_valid_webhook_event_signature.return_value = True
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             '{"foo',
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE=self.SHA256_SIGNATURE,
@@ -95,7 +95,7 @@ class TestSquareRefundWebhooks(TestCase):
         mock_is_valid_webhook_event_signature.return_value = True
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             '{"foo":"bar"}',
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE=self.SHA256_SIGNATURE,
@@ -116,7 +116,7 @@ class TestSquareRefundWebhooks(TestCase):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE=self.SHA256_SIGNATURE,
@@ -258,7 +258,7 @@ class TestSquareDisputeWebhookCreate(TestCase):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE=self.SHA256_SIGNATURE,
@@ -292,7 +292,7 @@ class TestSquareDisputeWebhookCreate(TestCase):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
 
         response = self.client.post(
-            reverse("registration:square_webhook"),
+            reverse("furpocalypse_registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
             HTTP_X_SQUARE_HMACSHA256_SIGNATURE=self.SHA256_SIGNATURE,

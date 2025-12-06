@@ -204,7 +204,7 @@
                   changeYear: true
               });
           }
-          $.getJSON("{% url 'registration:pricelevels' %}", function (data) {
+          $.getJSON("{% url 'furpocalypse_registration:pricelevels' %}", function (data) {
               levelData = data;
               $.each(data, function (key, val) {
                   levelTemplateData.push({
@@ -218,7 +218,7 @@
               $(".changeLevel").hide();
 
           });
-          $.getJSON("{% url 'registration:minorpricelevels' %}", function (data) {
+          $.getJSON("{% url 'furpocalypse_registration:minorpricelevels' %}", function (data) {
               minorLevelData = data;
               $.each(data, function (key, val) {
                   minorLevelTemplateData.push({
@@ -230,7 +230,7 @@
               });
 
           });
-          $.getJSON("{% url 'registration:accompaniedpricelevels' %}", function (data) {
+          $.getJSON("{% url 'furpocalypse_registration:accompaniedpricelevels' %}", function (data) {
               accompaniedLevelData = data;
               $.each(data, function (key, val) {
                   accompaniedLevelTemplateData.push({
@@ -242,7 +242,7 @@
               });
 
           });
-          $.getJSON("{% url 'registration:freepricelevels' %}", function (data) {
+          $.getJSON("{% url 'furpocalypse_registration:freepricelevels' %}", function (data) {
               freeLevelData = data;
               $.each(data, function (key, val) {
                   freeLevelTemplateData.push({
@@ -254,13 +254,13 @@
               });
 
           });
-          $.getJSON("{% url 'registration:departments' %}", function (data) {
+          $.getJSON("{% url 'furpocalypse_registration:departments' %}", function (data) {
               deptData = data;
               $.each(data, function (key, val) {
                   $("#volunteer").append("<option value='" + val.id + "'>" + val.name + "</option>");
               });
           });
-          $.getJSON("{% url 'registration:shirtsizes' %}", function (data) {
+          $.getJSON("{% url 'furpocalypse_registration:shirtsizes' %}", function (data) {
               shirtSizes = data;
           });
       });
@@ -533,14 +533,14 @@
               "type": "POST",
               "dataType": "json",
               "contentType": "application/json; charset=utf-8",
-              "url": "{% url 'registration:add_to_cart' %}",
+              "url": "{% url 'furpocalypse_registration:add_to_cart' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
                   $.ajaxSettings.beforeSend(xhr, settings);
               },
               "success": function (result) {
-                  window.location = "{% url 'registration:onsite_cart' %}";
+                  window.location = "{% url 'furpocalypse_registration:onsite_cart' %}";
               },
               "error": function (result, status) {
                   alert("An error has occurred. Please contact {{ event.registrationEmail }} and we will correct the problem.")

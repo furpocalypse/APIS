@@ -76,7 +76,7 @@
               "type": "POST",
               "dataType": "json",
               "contentType": "application/json; charset=utf-8",
-              "url": "{% url 'registration:info_upgrade' %}",
+              "url": "{% url 'furpocalypse_registration:info_upgrade' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -90,7 +90,7 @@
                   }
               },
               "success": function () {
-                  window.location = "{% url 'registration:find_upgrade' %}";
+                  window.location = "{% url 'furpocalypse_registration:find_upgrade' %}";
               }
           });
       }

@@ -338,7 +338,7 @@
           $.ajax({
               "type": "POST",
               "dataType": "json",
-              "url": "{% url 'registration:addNewDealer' %}",
+              "url": "{% url 'furpocalypse_registration:addNewDealer' %}",
               "data": JSON.stringify(data),
               "beforeSend": function (xhr, settings) {
                   console.log("Before Send");
@@ -348,7 +348,7 @@
                   alert("An error has occurred. Please contact {{event.dealerEmail}} and we will correct the problem.")
               },
               "success": function () {
-                  window.location = "{% url 'registration:thanks_dealer' %}";
+                  window.location = "{% url 'furpocalypse_registration:thanks_dealer' %}";
               }
           });
       }
@@ -387,7 +387,7 @@
                       changeYear: true
                   });
               }
-              $.getJSON("{% url 'registration:tablesizes' %}", function (data) {
+              $.getJSON("{% url 'furpocalypse_registration:tablesizes' %}", function (data) {
                   tableSizes = data;
                   $.each(tableSizes, function (key, item) {
                       $("#tableSize").append("<option value='" + item.id + "'>" + item.name + " ($" + item.basePrice + ")</option>");

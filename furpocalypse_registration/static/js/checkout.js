@@ -34,7 +34,7 @@ $("body").ready(function () {
                 $("#add1").val("");
                 $("#add2").val("");
                 $("#city").val("");
-                $("#state").val("");
+                $("#state-text").val("");
                 $("#country").val("");
                 return;
             }
@@ -46,7 +46,7 @@ $("body").ready(function () {
             $("#add1").val(address.address1);
             $("#add2").val(address.address2);
             $("#city").val(address.city);
-            $("#state").val(address.state);
+            $("#state-text").val(address.state);
             $("#postal").val(address.postalCode);
             $("#country").val(address.country);
         });

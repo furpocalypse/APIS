@@ -323,7 +323,7 @@ class Migration(migrations.Migration):
             model_name="event",
             name="onlineRegStart",
             field=models.DateTimeField(
-                help_text="Start time for /registration/onsite form",
+                help_text="Start time for /furpocalypse_registration/onsite form",
                 verbose_name="On-site Registration Start",
             ),
         ),

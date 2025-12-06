@@ -38,50 +38,50 @@ class DealerTestCase(TestCase):
 
 class TestDealers(DealerTestCase):
     def test_dealers(self):
-        response = self.client.get(reverse("registration:dealers", args=("FOOBAR",)))
+        response = self.client.get(reverse("furpocalypse_registration:dealers", args=("FOOBAR",)))
         self.assertEqual(response.status_code, 200)
 
     def test_thanksDealer(self):
-        response = self.client.get(reverse("registration:thanks_dealer"))
+        response = self.client.get(reverse("furpocalypse_registration:thanks_dealer"))
         self.assertEqual(response.status_code, 200)
 
     def test_doneDealer(self):
-        response = self.client.get(reverse("registration:done_dealer"))
+        response = self.client.get(reverse("furpocalypse_registration:done_dealer"))
         self.assertEqual(response.status_code, 200)
 
     def test_addNewDealer_open(self) -> None:
-        response = self.client.get(reverse("registration:new_dealer"))
+        response = self.client.get(reverse("furpocalypse_registration:new_dealer"))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"not yet open", response.content)
 
     @freeze_time(timezone.now() - timedelta(days=20))
     def test_addNewDealer_closed_upcoming(self) -> None:
-        response = self.client.get(reverse("registration:new_dealer"))
+        response = self.client.get(reverse("furpocalypse_registration:new_dealer"))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"not yet open", response.content)
 
     @freeze_time(timezone.now() + timedelta(days=20))
     def test_addNewDealer_closed_ended(self) -> None:
-        response = self.client.get(reverse("registration:new_dealer"))
+        response = self.client.get(reverse("furpocalypse_registration:new_dealer"))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"has ended", response.content)
 
     def test_find_dealer_to_add_assistant(self):
         response = self.client.get(
-            reverse("registration:find_dealer_to_add_assistant", args=("FOOBAR",))
+            reverse("furpocalypse_registration:find_dealer_to_add_assistant", args=("FOOBAR",))
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"FOOBAR", response.content)
 
     def test_dealerAsst(self):
         response = self.client.get(
-            reverse("registration:dealer_asst", args=("FOOBAR",))
+            reverse("furpocalypse_registration:dealer_asst", args=("FOOBAR",))
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"FOOBAR", response.content)
 
     def test_doneAsstDealer(self):
-        response = self.client.get(reverse("registration:done_asst_dealer"))
+        response = self.client.get(reverse("furpocalypse_registration:done_asst_dealer"))
         self.assertEqual(response.status_code, 200)
 
 

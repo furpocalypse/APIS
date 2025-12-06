@@ -8,7 +8,7 @@
 
   <div class="row">
     <div class="col-sm-6">
-      <h2><a href="{% url 'registration:onsite_admin' %}">APIS Register</a></h2>
+      <h2><a href="{% url 'furpocalypse_registration:onsite_admin' %}">APIS Register</a></h2>
     </div>
     <div class="col-sm-2 col-sm-offset-2 col-top">
       <form class="form-inline" id="terminal_form" method="get">
@@ -57,7 +57,7 @@
               <i class="fas fa-user"></i><span class="sr-only">User options</span>
             </button>
             <ul class="dropdown-menu" aria-labelledby="user">
-              <li><a href="{% url 'registration:logout' %}?next={% url 'registration:onsite_admin' %}">Sign Out <i
+              <li><a href="{% url 'furpocalypse_registration:logout' %}?next={% url 'furpocalypse_registration:onsite_admin' %}">Sign Out <i
                   class="fas fa-sign-out-alt right"></i></a></li>
             </ul>
           </div>
@@ -77,14 +77,14 @@
     <i class="fas fa-exclamation-triangle"></i>
     <span class="sr-only">Error:</span>
     <b>There was a problem while connecting to the server.</b>
-    <a class="alert-link" href="{% url 'registration:onsite_admin' %}">Reload</a>
+    <a class="alert-link" href="{% url 'furpocalypse_registration:onsite_admin' %}">Reload</a>
   </div>
 
   <div class="row">
     <div class="col-md-6">
       <div class="row">
         <div class="col-md-12">
-          <form class="form-inline my-lg-0" action="{% url 'registration:onsite_admin' %}" id="search_form"
+          <form class="form-inline my-lg-0" action="{% url 'furpocalypse_registration:onsite_admin' %}" id="search_form"
                 method="get">
             <input type="hidden" id="terminal" name="terminal" value="{{ request.session.terminal }}">
             <input class="form-control mr-sm-2" type="text" placeholder="Search attendee"
@@ -92,7 +92,7 @@
             <button class="btn btn-default my-2 my-sm-0" type="submit">
               Search <i class="fas fa-search"></i>
             </button>
-            <a href="{% url 'registration:onsite' %}" class="btn btn-success my-2 my-sm-0" target="_blank">
+            <a href="{% url 'furpocalypse_registration:onsite' %}" class="btn btn-success my-2 my-sm-0" target="_blank">
               Add Attendee <i class="fas fa-plus-circle"></i>
             </a>
           </form>
@@ -163,7 +163,7 @@
             </h2>
           </div>
           <div class="col-md-4" style="margin-top: 20px">
-            <a href="{% url 'registration:onsite_admin_clear_cart' %}?terminal={{ request.session.terminal }}&search={{ request.GET.search }}"
+            <a href="{% url 'furpocalypse_registration:onsite_admin_clear_cart' %}?terminal={{ request.session.terminal }}&search={{ request.GET.search }}"
                class="btn btn-danger right" id="clear-cart">Clear</a>
           </div>
         </div>
@@ -332,7 +332,7 @@
         </button>
       </div>
       <div class="panel-body">
-        <a href="{% endverbatim %}{% url 'registration:onsite' %}{% verbatim %}?firstName={{first}}&lastName={{last}}&dob={{dob}}&address1={{address}}&address2={{address2}}&city={{city}}&state={{state}}&postalCode={{ZIP}}"
+        <a href="{% endverbatim %}{% url 'furpocalypse_registration:onsite' %}{% verbatim %}?firstName={{first}}&lastName={{last}}&dob={{dob}}&address1={{address}}&address2={{address2}}&city={{city}}&state={{state}}&postalCode={{ZIP}}"
            target="blank" class="" title="Add attendee">
           <i class="fa-solid fa-user-plus"></i> <strong>{{ first }} {{ last }}</strong>
         </a>
@@ -424,25 +424,25 @@
   <script>
       const DEBUG = {% settings_value_bool 'DEBUG' %};
 
-      const URL_REGISTRATION_ASSIGN_BADGE_NUMBER = "{% url 'registration:assign_badge_number' %}";
-      const URL_REGISTRATION_ONSITE_PRINT_BADGES = "{% url 'registration:onsite_print_badges' %}";
-      const URL_REGISTRATION_ONSITE_ADMIN_CLEAR_CART = "{% url 'registration:onsite_admin_clear_cart' %}";
-      const URL_REGISTRATION_ONSITE_ADMIN_CART = "{% url 'registration:onsite_admin_cart' %}";
-      const URL_REGISTRATION_ONSITE_ADMIN_ADD_TO_CART = "{% url 'registration:onsite_add_to_cart' %}";
-      const URL_REGISTRATION_ONSITE_REMOVE_FROM_CART = "{% url 'registration:onsite_remove_from_cart' %}";
-      const URL_REGISTRATION_OPEN_TERMINAL = "{% url 'registration:open_terminal' %}";
-      const URL_REGISTRATION_CLOSE_TERMINAL = "{% url 'registration:close_terminal' %}";
-      const URL_REGISTRATION_READY_TERMINAL = "{% url 'registration:ready_terminal' %}";
-      const URL_REGISTRATION_OPEN_DRAWER = "{% url 'registration:open_drawer' %}";
-      const URL_REGISTRATION_CASH_DEPOSIT = "{% url 'registration:cash_deposit' %}";
-      const URL_REGISTRATION_SAFE_DROP = "{% url 'registration:safe_drop' %}";
-      const URL_REGISTRATION_CASH_PICKUP = "{% url 'registration:cash_pickup' %}";
-      const URL_REGISTRATION_CLOSE_DRAWER = "{% url 'registration:close_drawer' %}";
-      const URL_REGISTRATION_NO_SALE = "{% url 'registration:no_sale' %}";
-      const URL_REGISTRATION_ENABLE_PAYMENT = "{% url 'registration:enable_payment' %}";
-      const URL_REGISTRATION_COMPLETE_CASH_TRANSACTION = "{% url 'registration:complete_cash_transaction' %}";
+      const URL_REGISTRATION_ASSIGN_BADGE_NUMBER = "{% url 'furpocalypse_registration:assign_badge_number' %}";
+      const URL_REGISTRATION_ONSITE_PRINT_BADGES = "{% url 'furpocalypse_registration:onsite_print_badges' %}";
+      const URL_REGISTRATION_ONSITE_ADMIN_CLEAR_CART = "{% url 'furpocalypse_registration:onsite_admin_clear_cart' %}";
+      const URL_REGISTRATION_ONSITE_ADMIN_CART = "{% url 'furpocalypse_registration:onsite_admin_cart' %}";
+      const URL_REGISTRATION_ONSITE_ADMIN_ADD_TO_CART = "{% url 'furpocalypse_registration:onsite_add_to_cart' %}";
+      const URL_REGISTRATION_ONSITE_REMOVE_FROM_CART = "{% url 'furpocalypse_registration:onsite_remove_from_cart' %}";
+      const URL_REGISTRATION_OPEN_TERMINAL = "{% url 'furpocalypse_registration:open_terminal' %}";
+      const URL_REGISTRATION_CLOSE_TERMINAL = "{% url 'furpocalypse_registration:close_terminal' %}";
+      const URL_REGISTRATION_READY_TERMINAL = "{% url 'furpocalypse_registration:ready_terminal' %}";
+      const URL_REGISTRATION_OPEN_DRAWER = "{% url 'furpocalypse_registration:open_drawer' %}";
+      const URL_REGISTRATION_CASH_DEPOSIT = "{% url 'furpocalypse_registration:cash_deposit' %}";
+      const URL_REGISTRATION_SAFE_DROP = "{% url 'furpocalypse_registration:safe_drop' %}";
+      const URL_REGISTRATION_CASH_PICKUP = "{% url 'furpocalypse_registration:cash_pickup' %}";
+      const URL_REGISTRATION_CLOSE_DRAWER = "{% url 'furpocalypse_registration:close_drawer' %}";
+      const URL_REGISTRATION_NO_SALE = "{% url 'furpocalypse_registration:no_sale' %}";
+      const URL_REGISTRATION_ENABLE_PAYMENT = "{% url 'furpocalypse_registration:enable_payment' %}";
+      const URL_REGISTRATION_COMPLETE_CASH_TRANSACTION = "{% url 'furpocalypse_registration:complete_cash_transaction' %}";
       const URL_ADMIN_REGISTRATION_BADGE = "{% url 'admin:furpocalypse_registration_badge_change' 0 %}";
-      const URL_REGISTRATION_ONSITE_ADMIN_CREATE_DISCOUNT = "{% url 'registration:onsite_create_discount' %}";
+      const URL_REGISTRATION_ONSITE_ADMIN_CREATE_DISCOUNT = "{% url 'furpocalypse_registration:onsite_create_discount' %}";
 
       // MQTT credentials for in-browser push notifications
       const MQTT_ENABLED = {% if mqtt_auth %}true{% else %}false{% endif %};

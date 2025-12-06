@@ -244,13 +244,13 @@
       const LOCATION_ID = "{% settings_value 'SQUARE_LOCATION_ID' %}";
 
       /* APIS URLs */
-      const URL_REGISTRATION_CHECKOUT = "{% url 'registration:checkout_upgrade' %}";
-      const URL_REGISTRATION_INDEX = "{% url 'registration:index' %}";
-      const URL_REGISTRATION_DONE = "{% url 'registration:done_upgrade' %}";
-      const URL_REGISTRATION_ADDRESSES = "{% url 'registration:addresses' %}";
-      const URL_REGISTRATION_FLUSH = "{% url 'registration:flush' %}";
-      const URL_REGISTRATION_CHECKOUT_UPGRADE = "{% url 'registration:checkout_upgrade' %}";
-      const URL_REGISTRATION_DONE_UPGRADE = "{% url 'registration:done_upgrade' %}";
+      const URL_REGISTRATION_CHECKOUT = "{% url 'furpocalypse_registration:checkout_upgrade' %}";
+      const URL_REGISTRATION_INDEX = "{% url 'furpocalypse_registration:index' %}";
+      const URL_REGISTRATION_DONE = "{% url 'furpocalypse_registration:done_upgrade' %}";
+      const URL_REGISTRATION_ADDRESSES = "{% url 'furpocalypse_registration:addresses' %}";
+      const URL_REGISTRATION_FLUSH = "{% url 'furpocalypse_registration:flush' %}";
+      const URL_REGISTRATION_CHECKOUT_UPGRADE = "{% url 'furpocalypse_registration:checkout_upgrade' %}";
+      const URL_REGISTRATION_DONE_UPGRADE = "{% url 'furpocalypse_registration:done_upgrade' %}";
 
       /* Application data */
       let cart_total = {{ total|default:0 }};

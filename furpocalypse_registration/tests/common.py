@@ -365,7 +365,7 @@ class OrdersTestCase(TestCase):
         }
 
         response = self.client.post(
-            reverse("registration:add_to_cart"),
+            reverse("furpocalypse_registration:add_to_cart"),
             json.dumps(postData),
             content_type="application/json",
         )
@@ -375,7 +375,7 @@ class OrdersTestCase(TestCase):
     def zero_checkout(self):
         postData = {}
         response = self.client.post(
-            reverse("registration:checkout"),
+            reverse("furpocalypse_registration:checkout"),
             json.dumps(postData),
             content_type="application/json",
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
@@ -405,7 +405,7 @@ class OrdersTestCase(TestCase):
             }
 
         response = self.client.post(
-            reverse("registration:checkout"),
+            reverse("furpocalypse_registration:checkout"),
             json.dumps(postData),
             content_type="application/json",
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),

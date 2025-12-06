@@ -47,7 +47,7 @@ def find_dealer_to_add_assistant(request, guid):
     context = {
         "token": guid,
         "event": event,
-        "next": reverse("registration:find_dealer_to_add_assistant_post"),
+        "next": reverse("furpocalypse_registration:find_dealer_to_add_assistant_post"),
     }
     return render(request, "registration/dealer/dealerasst-locate.html", context)
 
@@ -57,7 +57,7 @@ def dealer_asst(request, guid):
     context = {
         "token": guid,
         "event": event,
-        "next": reverse("registration:find_asst_dealer"),
+        "next": reverse("furpocalypse_registration:find_asst_dealer"),
     }
     return render(request, "registration/dealer/dealerasst-locate.html", context)
 
@@ -155,7 +155,7 @@ def find_dealer_to_add_assistant_post(request):
         {
             "success": True,
             "message": "DEALER",
-            "location": reverse("registration:add_assistants"),
+            "location": reverse("furpocalypse_registration:add_assistants"),
         }
     )
 
@@ -181,7 +181,7 @@ def find_asst_dealer(request):
             {
                 "success": True,
                 "message": "ASSISTANT",
-                "location": reverse("registration:find_upgrade"),
+                "location": reverse("furpocalypse_registration:find_upgrade"),
             }
         )
 
@@ -194,7 +194,7 @@ def find_asst_dealer(request):
         {
             "success": True,
             "message": "ASSISTANT",
-            "location": reverse("registration:index"),
+            "location": reverse("furpocalypse_registration:index"),
         }
     )
 

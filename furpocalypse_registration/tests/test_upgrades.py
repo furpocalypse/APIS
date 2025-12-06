@@ -9,13 +9,13 @@ from furpocalypse_registration.tests.common import OrdersTestCase
 class TestUpgrades(OrdersTestCase):
     def test_upgrade_index(self):
         guid = "ARSTBCESKFGHAIESTRK"
-        response = self.client.get(reverse("registration:upgrade", args=[guid]))
+        response = self.client.get(reverse("furpocalypse_registration:upgrade", args=[guid]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, guid)
 
     def test_infoUpgrade_bad_json(self):
         response = self.client.post(
-            reverse("registration:info_upgrade"),
+            reverse("furpocalypse_registration:info_upgrade"),
             "notJSON-",
             content_type="application/json",
         )
@@ -35,7 +35,7 @@ class TestUpgrades(OrdersTestCase):
             "event": self.event.name,
         }
         response = self.client.post(
-            reverse("registration:info_upgrade"),
+            reverse("furpocalypse_registration:info_upgrade"),
             json.dumps(post_data),
             content_type="application/json",
         )
@@ -54,7 +54,7 @@ class TestUpgrades(OrdersTestCase):
             "token": badge.registrationToken,
         }
         response = self.client.post(
-            reverse("registration:info_upgrade"),
+            reverse("furpocalypse_registration:info_upgrade"),
             json.dumps(post_data),
             content_type="application/json",
         )
@@ -73,7 +73,7 @@ class TestUpgrades(OrdersTestCase):
             "token": badge.registrationToken,
         }
         response = self.client.post(
-            reverse("registration:info_upgrade"),
+            reverse("furpocalypse_registration:info_upgrade"),
             json.dumps(post_data),
             content_type="application/json",
         )
@@ -89,7 +89,7 @@ class TestUpgrades(OrdersTestCase):
         ]
         self.add_to_cart(self.attendee_form_upgrade, self.price_45, options)
 
-        response = self.client.get(reverse("registration:cart"))
+        response = self.client.get(reverse("furpocalypse_registration:cart"))
         self.assertEqual(response.status_code, 200)
         response = self.checkout("cnon:card-nonce-ok", "0", "0")
         self.assertEqual(response.status_code, 200)
@@ -105,13 +105,13 @@ class TestUpgrades(OrdersTestCase):
             "token": badge.registrationToken,
         }
         response = self.client.post(
-            reverse("registration:info_upgrade"),
+            reverse("furpocalypse_registration:info_upgrade"),
             json.dumps(post_data),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
 
-        response = self.client.get(reverse("registration:find_upgrade"))
+        response = self.client.get(reverse("furpocalypse_registration:find_upgrade"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["attendee"], attendee)
         self.assertEqual(response.context["badge"], badge)
@@ -128,7 +128,7 @@ class TestUpgrades(OrdersTestCase):
         ]
         self.add_to_cart(self.attendee_form_upgrade, self.price_45, options)
 
-        response = self.client.get(reverse("registration:cart"))
+        response = self.client.get(reverse("furpocalypse_registration:cart"))
         self.assertEqual(response.status_code, 200)
         cart = response.context["orderItems"]
         self.assertEqual(len(cart), 1)
@@ -150,7 +150,7 @@ class TestUpgrades(OrdersTestCase):
             "token": badge.registrationToken,
         }
         response = self.client.post(
-            reverse("registration:info_upgrade"),
+            reverse("furpocalypse_registration:info_upgrade"),
             json.dumps(post_data),
             content_type="application/json",
         )
@@ -173,14 +173,14 @@ class TestUpgrades(OrdersTestCase):
             },
         }
         self.client.post(
-            reverse("registration:add_upgrade"),
+            reverse("furpocalypse_registration:add_upgrade"),
             json.dumps(post_data),
             content_type="application/json",
         )
-        cart_response = self.client.get(reverse("registration:invoice_upgrade"))
+        cart_response = self.client.get(reverse("furpocalypse_registration:invoice_upgrade"))
 
         checkout_response = self.client.post(
-            reverse("registration:checkout_upgrade"),
+            reverse("furpocalypse_registration:checkout_upgrade"),
             json.dumps(form),
             content_type="application/json",
         )

@@ -11,7 +11,7 @@ import furpocalypse_registration.views.ordering
 import furpocalypse_registration.views.printing
 import furpocalypse_registration.views.staff
 import furpocalypse_registration.views.upgrade
-import furpocalypse_registration.views.webhooks
+import furpocalypse_registration.views.payments.paypal_webhooks
 
 app_name = "furpocalypse_registration"
 
@@ -22,7 +22,7 @@ def trigger_error(request):
 
 
 urlpatterns = [
-    re_path(r"^sentry-debug/", trigger_error),
+    # re_path(r"^sentry-debug/", trigger_error),
     re_path(r"^$", furpocalypse_registration.views.common.index, name="index"),
     re_path(r"^logout/$", LogoutView.as_view(), name="logout"),
     re_path(
@@ -394,16 +394,16 @@ urlpatterns = [
     re_path(r"^flush/?$", furpocalypse_registration.views.common.flush, name="flush"),
     re_path(r"^pdf/?$", furpocalypse_registration.views.printing.servePDF, name="pdf"),
     re_path(r"^print/?$", furpocalypse_registration.views.printing.printNametag, name="print"),
-    re_path(
-        r"^firebase/register/?",
-        furpocalypse_registration.views.onsite_admin.firebase_register,
-        name="firebase_register",
-    ),
-    re_path(
-        r"^firebase/lookup/?",
-        furpocalypse_registration.views.onsite_admin.firebase_lookup,
-        name="firebase_lookup",
-    ),
+    # re_path(
+    #     r"^firebase/register/?",
+    #     furpocalypse_registration.views.onsite_admin.firebase_register,
+    #     name="firebase_register",
+    # ),
+    # re_path(
+    #     r"^firebase/lookup/?",
+    #     furpocalypse_registration.views.onsite_admin.firebase_lookup,
+    #     name="firebase_lookup",
+    # ),
     # PAYPAL_TODO - Add comprehensive PayPal webhook endpoints (Phase 1-2)
     # DECISION: Online-only PayPal webhooks, complete Square replacement
     # Current PayPal webhook endpoints are basic and only handle order creation/capture.
@@ -419,12 +419,12 @@ urlpatterns = [
     # - views/webhooks.py (webhook endpoint implementations needed)
     re_path(
         r"webhook/paypal/v1/create-order",
-        furpocalypse_registration.views.webhooks.paypal_create_order,
+        furpocalypse_registration.views.payments.paypal_webhooks.paypal_create_order,
         name="paypal_create_order",
     ),
     re_path(
         r"webhook/paypal/v1/capture-order",
-        furpocalypse_registration.views.webhooks.paypal_capture_order,
+        furpocalypse_registration.views.payments.paypal_webhooks.paypal_capture_order,
         name="paypal_capture_order",
     ),
 ]
