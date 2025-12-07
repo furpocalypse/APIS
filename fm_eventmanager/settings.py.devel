@@ -138,12 +138,8 @@ class _ReadTheREADME:
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'HOST': _ReadTheREADME,
-        'NAME' : 'apis_dev',
-        'TEST' : {
-            'NAME' : 'apis_test',
-        }
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME' : BASE_DIR + "/db.sqlite3",
     }
 }
 
