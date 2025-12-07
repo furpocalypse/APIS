@@ -24,6 +24,7 @@ dependencies = [
     "influxdb-client>=1.40.0",
     "paho-mqtt>=1.6.1",
     "pillow>=5.3",
+    "psycopg2-binary>=2.9.9",
     "pygments>=2.18.0",
     "pyjwt>=2.8.0",
     "qrcode>=7.4.2",
@@ -34,6 +35,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coveralls>=4.0.2",
     "django-debug-toolbar>=5.2.0",
     "ruff>=0.9.6",
+]
+test = [
+    "coveralls>=4.0.2"
 ]

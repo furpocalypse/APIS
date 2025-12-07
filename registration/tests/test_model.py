@@ -22,7 +22,7 @@ class TestCharity(TestCase):
         self.assertIsInstance(self.charity.name, str)
         self.assertIsInstance(self.charity.url, str)
         self.assertIsInstance(self.charity.donations, Decimal)
-        self.assertEquals(str(self.charity), self.charity.name)
+        self.assertEqual(str(self.charity), self.charity.name)
 
 
 class TestVenue(TestCase):
