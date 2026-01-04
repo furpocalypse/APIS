@@ -36,7 +36,7 @@ class TestVenue(TestCase):
         self.assertIsInstance(self.venue.city, str)
         self.assertIsInstance(self.venue.state, str)
         self.assertIsInstance(self.venue.country, str)
-        self.assertEquals(str(self.venue), self.venue.name)
+        self.assertEqual(str(self.venue), self.venue.name)
 
 
 class TestAttendee(TestCase):
