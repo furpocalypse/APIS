@@ -4,7 +4,6 @@
 
 import django.db.models.deletion
 from django.db import migrations, models
-from django.contrib.postgres.operations import TrigramExtension
 
 
 class Migration(migrations.Migration):
@@ -14,7 +13,6 @@ class Migration(migrations.Migration):
     dependencies = []
 
     operations = [
-        TrigramExtension(),
         migrations.CreateModel(
             name="Attendee",
             fields=[
