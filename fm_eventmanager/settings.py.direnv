@@ -201,22 +201,18 @@ SESSION_COOKIE_AGE = 60*60  # 1hr
 # Default email to display as part of error messages
 APIS_DEFAULT_EMAIL = "registration@example.com"
 
-# Sandbox values - DO NOT check in production ids
-AUTHNET_NAME = '426rwVfr3G47'
-AUTHNET_TRANSACTIONKEY = '399UTfznCV7gz224'
-
 # Sandbox values = DO NOT check in production ids
-SQUARE_APPLICATION_ID = 'sandbox-sq0idp-1a_xxxxxxxxxxxxxxxxxxx'
-SQUARE_ACCESS_TOKEN = 'sandbox-sq0atb-xxxxxxxxxxxxxxxxxxxxxx'
-SQUARE_LOCATION_ID = 'xxxxxxxxx...'
+SQUARE_APPLICATION_ID = os.environ['SQUARE_APPLICATION_ID']
+SQUARE_ACCESS_TOKEN = os.environ['SQUARE_ACCESS_TOKEN']
+SQUARE_LOCATION_ID = os.environ['SQUARE_LOCATION_ID']
 SQUARE_CURRENCY = 'USD'
-SQUARE_ENVIRONMENT = 'sandbox'  # Or "production"
-SQUARE_WEBHOOK_SIGNATURE_KEY = 'xj-...'
+SQUARE_ENVIRONMENT = 'sandbox'
+SQUARE_WEBHOOK_SIGNATURE_KEY = os.getenv('SQUARE_WEBHOOK_SIGNATURE_KEY', 'unset')
 
 # Sandbox values - DO NOT check in production credentials
-EMAIL_HOST = 'smtp.mailgun.org'
-EMAIL_HOST_USER = 'postmaster@sandboxcdfc4543b9e84e0ea21d82a527e714fc.mailgun.org'
-EMAIL_HOST_PASSWORD = '8aee7562e054466c362ebd84e7227703'
+EMAIL_HOST = 'localhost'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 
 # Print handler for cash drawer and receipts
 REGISTER_SQUARE_LOCATION = SQUARE_LOCATION_ID
@@ -238,7 +234,7 @@ MQTT_BROKER = {
 # This URL is passed to browsers to connect to MQTT over websockets for push messages
 MQTT_EXTERNAL_BROKER = "wss://mqtt.furthemore.org/mqtt"
 
-MQTT_JWT_SECRET = "secret=="
+MQTT_JWT_SECRET = os.getenv('MQTT_JWT_SECRET')
 MQTT_JWT_ALGORITHM = "HS256"
 
 ENVIRONMENT_NAME = "Development Server"
