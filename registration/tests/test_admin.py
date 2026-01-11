@@ -619,6 +619,8 @@ class AdminTestCase(TestCase):
         self.admin_site = AdminSite()
         self.event = Event(**DEFAULT_EVENT_ARGS)
         self.event.save()
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
+        self.admin_user.save()
 
 
 class TestDealerAdmin(AdminTestCase):
@@ -720,6 +722,7 @@ class TestStaffAdmin(AdminTestCase):
 
     def test_copy_to_event_form(self):
         request = HttpRequest()
+        request.user = self.admin_user
         staff = Staff.objects.all()
         response = self.staff_admin.copy_to_event(request, staff)
         self.assertEqual(response.status_code, 200)
@@ -762,14 +765,7 @@ class TestStaffAdmin(AdminTestCase):
         self.assertEqual(Staff.objects.filter(event=self.new_event).count(), 0)
 
 
-class TestTempToken(TestCase):
-    def setUp(self):
-        self.event = Event(**DEFAULT_EVENT_ARGS)
-        self.event.save()
-
-        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
-        self.admin_user.save()
-
+class TestTempToken(AdminTestCase):
     @patch("registration.emails.send_email")
     def test_temp_token_send_email(self, mock_send_email):
         test_email_address = "test-admin@example.net"
@@ -817,7 +813,7 @@ class TestTempToken(TestCase):
         self.assertIsNone(form)
 
         # Get the response message
-        content = soup.find("div", attrs={"class": "content"})
+        content = soup.find("main", attrs={"class": "content"})
         message = content.find("ul", attrs={"class": "messagelist"}).text.strip()
         # Standardize quotes
         message = message.replace('“', '"').replace('”', '"')
@@ -851,7 +847,7 @@ class TestTempToken(TestCase):
 
         soup = BeautifulSoup(response.content, "html.parser")
         # Get the response message
-        content = soup.find("div", attrs={"class": "content"})
+        content = soup.find("main", attrs={"class": "content"})
         message = content.find("ul", attrs={"class": "messagelist"}).text.strip()
         expected_message = f"Successfully sent email to {test_email_address}"
         self.assertEqual(message, expected_message)
