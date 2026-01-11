@@ -49,6 +49,7 @@ dependencies = [
     { name = "ruff" },
     { name = "sentry-sdk" },
     { name = "squareup" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -89,6 +90,7 @@ requires-dist = [
     { name = "ruff", specifier = ">=0.9.6" },
     { name = "sentry-sdk", specifier = ">=2.21.0" },
     { name = "squareup", specifier = ">=22.0.0.20220921" },
+    { name = "tzdata", specifier = ">=2025.2" },
 ]
 
 [package.metadata.requires-dev]

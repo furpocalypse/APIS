@@ -33,6 +33,7 @@ dependencies = [
     "ruff>=0.9.6",
     "sentry-sdk>=2.21.0",
     "squareup>=22.0.0.20220921",
+    "tzdata>=2025.2",
 ]
 
 [dependency-groups]
