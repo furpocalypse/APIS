@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'django_admin_env_notice',
     'django.contrib.admin',
     'django.contrib.auth',
+    'django.contrib.postgres',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
@@ -82,7 +83,6 @@ INSTALLED_APPS = [
     'nested_inline',
     'import_export',
     'django_extensions',
-    'django_u2f',
     'maintenance_mode',
     'registration',
     'debug_toolbar',
@@ -182,10 +182,10 @@ USE_TZ = True
 SITE_ID = 1
 
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
-MAINTENANCE_MODE_IGNORE_URLS = ("^/u2f/",)
+MAINTENANCE_MODE_IGNORE_URLS = ()
 
-LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
-LOGIN_URL = 'u2f:login'
+# LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
+# LOGIN_URL = 'u2f:login'
 
 INTERNAL_IPS = ['127.0.0.1']
 

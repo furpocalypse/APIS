@@ -1,7 +1,8 @@
 import json
 import logging
-from datetime import datetime
+import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.shortcuts import render
 from django.urls import reverse
@@ -24,8 +25,7 @@ form_type = "attendee"
 
 def onsite(request):
     event = Event.objects.get(default=True)
-    tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
     context = {"event": event, "form_type": form_type}
 
     if event.websiteUrl:
@@ -69,11 +69,10 @@ def onsite_cart(request):
             except Event.DoesNotExist:
                 event = Event.objects.get(default=True)
             evt = event.eventStart
-            tz = timezone.get_current_timezone()
             try:
-                birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+                birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
             except ValueError:
-                birthdate = tz.localize(datetime.strptime("2000-01-01", "%Y-%m-%d"))
+                birthdate = datetime.datetime.strptime("2000-01-01", "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
 
             age_at_event = (
                 evt.year

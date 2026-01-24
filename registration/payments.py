@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from django.conf import settings
+from django.db.utils import NotSupportedError
 from prometheus_client import Histogram
 from square.client import Client
 
@@ -344,11 +345,19 @@ def process_webhook_refund_update(notification) -> bool:
     refund_id = notification.body["data"]["id"]
     try:
         order = Order.objects.get(apiData__refunds__contains=[{"id": refund_id}])
+        # The above is not supported on all DB backends.
     except Order.DoesNotExist:
         logger.warning(
             f"Got refund.updated webhook update for a refund id not found: {refund_id}"
         )
         return False
+    except NotSupportedError:
+        orders = [rec for rec in Order.objects.all() if "id" in rec["apiData"] and rec["apiData"]["id"] == refund_id ]
+        if len(orders) == 0:
+            logger.warning(
+                f"Got refund.updated webhook update for a refund id not found: {refund_id}"
+            )
+            return False
 
     webhook_refund = notification.body["data"]["object"]["refund"]
 
@@ -477,7 +486,7 @@ def process_webhook_dispute_created_or_updated(
                 firstName=attendee.firstName,
                 lastName=attendee.lastName,
                 email=attendee.email,
-                reason=f"Initiated chargeback [APIS {datetime.now().isoformat()}]",
+                reason=f"Initiated chargeback [APIS {datetime.datetime.now().isoformat()}]",
             )
 
             ban.save()

@@ -7,7 +7,7 @@ from io import BytesIO
 
 import qrcode
 from django import forms
-from django.conf.urls import url
+from django.urls import re_path
 from django.contrib import admin, auth, messages
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
@@ -50,19 +50,6 @@ admin.site.register(TableSize)
 admin.site.register(Cart)
 
 
-def disable_two_factor(modeladmin, request, queryset):
-    for user in queryset:
-        obj = user.totp_devices.filter(user=user)
-        obj.delete()
-        obj = user.u2f_keys.filter(user=user)
-        obj.delete()
-        obj = user.backup_codes.filter(user=user)
-        obj.delete()
-
-
-disable_two_factor.short_description = "Disable 2FA"
-
-
 class UserProfileAdmin(auth.admin.UserAdmin):
     model = User
     list_display = (
@@ -70,17 +57,8 @@ class UserProfileAdmin(auth.admin.UserAdmin):
         "email",
         "first_name",
         "last_name",
-        "two_factor_enabled",
     )
-    actions = [
-        disable_two_factor,
-    ]
-
-    def two_factor_enabled(self, obj):
-        return obj.totp_devices.first() is not None or obj.u2f_keys.first() is not None
-
-    two_factor_enabled.boolean = True
-    two_factor_enabled.short_description = "2FA"
+    actions = []
 
 
 admin.site.unregister(User)
@@ -99,7 +77,7 @@ class FirebaseAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super(FirebaseAdmin, self).get_urls()
         my_urls = [
-            url(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
+            re_path(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
         ]
         return my_urls + urls
 
@@ -1428,8 +1406,8 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
     def get_urls(self):
         urls = super(OrderAdmin, self).get_urls()
         my_urls = [
-            url(r"^(.+)/refund/$", self.refund_view, name="order_refund"),
-            url(r"^(.+)/refresh/$", self.refresh_view, name="order_refresh"),
+            re_path(r"^(.+)/refund/$", self.refund_view, name="order_refund"),
+            re_path(r"^(.+)/refresh/$", self.refresh_view, name="order_refresh"),
         ]
         return my_urls + urls
 

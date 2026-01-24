@@ -62,9 +62,8 @@ def get_cart(request):
             pda = cartJson["attendee"]
             event = Event.objects.get(name=cartJson["event"])
             evt = event.eventStart
-            tz = timezone.get_current_timezone()
             try:
-                birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+                birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
             except ValueError:
                 logger.warning(
                     f"The required field 'birthdate' is not well-formed (got '{pda['birthdate']}')"
@@ -129,8 +128,7 @@ def saveCart(cart):
     pdp = postData["priceLevel"]
     evt = postData["event"]
 
-    tz = timezone.get_current_timezone()
-    birthdate = tz.localize(datetime.strptime(pda["birthdate"], "%Y-%m-%d"))
+    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
 
     event = Event.objects.get(name=evt)
 
@@ -214,7 +212,7 @@ def add_to_cart(request):
         return common.abort(400, "Required parameters not found in POST body")
 
     try:
-        datetime.strptime(pda["birthdate"], "%Y-%m-%d")
+        datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d")
     except ValueError:
         return common.abort(
             400,

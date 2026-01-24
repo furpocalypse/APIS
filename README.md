@@ -24,7 +24,6 @@ Stack:
     [browser worker](https://github.com/rechner/py-aamva).
   + Print badges on the fly with a custom template on any compatible card
     or label printer, with Unicode-supported fonts (Emoji!)
-  + Protect admin and volunteer logins with TOTP 2-Factor or FIDO U2F.
 
 ![Screenshot of Cash Register Position](/docs/admin-onsite.png)
 
@@ -102,38 +101,84 @@ The following was tested on a fresh installation of Ubuntu 20.04.
 
 ### Locally without docker (recommended for developers)
 
-    git clone https://github.com/furthemore/APIS.git
+The recommended development environment is Linux, or WSL if you're on Windows. All instructions below assume you've freshly cloned the repository but have NOT entered the new directory yet.
+
+## Automatic setup with direnv
+
+If you have installed `direnv`, environment setup and dependency installation should be handled for you by entering the project directory after you allow direnv load the `/envrc` file.
+
+    direnv allow ./APIS
+
+To help keep credentials out of the repository during development, the .envrc script is set up to read a file named `.env` and load those secrets (and other configuration) into the environment. Make a copy of `.env.example` then put the needed configuration and secrets into the file:
+
+    cp ./APIS/.env.example ./APIS/.env
+    nano ./APIS/.env #Or use whatever your favorite editor is
+
+Then copy the settings file template tailored for direnv use, modify other settings if desired, and enter the directory. uv will install itself, set up a python venv, install all dependencies, load config into environment variables, and install pre-commit hooks:
+
+    cp ./APIS/fm_eventmanager/settings.py.direnv ./APIS/fm_eventmanager/settings.py
+    nano ./APIS/fm_eventmanager/settings.py # Optional
     cd APIS
-    python3 -v venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
 
-    # Create a development database server
+## Manual setup
+
+APIS uses [uv][uv] for project configuration, dependency management, and virtual environment configuration. Install it as per [its documentation][uv-install]:
+
+    # Linux/WSL using curl
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    # Linux/WSL using wget
+    wget -qO- https://astral.sh/uv/install.sh | sh
+
+    # Windows without WSL
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+Next, copy the development settings file template for development and make any changes you need to configure the database, mail server, Square, etc
+
+    # Linux
+    cp ./APIS/fm_eventmanager/settings.py.devel ./APIS/fm_eventmanager/settings.py
+
+    # Windows
+    Copy-Item .\APIS\fm_eventmanager\settings.py.devel .\APIS\fm_eventmanager\settings.py
+
+Next, enter the directory, set up the python virtual environment, and install dependencies with uv:
+
+    # Linux
+    cd APIS
+    uv venv
+    source .venv/bin/activate
+    uv sync
+
+    # Windows
+    Set-Location APIS
+    uv venv
+    .venv\Scripts\activate
+    uv sync
+
+Finally, set up pre-commit hooks:
+
+    uv tool run pre-commit install
+
+Be sure to run `deactivate` when finished to close the python venv!
+
+## First run
+
+After getting everything set up by either method above, set up the Postgres database and run migrations to set it up, create the superuser, and then launch the server.
+
+**NOTE**: Recent versions of Debian and its derivatives (e.g. Ubuntu, Linux Mint) package Postgres in a way that allows multiple versions to run concurrently, thus the binaries that these scripts use aren't on the PATH. You will need to set up your Postgres instance manually and skip to the `migrate` command in this case.
+
+    # Create and start the development database server (except on Debian)
     python manage.py make_db
-
-    # Start the development database server
     python manage.py start_db
 
-    # Review your settings, including the database settings from the output from make_db.
-    cp fm_eventmanager/settings.py.devel fm_eventmanager/settings.py
-
+    # Set up database tables, create the admin user, and run the server.
     python manage.py migrate
     python manage.py createsuperuser
+    python manage.py runserver
 
-    # Create a self-signed certificate if you want to test or hack on U2F
-    openssl req -x509 -nodes -sha256 -days 365 -newkey rsa:2048 \
-      -keyout localhost.key -out localhost.crt -subj /CN=localhost
-
-    # Get it running (omit --cert localhost for HTTP)
-    python manage.py runserver_plus --cert localhost.crt
+You should be able to access the APIS instance at http://127.0.0.1:8000 with the superuser account you created.
 
 [square]: https://square.com/
 [android]: https://github.com/furthemore/APIS-register
-
-## Development
-
-### Using [pre-commit](https://pre-commit.com/)
-1. Install: `pip install pre-commit` or `brew install pre-commit`.
-2. then run: `pre-commit install`, this will apply the hooks defined in `.pre-commit-config.yaml` to evey commit
-
-```
+[uv]: https://docs.astral.sh/uv/
+[uv-install]: https://docs.astral.sh/uv/#installation

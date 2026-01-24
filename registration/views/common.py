@@ -1,7 +1,8 @@
 import json
 import logging
-from datetime import datetime
+import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
@@ -188,8 +189,7 @@ def index(request):
     except Event.DoesNotExist:
         return render(request, "registration/docs/no-event.html")
 
-    tz = timezone.get_current_timezone()
-    today = tz.localize(datetime.now())
+    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
     discount = request.session.get("discount")
     if discount:
         discount = Discount.objects.filter(codeName=discount)
