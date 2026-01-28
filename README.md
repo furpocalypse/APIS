@@ -1,14 +1,14 @@
 # APIS EventManager
 
-![Build](https://github.com/furthemore/APIS/actions/workflows/django.yml/badge.svg) [![Coverage Status](https://coveralls.io/repos/github/furthemore/APIS/badge.svg)](https://coveralls.io/github/furthemore/APIS)
+![Build](https://github.com/furpocalypse/APIS/actions/workflows/django.yml/badge.svg) [![Coverage Status](https://coveralls.io/repos/github/furpocalypse/APIS/badge.svg)](https://coveralls.io/github/furpocalypse/APIS)
 
 Data Model snapshot (7 December 2020): https://i.imgur.com/A4fPDf5.png
 
 Stack:
-  + Ubuntu 20.04 (LTS)
+  + Ubuntu 24.04 (LTS)
   + Postgres
-  + Python 3.8 - 3.10
-  + Django 3.2
+  + Python 3.11
+  + Django 5.2
   + Bootstrap 3
   + jQuery 1.12
 
@@ -31,7 +31,7 @@ Stack:
 ### Running Using Published Docker Images
 
     # Install docker using the instructions at either:
-    # https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-20-04 or
+    # https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-22-04 or
     # https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository.
 
     # Download docker-compose.yml and example.env files from this repo
@@ -56,7 +56,7 @@ Stack:
 The following was tested on a fresh installation of Ubuntu 20.04.
 
     # Get the software from Github
-    git clone https://github.com/furthemore/APIS.git
+    git clone https://github.com/furpocalypse/APIS.git
     cd APIS
 
     # Create .env from template and edit relevant settings (API keys, etc)
@@ -69,7 +69,7 @@ The following was tested on a fresh installation of Ubuntu 20.04.
     apt install build-essential
 
     # Install docker using the instructions at either:
-    # https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-20-04 or
+    # https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-22-04 or
     # https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository.
 
     # Build base docker image:
@@ -101,26 +101,25 @@ The following was tested on a fresh installation of Ubuntu 20.04.
 
 ### Locally without docker (recommended for developers)
 
-The recommended development environment is Linux, or WSL if you're on Windows. All instructions below assume you've freshly cloned the repository but have NOT entered the new directory yet.
+The recommended development environment is Linux, or WSL if you're on Windows. If on Linux, you can install [direnv] to streamline your environment setup and management. All instructions below assume you've freshly cloned the repository but have NOT entered the new directory yet.
 
-## Automatic setup with direnv
+#### Automatic setup with direnv
 
 If you have installed `direnv`, environment setup and dependency installation should be handled for you by entering the project directory after you allow direnv load the `/envrc` file.
 
     direnv allow ./APIS
 
-To help keep credentials out of the repository during development, the .envrc script is set up to read a file named `.env` and load those secrets (and other configuration) into the environment. Make a copy of `.env.example` then put the needed configuration and secrets into the file:
+Make a copy of `development.env` to `.env`, then put the needed configuration and secrets into the file:
 
-    cp ./APIS/.env.example ./APIS/.env
+    cp ./APIS/development.env ./APIS/.env
     nano ./APIS/.env #Or use whatever your favorite editor is
 
 Then copy the settings file template tailored for direnv use, modify other settings if desired, and enter the directory. uv will install itself, set up a python venv, install all dependencies, load config into environment variables, and install pre-commit hooks:
 
     cp ./APIS/fm_eventmanager/settings.py.direnv ./APIS/fm_eventmanager/settings.py
-    nano ./APIS/fm_eventmanager/settings.py # Optional
     cd APIS
 
-## Manual setup
+#### Manual setup
 
 APIS uses [uv][uv] for project configuration, dependency management, and virtual environment configuration. Install it as per [its documentation][uv-install]:
 
@@ -161,7 +160,7 @@ Finally, set up pre-commit hooks:
 
 Be sure to run `deactivate` when finished to close the python venv!
 
-## First run
+#### First run
 
 After getting everything set up by either method above, set up the Postgres database and run migrations to set it up, create the superuser, and then launch the server.
 
@@ -180,5 +179,6 @@ You should be able to access the APIS instance at http://127.0.0.1:8000 with the
 
 [square]: https://square.com/
 [android]: https://github.com/furthemore/APIS-register
+[direnv]: https://direnv.net/
 [uv]: https://docs.astral.sh/uv/
 [uv-install]: https://docs.astral.sh/uv/#installation
