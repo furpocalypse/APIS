@@ -309,38 +309,6 @@ def update_order_payment_data(order: Order, order_total: float, payment) -> floa
     return order_total
 
 
-def process_webhook_refund_updated(notification: PaymentWebhookNotification):
-    """
-    Handle a webhook notification for a refund and update its Order accordingly.
-
-    Does not explicitly save the Order.
-
-    :param notification: The webhook notification of the refund.
-    """
-    # Find matching order, if any:
-    payment_id = notification.body["data"]["object"]["payment_id"]
-    try:
-        order: Order = Order.objects.get(apiData__payment__id=payment_id)
-    except Order.DoesNotExist:
-        logger.warning(
-            f"Got webhook for refund.update on payment.id = {payment_id}, but found no corresponding payment."
-        )
-        return False
-
-    stored_refunds = order.apiData["refunds"]
-    refund = notification.body["data"]["object"]["refund"]
-    if refund:
-        # Check if refund has already been stored (Refund created internally), and update in-place
-        order.apiData["refunds"].append(refund)
-        status = refund.get("status")
-        if status == "COMPLETED":
-            order.status = Order.REFUNDED
-        elif status == "PENDING":
-            order.status = Order.REFUND_PENDING
-
-    # TODO: Shouldn't order.save() be called here? Is this function used/tested?
-
-
 def refund_payment(
     order: Order,
     amount: float,
@@ -474,7 +442,7 @@ def refund_card_payment(
     return True, message
 
 
-def process_webhook_refund_update(notification) -> bool:
+def process_webhook_refund_update(notification: PaymentWebhookNotification) -> bool:
     # Find matching order based on refund ID:
     refund_id = notification.body["data"]["id"]
     try:
