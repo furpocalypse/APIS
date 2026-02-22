@@ -1,5 +1,5 @@
-from datetime import datetime
 from abc import ABCMeta, abstractmethod
+from datetime import datetime
 
 from django.conf import settings
 from django.contrib.sites.models import Site
@@ -10,12 +10,11 @@ from influxdb import InfluxDBClient
 
 from registration.models import *
 
-
 """
 There's a few options for where these metrics could end up.  These should eventually be configurable:
- - built-in database metrics table: (simplest, no external dependency).
- - prometheus: Time-series database, with existing reporters for e.g. django request processors.
- - influxdb: Another great time-series database.
+    * built-in database metrics table: (simplest, no external dependency).
+    * prometheus: Time-series database, with existing reporters for e.g. django request processors.
+    * influxdb: Another great time-series database.
 """
 
 
@@ -178,7 +177,8 @@ class InfluxDBReporter(CronReporterABC):
 
         :Keyword Arguments:
             * *timestamp* (``datetime.datetime``) --
-            Datetime timestamp to record
+              Datetime timestamp to record
+
         :return:
         """
         ts = kwargs.get("timestamp")

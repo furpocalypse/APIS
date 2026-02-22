@@ -39,6 +39,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "coveralls>=4.0.2",
+    "sphinx>=9.0.4",
+    "sphinx-rtd-theme>=3.1.0",
+    "sphinxcontrib-django>=2.5",
 ]
 test = [
     "coveralls>=4.0.2"
