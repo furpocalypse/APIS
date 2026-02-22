@@ -1,17 +1,26 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import List, Literal, Optional, TypeAlias
 
 from django.conf import settings
 from django.db.utils import NotSupportedError
+from django.http import HttpRequest
 from prometheus_client import Histogram
+from square.api.devices_api import DevicesApi
+from square.api.orders_api import OrdersApi
+from square.api.payments_api import PaymentsApi
+from square.api.refunds_api import RefundsApi
+from square.api.terminal_api import TerminalApi
 from square.client import Client
+from square.http.api_response import ApiResponse
 
 from . import emails
 from .models import *
 
-SQUARE_REQUESTS = Histogram("square_requests", "HTTP requests to Square API", ["endpoint"])
+SQUARE_REQUESTS = Histogram(
+    "square_requests", "HTTP requests to Square API", ["endpoint"]
+)
 
 client = Client(
     timeout=10,
@@ -21,16 +30,40 @@ client = Client(
     environment=settings.SQUARE_ENVIRONMENT,
 )
 
-devices_api = client.devices
-orders_api = client.orders
-payments_api = client.payments
-refunds_api = client.refunds
-terminals_api = client.terminal
+devices_api: DevicesApi = client.devices  # pyright: ignore[reportAssignmentType]
+orders_api: OrdersApi = client.orders  # pyright: ignore[reportAssignmentType]
+payments_api: PaymentsApi = client.payments  # pyright: ignore[reportAssignmentType]
+refunds_api: RefundsApi = client.refunds  # pyright: ignore[reportAssignmentType]
+terminals_api: TerminalApi = client.terminal  # pyright: ignore[reportAssignmentType]
 
 logger = logging.getLogger("registration.payments")
 
+BillingData: TypeAlias = dict[
+    Literal[
+        "source_id",
+        "cc_firstname",
+        "cc_lastname",
+        "email",
+        "address1",
+        "address2",
+        "city",
+        "state",
+        "postal",
+        "country",
+        "verificationToken",
+    ],
+    str,
+]
 
-def get_idempotency_key(request=None):
+
+def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
+    """
+    Gets the idempotency key from a request, generating one if none exists.
+
+    :param request: The request sent by the client.
+    :type request: :class:`django.http.HttpRequest`, optional
+    :return: A UUID as a string used as an idempotency key.
+    """
     if request:
         header_key = request.META.get("IDEMPOTENCY_KEY")
         if header_key:
@@ -38,11 +71,24 @@ def get_idempotency_key(request=None):
     return str(uuid.uuid4())
 
 
-def charge_payment(order, cc_data, request=None):
+def charge_payment(
+    order: Order, cc_data: BillingData, request: Optional[HttpRequest] = None
+) -> tuple[bool, dict]:
     """
-    Returns two variabies:
-        success - general success flag
-        message - type of failure.
+    Submits payment data on an order to the payment processor.
+
+     Makes the following Square API calls:
+
+    * `square.api.payments_api.PaymentsApi.create_payment`
+
+    :param order: The APIS Order making the charge.
+    :type order: :class:`registration.models.Order`
+    :param cc_data: Billing data needed to make the charge.
+    :type cc_data: :class:`registration.payments.BillingData`
+    :param request: HTTP request from the client
+    :type request: :class:`django.http.HttpRequest`, optional
+    :return: A tuple of the success status, and a dictionary to be sent as a
+        JSON response.
     """
 
     idempotency_key = get_idempotency_key(request)
@@ -118,14 +164,34 @@ def charge_payment(order, cc_data, request=None):
     return True, api_response.body
 
 
-def format_errors(errors):
+def format_errors(errors: List) -> str:
+    """
+    Formats a list of Square API errors to lines of text.
+
+    :param errors: A list of Square API errors.
+    :return: Lines of text in the format of: ``<category> - <code>: <details>``
+    """
     error_string = ""
     for error in errors:
         error_string += "{e[category]} - {e[code]}: {e[detail]}\n".format(e=error)
     return error_string
 
 
-def refresh_payment(order, store_api_data=None):
+def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None]:
+    """
+    Queries the payment gateway to update payment information on an order.
+
+    Makes the following Square API calls:
+
+    * `square.api.payments_api.PaymentsApi.get_payment`
+    * `square.api.refunds_api.RefundsApi.get_payment_refund`
+
+    :param order: The :class:`Order` to update.
+    :param store_api_data: Optional data. If not supplied, this function will
+        pull from the ``apiData`` property of the ``order``.
+    :return: A tuple of a boolean success status, and a string error of the
+        success status is ``False``.
+    """
     # Function raises ValueError if there's a problem decoding the stored data
     if store_api_data:
         api_data = store_api_data
@@ -206,7 +272,23 @@ def refresh_payment(order, store_api_data=None):
     return True, None
 
 
-def update_order_payment_data(order, order_total, payment):
+def update_order_payment_data(order: Order, order_total: float, payment) -> float:
+    """
+    Updates payment data in an APIS Order object based on info returned from
+    the Square API.
+
+    Based on given payment data, attempts to set the last 4 digits of the card
+    used for payment and the status of the order (``"COMPLETED"``, ``"FAILED"``,
+    or ``"CAPTURED"``), and returns the amount that was charged. Does not save
+    the Order.
+
+    :param order: The Order to be updated.
+    :param order_total: The total amount charged.
+    :param payment: Payment data returned from Square.
+    :return: The total charge amount that should be logged. If the order failed,
+             it will be the same as the ``order_total`` param. Otherwise, it
+             will be the amount inside of the ``payment`` data.
+    """
     try:
         order.lastFour = payment["card_details"]["card"]["last_4"]
     except KeyError:
@@ -227,11 +309,18 @@ def update_order_payment_data(order, order_total, payment):
     return order_total
 
 
-def process_webhook_refund_updated(notification):
+def process_webhook_refund_updated(notification: PaymentWebhookNotification):
+    """
+    Handle a webhook notification for a refund and update its Order accordingly.
+
+    Does not explicitly save the Order.
+
+    :param notification: The webhook notification of the refund.
+    """
     # Find matching order, if any:
     payment_id = notification.body["data"]["object"]["payment_id"]
     try:
-        order = Order.objets.get(apiData__payment__id=payment_id)
+        order: Order = Order.objects.get(apiData__payment__id=payment_id)
     except Order.DoesNotExist:
         logger.warning(
             f"Got webhook for refund.update on payment.id = {payment_id}, but found no corresponding payment."
@@ -249,8 +338,25 @@ def process_webhook_refund_updated(notification):
         elif status == "PENDING":
             order.status = Order.REFUND_PENDING
 
+    # TODO: Shouldn't order.save() be called here? Is this function used/tested?
 
-def refund_payment(order, amount, reason=None, request=None):
+
+def refund_payment(
+    order: Order,
+    amount: float,
+    reason: Optional[str] = None,
+    request: Optional[HttpRequest] = None,
+) -> tuple[bool, str | None]:
+    """
+    Determines whether an order can be refunded, and processes the refund id so.
+
+    :param order: The order that the payment refund should belong to.
+    :param amount: The amount being refunded.
+    :param reason: The reason for the refund.
+    :param request: Unused.
+    :return: A Tuple of a `bool` and a `str`, indicating success status and a
+             message in the case of an error.
+    """
     if order.status == Order.FAILED:
         return False, "Failed orders cannot be refunded."
     if order.billingType == Order.CREDIT:
@@ -266,7 +372,18 @@ def refund_payment(order, amount, reason=None, request=None):
     return False, "Not sure how to refund order type {0}!".format(order.billingType)
 
 
-def refund_cash_payment(order, amount, reason=None):
+def refund_cash_payment(
+    order: Order, amount: float, reason: Optional[str] = None
+) -> tuple[bool, None]:
+    """
+    Deducts the ``amount`` from the ``order``'s total and logs a `Cashdrawer`
+    transaction in the APIS database.
+
+    :param order: The Order being refunded.
+    :param amount: The amount of cash being refunded.
+    :param reason: An optional reason for the refund.
+    :return: A tuple of a boolean and nothing - this always succeeds.
+    """
     # Change order status
     order.status = Order.REFUNDED
     order.notes += "\nRefund issued {0}: {1}".format(timezone.now(), reason)
@@ -281,7 +398,24 @@ def refund_cash_payment(order, amount, reason=None):
     return True, None
 
 
-def refund_card_payment(order, amount, reason=None, request=None):
+def refund_card_payment(
+    order: Order,
+    amount: float,
+    reason: Optional[str] = None,
+    request: Optional[HttpRequest] = None,
+) -> tuple[bool, str]:
+    """Process a refund for a card-based payment.
+
+    Makes the following Square API calls:
+
+    * `square.api.refunds_api.RefundsApi.refund_payment`
+
+    :param order: _description_
+    :param amount: _description_
+    :param reason: Optional reason to log for the refund.
+    :param request: Original HTTP request from Django. Unused.
+    :return: A tuple of a boolean success status and an accompanying message.
+    """
     api_data = order.apiData
     payment_id = api_data["payment"]["id"]
     converted_amount = int(amount * 100)
@@ -352,7 +486,11 @@ def process_webhook_refund_update(notification) -> bool:
         )
         return False
     except NotSupportedError:
-        orders = [rec for rec in Order.objects.all() if "id" in rec["apiData"] and rec["apiData"]["id"] == refund_id ]
+        orders = [
+            rec
+            for rec in Order.objects.all()
+            if "id" in rec["apiData"] and rec["apiData"]["id"] == refund_id
+        ]
         if len(orders) == 0:
             logger.warning(
                 f"Got refund.updated webhook update for a refund id not found: {refund_id}"
@@ -498,6 +636,14 @@ def process_webhook_dispute_created_or_updated(
 
 
 def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
+    """Creates an order in Square.
+
+    :param terminal_name: The name of the terminal device from which the order
+        originated.
+    :param data: Order data.
+    :type data: dict
+    :return: The created order's ID.
+    """
     discounts = []
     line_items = []
 
@@ -509,68 +655,80 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
             uid = f"discount-{badge['id']}"
 
             if discount["percent_off"] > 0:
-                discounts.append({
-                    "uid": uid,
-                    "name": f"Discount {discount['name']}",
-                    "type": "FIXED_PERCENTAGE",
-                    "scope": "LINE_ITEM",
-                    "percentage": str(discount["percent_off"]),
-                })
+                discounts.append(
+                    {
+                        "uid": uid,
+                        "name": f"Discount {discount['name']}",
+                        "type": "FIXED_PERCENTAGE",
+                        "scope": "LINE_ITEM",
+                        "percentage": str(discount["percent_off"]),
+                    }
+                )
             elif discount["amount_off"] > 0:
-                discounts.append({
-                    "uid": uid,
-                    "name": f"Discount {discount['name']}",
-                    "type": "FIXED_AMOUNT",
-                    "scope": "LINE_ITEM",
-                    "amount_money": {
-                        "amount": int(discount["amount_off"] * 100),
-                        "currency": settings.SQUARE_CURRENCY,
-                    },
-                })
+                discounts.append(
+                    {
+                        "uid": uid,
+                        "name": f"Discount {discount['name']}",
+                        "type": "FIXED_AMOUNT",
+                        "scope": "LINE_ITEM",
+                        "amount_money": {
+                            "amount": int(discount["amount_off"] * 100),
+                            "currency": settings.SQUARE_CURRENCY,
+                        },
+                    }
+                )
 
-            badge_applied_discounts.append({
-                "discount_uid": uid,
-            })
+            badge_applied_discounts.append(
+                {
+                    "discount_uid": uid,
+                }
+            )
 
-        line_items.append({
-            "uid": f"badge-{badge['id']}",
-            "name": f"{badge['effectiveLevel']['name']} Badge",
-            "note": f"Badge Name - {badge['badgeName']}",
-            "quantity": "1",
-            "item_type": "ITEM",
-            "base_price_money": {
-                "amount": int(badge['level_subtotal'] * 100),
-                "currency": settings.SQUARE_CURRENCY,
-            },
-            "applied_discounts": badge_applied_discounts,
-        })
+        line_items.append(
+            {
+                "uid": f"badge-{badge['id']}",
+                "name": f"{badge['effectiveLevel']['name']} Badge",
+                "note": f"Badge Name - {badge['badgeName']}",
+                "quantity": "1",
+                "item_type": "ITEM",
+                "base_price_money": {
+                    "amount": int(badge["level_subtotal"] * 100),
+                    "currency": settings.SQUARE_CURRENCY,
+                },
+                "applied_discounts": badge_applied_discounts,
+            }
+        )
 
     if data["charityDonation"] > 0 or data["orgDonation"] > 0:
         event = Event.objects.get(default=True)
 
         if data["charityDonation"] > 0:
-            line_items.append({
-                "uid": "donation-charity",
-                "name": f"Donation to {{ event.charity }}",
-                "quantity": "1",
-                "item_type": "ITEM",
-                "base_price_money": {
-                    "amount": int(data["charityDonation"] * 100),
-                    "currency": settings.SQUARE_CURRENCY,
+            line_items.append(
+                {
+                    "uid": "donation-charity",
+                    "name": f"Donation to {{ event.charity }}",
+                    "quantity": "1",
+                    "item_type": "ITEM",
+                    "base_price_money": {
+                        "amount": int(data["charityDonation"] * 100),
+                        "currency": settings.SQUARE_CURRENCY,
+                    },
                 }
-            })
+            )
 
         if data["orgDonation"] > 0:
-            line_items.append({
-                "uid": "donation-organization",
-                "name": f"Donation to {{ event }}",
-                "quantity": "1",
-                "item_type": "ITEM",
-                "base_price_money": {
-                    "amount": int(data["orgDonation"] * 100),
-                    "currency": settings.SQUARE_CURRENCY,
+            line_items.append(
+                {
+                    "uid": "donation-organization",
+                    "name": f"Donation to {{ event }}",
+                    "quantity": "1",
+                    "item_type": "ITEM",
+                    "base_price_money": {
+                        "amount": int(data["orgDonation"] * 100),
+                        "currency": settings.SQUARE_CURRENCY,
+                    },
                 }
-            })
+            )
 
     order_data = {
         "order": {
@@ -581,7 +739,7 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
             },
             "discounts": discounts,
             "line_items": line_items,
-            "note": f"Reference: {data['reference']}"
+            "note": f"Reference: {data['reference']}",
         }
     }
 
@@ -595,7 +753,16 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
         return None
 
 
-def print_payment_receipt(request, square_device: SquareDevice, payment_id: str) -> bool:
+def print_payment_receipt(
+    request, square_device: SquareDevice, payment_id: str
+) -> bool:
+    """Tells a terminal to print a reciept for a given payment.
+
+    :param request: Original HTTP request from Django
+    :param square_device: The SquareDevice to send the print request to.
+    :param payment_id: Payment ID to print a reciept for.
+    :return: A boolean value indicating the success of the print request.
+    """
     data = {
         "idempotency_key": get_idempotency_key(request),
         "action": {
@@ -618,6 +785,16 @@ def print_payment_receipt(request, square_device: SquareDevice, payment_id: str)
 
 
 def get_terminals() -> List[dict]:
+    """
+    Gets the list of terminals defined in the payment processor.
+
+    Makes the following Square API calls:
+
+    * `square.api.devices_api.DevicesApi.list_devices`
+
+    :raises Exception: The API fails to get the device list.
+    :return: A List of parsed JSON dictionaries describing the terminals.
+    """
     terminals = []
 
     cursor = None
@@ -637,7 +814,29 @@ def get_terminals() -> List[dict]:
     return terminals
 
 
-def prompt_terminal_payment(request, device_id: str, total: int, reference: str, note: str, order_id: Optional[str]) -> Any:
+def prompt_terminal_payment(
+    request: HttpRequest,
+    device_id: str,
+    total: int,
+    reference: str,
+    note: str,
+    order_id: Optional[str],
+) -> ApiResponse:
+    """Sends a checkout request to a payment terminal.
+
+    Makes the following Square API calls:
+
+    * `square.api.terminal_api.TerminalApi.create_terminal_checkout`
+
+    :param request: Original HTTP request from Django
+    :param device_id: The Square device ID of the terminal to send the checkout
+        request to.
+    :param total: The total of the transaction being checked out, in cents.
+    :param reference: Reference ID
+    :param note: A note to attach to the checkout request.
+    :param order_id: The ID of the order being checked out.
+    :return: The ApiResponse produced by the payment processor.
+    """
     data = {
         "idempotency_key": get_idempotency_key(request),
         "checkout": {
@@ -649,7 +848,7 @@ def prompt_terminal_payment(request, device_id: str, total: int, reference: str,
             "device_options": {
                 "device_id": device_id,
             },
-        }
+        },
     }
 
     if order_id:
