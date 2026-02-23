@@ -17,6 +17,7 @@ Commands:
 	make dev                        : Develop locally with Docker
 	make dev-setup                  : Sets up a venv for local development
 	make pre-commit-setup           : Installs (or updates) pre-commit hooks
+	make docs                       : Generates documentation with Sphinx
 
 endef
 export HELP
@@ -78,6 +79,12 @@ dev-setup:
 
 	@echo "ACTION REQUIRED: Review fm_eventmanager/settings.py"
 
+docs:
+	sphinx-apidoc -o ./docs/source . "./*/migrations" "./manage.py" -fM
+	cd docs && make clean && make html
+
 pre-commit-setup:
 	pip3 install pre-commit
 	pre-commit install
+
+.PHONY: docs
