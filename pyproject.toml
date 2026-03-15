@@ -24,6 +24,7 @@ dependencies = [
     "influxdb>=5.3.1",
     "influxdb-client>=1.40.0",
     "paho-mqtt>=1.6.1",
+    "paypal-server-sdk==2.2.0",
     "pillow>=5.3",
     "psycopg2-binary>=2.9.9",
     "pygments>=2.18.0",
@@ -32,7 +33,6 @@ dependencies = [
     "respx>=0.22.0",
     "ruff>=0.9.6",
     "sentry-sdk>=2.21.0",
-    "squareup>=22.0.0.20220921",
     "tzdata>=2025.2",
 ]
 

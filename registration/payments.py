@@ -6,14 +6,15 @@ from typing import List, Literal, Optional, TypeAlias
 from django.conf import settings
 from django.db.utils import NotSupportedError
 from django.http import HttpRequest
+from paypalserversdk.configuration import Environment
+from paypalserversdk.http.auth.o_auth_2 import ClientCredentialsAuthCredentials
+from paypalserversdk.logging.configuration.api_logging_configuration import (
+    LoggingConfiguration,
+    RequestLoggingConfiguration,
+    ResponseLoggingConfiguration,
+)
+from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 from prometheus_client import Histogram
-from square.api.devices_api import DevicesApi
-from square.api.orders_api import OrdersApi
-from square.api.payments_api import PaymentsApi
-from square.api.refunds_api import RefundsApi
-from square.api.terminal_api import TerminalApi
-from square.client import Client
-from square.http.api_response import ApiResponse
 
 from . import emails
 from .models import *
@@ -22,19 +23,24 @@ SQUARE_REQUESTS = Histogram(
     "square_requests", "HTTP requests to Square API", ["endpoint"]
 )
 
-client = Client(
-    timeout=10,
-    max_retries=5,
-    retry_methods=["GET", "POST"],
-    access_token=settings.SQUARE_ACCESS_TOKEN,
-    environment=settings.SQUARE_ENVIRONMENT,
+client = PaypalServersdkClient(
+    client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
+        o_auth_client_id=settings.PAYPAL_CLIENT_ID,
+        o_auth_client_secret=settings.PAYPAL_CLIENT_SECRET,
+    ),
+    environment=(
+        Environment.PRODUCTION
+        if settings.PAYPAL_ENVIRONMENT.lower()[0] == "p"
+        else Environment.SANDBOX
+    ),
+    logging_configuration=LoggingConfiguration(
+        log_level=logging.INFO,
+        request_logging_config=RequestLoggingConfiguration(log_body=settings.DEBUG),
+        response_logging_config=ResponseLoggingConfiguration(
+            log_headers=settings.DEBUG
+        ),
+    ),
 )
-
-devices_api: DevicesApi = client.devices  # pyright: ignore[reportAssignmentType]
-orders_api: OrdersApi = client.orders  # pyright: ignore[reportAssignmentType]
-payments_api: PaymentsApi = client.payments  # pyright: ignore[reportAssignmentType]
-refunds_api: RefundsApi = client.refunds  # pyright: ignore[reportAssignmentType]
-terminals_api: TerminalApi = client.terminal  # pyright: ignore[reportAssignmentType]
 
 logger = logging.getLogger("registration.payments")
 
@@ -135,7 +141,8 @@ def charge_payment(
     logger.debug(body)
 
     with SQUARE_REQUESTS.labels(endpoint="create_payment").time():
-        api_response = payments_api.create_payment(body)
+        api_response = {}
+        # api_response = payments_api.create_payment(body)
 
     logger.debug("---- Charge Submitted ----")
     logger.debug(api_response)
@@ -208,7 +215,8 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
         logger.warning("Refresh payment: MISSING_PAYMENT_ID")
         return False, "MISSING_PAYMENT_ID"
     with SQUARE_REQUESTS.labels(endpoint="get_payment").time():
-        payments_response = payments_api.get_payment(payment_id)
+        payments_response = {}
+        # payments_response = payments_api.get_payment(payment_id)
 
     payment = payments_response.body.get("payment")
     if payments_response.is_success():
@@ -237,7 +245,8 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
 
     for refund_id in refund_ids:
         with SQUARE_REQUESTS.labels(endpoint="get_payment_refund").time():
-            refunds_response = refunds_api.get_payment_refund(refund_id)
+            refunds_response = {}
+            # refunds_response = refunds_api.get_payment_refund(refund_id)
 
         if refunds_response.is_success():
             refund = refunds_response.body.get("refund")
@@ -400,7 +409,8 @@ def refund_card_payment(
         body["reason"] = reason
 
     with SQUARE_REQUESTS.labels(endpoint="refund_payment").time():
-        result = refunds_api.refund_payment(body)
+        result = {}
+        # result = refunds_api.refund_payment(body)
     logger.debug(result.body)
 
     if result.is_error():
@@ -712,7 +722,8 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
     }
 
     with SQUARE_REQUESTS.labels(endpoint="create_order").time():
-        result = orders_api.create_order(order_data)
+        result = {}
+        # result = orders_api.create_order(order_data)
 
     if result.is_success():
         return result.body["order"]["id"]
@@ -744,7 +755,8 @@ def print_payment_receipt(
     }
 
     with SQUARE_REQUESTS.labels(endpoint="create_terminal_action").time():
-        result = terminals_api.create_terminal_action(data)
+        result = {}
+        # result = terminals_api.create_terminal_action(data)
 
     if result.is_error():
         logger.error("could not print receipt: %s", result.errors)
@@ -767,7 +779,8 @@ def get_terminals() -> List[dict]:
 
     cursor = None
     while True:
-        result = devices_api.list_devices(cursor=cursor)
+        result = {}
+        # result = devices_api.list_devices(cursor=cursor)
         if result.is_error():
             raise Exception("Unable to get Square devices")
 
@@ -789,7 +802,8 @@ def prompt_terminal_payment(
     reference: str,
     note: str,
     order_id: Optional[str],
-) -> ApiResponse:
+):
+    # ) -> ApiResponse:
     """Sends a checkout request to a payment terminal.
 
     Makes the following Square API calls:
@@ -824,4 +838,5 @@ def prompt_terminal_payment(
     else:
         data["checkout"]["note"] = note
 
-    return terminals_api.create_terminal_checkout(data)
+    return {}
+    # return terminals_api.create_terminal_checkout(data)
