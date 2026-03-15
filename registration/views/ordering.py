@@ -3,7 +3,7 @@ import logging
 import time
 from json import JSONDecodeError
 
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from idempotency_key.decorators import idempotency_key
 
 import registration.emails
@@ -243,6 +243,27 @@ def add_attendee_to_assistant(request, attendee):
             assistant.save()
         except DealerAsst.DoesNotExist:
             pass
+
+
+def create_order(request: HttpRequest) -> JsonResponse:
+    """
+    REST endpoint used by PayPal's frontend script to create an order after the
+    user enters their information into PayPal.
+
+    :param request: Incoming HTTP request.
+    :return: JSON response containing the response body from the PayPal Orders
+        API.
+    """
+    # Taking a stab at what this might look like.
+    try:
+        body = json.loads(request.body)
+    except ValueError as e:
+        logger.error("Unable to decode JSON for create_order()")
+        return JsonResponse({"success": False})
+
+    # response = create_paypal_order(body.cart) # Payments module
+    # return JsonResponse(response.body, status=200)
+    return common.abort(reason="Not implemented yet.")
 
 
 @idempotency_key(optional=False)
