@@ -27,6 +27,7 @@ dependencies = [
     "paypal-server-sdk==2.2.0",
     "pillow>=5.3",
     "psycopg2-binary>=2.9.9",
+    "pydantic>=2.12.5",
     "pygments>=2.18.0",
     "pyjwt>=2.8.0",
     "qrcode>=7.4.2",
