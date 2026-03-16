@@ -1,6 +1,6 @@
+import datetime
 import json
 import logging
-import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -31,10 +31,6 @@ from registration.models import (
     Staff,
     get_token,
 )
-from registration.payments import charge_payment
-from registration.views import ordering
-from registration.views.cart import saveCart
-from registration.views.ordering import add_attendee_to_assistant
 
 logger = logging.getLogger("django.request")
 
@@ -206,7 +202,9 @@ def index(request):
     if event.attendeeRegStart <= today <= event.attendeeRegEnd:
         return render(request, "registration/registration-form.html", context)
     elif event.attendeeRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to our social media for updates!"
+        )
         return render(request, "registration/closed.html", context)
     elif event.attendeeRegEnd <= today:
         context["message"] = "has ended."

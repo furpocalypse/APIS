@@ -15,6 +15,7 @@ from paypalserversdk.logging.configuration.api_logging_configuration import (
 )
 from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 from prometheus_client import Histogram
+from pydantic import validate_call
 
 from . import emails
 from .models import *
@@ -77,7 +78,8 @@ def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
     return str(uuid.uuid4())
 
 
-def charge_payment(
+@validate_call
+def charge_square_payment(
     order: Order, cc_data: BillingData, request: Optional[HttpRequest] = None
 ) -> tuple[bool, dict]:
     """

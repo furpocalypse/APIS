@@ -2,17 +2,87 @@ import json
 import logging
 import time
 from json import JSONDecodeError
+from typing import Any
 
-from django.http import HttpRequest, JsonResponse
+from apimatic_core.response_handler import ApiResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http.response import HttpResponse
 from idempotency_key.decorators import idempotency_key
+from paypalserversdk.api_helper import ApiHelper
+from paypalserversdk.controllers.orders_controller import OrdersController
+from paypalserversdk.controllers.payments_controller import PaymentsController
+from paypalserversdk.exceptions.error_exception import ErrorException
+from paypalserversdk.http.auth.o_auth_2 import ClientCredentialsAuthCredentials
+from paypalserversdk.logging.configuration.api_logging_configuration import (
+    LoggingConfiguration,
+    RequestLoggingConfiguration,
+    ResponseLoggingConfiguration,
+)
+from paypalserversdk.models.amount_breakdown import AmountBreakdown
+from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
+from paypalserversdk.models.capture_request import CaptureRequest
+from paypalserversdk.models.card_attributes import CardAttributes
+from paypalserversdk.models.card_request import CardRequest
+from paypalserversdk.models.card_verification import CardVerification
+from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
+from paypalserversdk.models.item import Item
+from paypalserversdk.models.item_category import ItemCategory
+from paypalserversdk.models.money import Money
+from paypalserversdk.models.order_application_context_shipping_preference import (
+    ShippingPreference,
+)
+from paypalserversdk.models.order_request import OrderRequest
+from paypalserversdk.models.orders_card_verification_method import (
+    OrdersCardVerificationMethod,
+)
+from paypalserversdk.models.payment_source import PaymentSource
+from paypalserversdk.models.paypal_experience_landing_page import (
+    PaypalExperienceLandingPage,
+)
+from paypalserversdk.models.paypal_experience_user_action import (
+    PaypalExperienceUserAction,
+)
+from paypalserversdk.models.paypal_wallet import PaypalWallet
+from paypalserversdk.models.paypal_wallet_experience_context import (
+    PaypalWalletExperienceContext,
+)
+from paypalserversdk.models.purchase_unit_request import PurchaseUnitRequest
+from paypalserversdk.models.shipping_details import ShippingDetails
+from paypalserversdk.models.shipping_option import ShippingOption
+from paypalserversdk.models.shipping_type import ShippingType
+from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 
 import registration.emails
 from registration.models import *
-from registration.payments import charge_payment
+from registration.payments import charge_square_payment
 
 from . import cart, common
 
 logger = logging.getLogger(__name__)
+
+
+paypal_client: PaypalServersdkClient = PaypalServersdkClient(
+    client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
+        o_auth_client_id=settings.PAYPAL_CLIENT_ID,
+        o_auth_client_secret=settings.PAYPAL_CLIENT_SECRET,
+    ),
+    logging_configuration=LoggingConfiguration(
+        log_level=logging.INFO,
+        # Disable masking of sensitive headers for Sandbox testing.
+        # This should be set to True (the default if unset)in production.
+        mask_sensitive_headers=False,
+        request_logging_config=RequestLoggingConfiguration(
+            log_headers=True, log_body=True
+        ),
+        response_logging_config=ResponseLoggingConfiguration(
+            log_headers=True, log_body=True
+        ),
+    ),
+)
+
+
+orders_controller: OrdersController = paypal_client.orders
+payments_controller: PaymentsController = paypal_client.payments
 
 
 def do_checkout(
@@ -57,7 +127,7 @@ def do_checkout(
                 ),
             )
 
-    status, response = charge_payment(order, billingData, request)
+    status, response = charge_square_payment(order, billingData, request)
 
     if status:
         order.save()
@@ -245,29 +315,104 @@ def add_attendee_to_assistant(request, attendee):
             pass
 
 
+# TODO
+def validate_cart(cart: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Check that the JSON we get matches against what is possible
+    to order.  Since what we get client side is unsanitized, an attack vector
+    would be to create custom-crafted carts which could be used to transfer
+    funds from us to the user or provide free everything.
+    """
+    return cart
+
+
+def register_unpaid_order():
+    raise RuntimeError("Use the actual function call!")
+
+
+# TODO
 def create_order(request: HttpRequest) -> JsonResponse:
     """
-    REST endpoint used by PayPal's frontend script to create an order after the
-    user enters their information into PayPal.
+    In the PayPal order flow, this is the second endpoint.
 
-    :param request: Incoming HTTP request.
+    REST endpoint used by PayPal's frontend script to create an order after the
+    user enters their information into PayPal.  The object is presumably
+    created by us, but could have been maliciously altered, so we must
+    validate it. Then with the valid order, we construct the call details
+    which get sent to PayPal, WE send those details (so it is secure between
+    us and PayPal), then return an ID to the user. The user then uses that
+    (via the PayPal JavaScript library) to make their payment calls, and call
+    the final step of the ordering process in `capture_order()`.
+
+    :param request: Incoming HTTP request.  The 'cart' item is defined
+        somewhere (probably the webpage) that gets redirected back to us
+        indicating what they ordered.  This object needs validation.
+
     :return: JSON response containing the response body from the PayPal Orders
         API.
     """
     # Taking a stab at what this might look like.
     try:
-        body = json.loads(request.body)
+        request_body = json.loads(request.body)
     except ValueError as e:
         logger.error("Unable to decode JSON for create_order()")
         return JsonResponse({"success": False})
 
-    # response = create_paypal_order(body.cart) # Payments module
-    # return JsonResponse(response.body, status=200)
-    return common.abort(reason="Not implemented yet.")
+    order_items = validate_cart(request_body)
+    register_unpaid_order(
+        order_items
+    )  # TODO: find the existing function which does this, update it, and use it.
+
+    # use the cart information passed from the front-end to calculate the order amount detals
+    order = orders_controller.create_order(
+        {
+            "body": OrderRequest(
+                intent=CheckoutPaymentIntent.CAPTURE,
+                purchase_units=[
+                    PurchaseUnitRequest(
+                        amount=AmountWithBreakdown(
+                            currency_code="USD",
+                            value="100",
+                            breakdown=AmountBreakdown(
+                                item_total=Money(currency_code="USD", value="100")
+                            ),
+                        ),
+                        items=[
+                            Item(
+                                name=item.itemName,
+                                unit_amount=Money(
+                                    currency_code="USD", value=str(item.individualPrice)
+                                ),
+                                quantity=str(item.quantity),
+                                description=item.description,
+                                sku=item.pk,
+                                category=ItemCategory.DIGITAL_GOODS,
+                            )
+                            for item in request_body["cart"]
+                        ],
+                    )
+                ],
+            )
+        }
+    )
+
+    return HttpResponse(
+        request_body=json.dumps(order.body), status=200, mimetype="application/json"
+    )
 
 
+# TODO
 @idempotency_key(optional=False)
-def checkout(request):
+def checkout(request: HttpRequest) -> HttpResponse:
+    """
+    In the PayPal order flow, this is the first endpoint.  It returns the
+    webpage with PayPal's JavaSceript API.
+
+    This mainly is talkback between the merchant server (us) and the person
+    checking out.  The results get sent back to us from an object we (if not
+    maliciously altered) create.  See `create_order()` for the next step.
+    """
+
     event = Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items = list(Cart.objects.filter(id__in=session_items))
@@ -394,6 +539,26 @@ def checkout(request):
         return common.abort(400, message)
 
 
+# TODO
+def capture_order(request: HttpRequest) -> HttpResponse:
+    """
+    This is the third and final endpoint for the merchant server to implement
+    in order to support the PayPal order flow.  We get back from the user a
+    payment validation token.  We take this token and send it to PayPal to
+    validate the payment. We take that response, handle whatever happened with
+    that payment, and register the transaction accordingly.
+    """
+
+    raise RuntimeError("Not implemented.")
+
+    order: ApiResponse = orders_controller.capture_order(
+        {"id": json.loads(request.body), "prefer": "return=representation"}
+    )
+    return HttpResponse(
+        request_body=json.dumps(order.body), status=200, mimetype="application/json"
+    )
+
+
 def deleteOrderItem(id):
     orderItems = OrderItem.objects.filter(id=id)
     if orderItems.count() == 0:
@@ -404,6 +569,7 @@ def deleteOrderItem(id):
     orderItem.delete()
 
 
+# TODO
 def cancel_order(request):
     # (DEPRECATED) XXX [Is it actually? Button still hooked up in frontend -R]
     # remove order from session
