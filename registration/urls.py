@@ -290,9 +290,9 @@ urlpatterns = [
         name="discount",
     ),
     re_path(
-        r"^cart/createorder/?$",
-        registration.views.ordering.create_order,
-        name="createorder",
+        r"^cart/paypalcreate/?$",
+        registration.views.ordering.create_paypal_order,
+        name="paypalcreate",
     ),
     re_path(
         r"^cart/checkout/?$", registration.views.ordering.checkout, name="checkout"

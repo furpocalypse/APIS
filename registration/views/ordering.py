@@ -1,91 +1,52 @@
 import json
 import logging
-import time
 from json import JSONDecodeError
-from typing import Any
+from typing import Any, Optional
 
 from apimatic_core.response_handler import ApiResponse
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.http.response import HttpResponse
 from idempotency_key.decorators import idempotency_key
-from paypalserversdk.api_helper import ApiHelper
-from paypalserversdk.controllers.orders_controller import OrdersController
-from paypalserversdk.controllers.payments_controller import PaymentsController
-from paypalserversdk.exceptions.error_exception import ErrorException
-from paypalserversdk.http.auth.o_auth_2 import ClientCredentialsAuthCredentials
-from paypalserversdk.logging.configuration.api_logging_configuration import (
-    LoggingConfiguration,
-    RequestLoggingConfiguration,
-    ResponseLoggingConfiguration,
-)
-from paypalserversdk.models.amount_breakdown import AmountBreakdown
-from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
-from paypalserversdk.models.capture_request import CaptureRequest
-from paypalserversdk.models.card_attributes import CardAttributes
-from paypalserversdk.models.card_request import CardRequest
-from paypalserversdk.models.card_verification import CardVerification
-from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
-from paypalserversdk.models.item import Item
-from paypalserversdk.models.item_category import ItemCategory
-from paypalserversdk.models.money import Money
-from paypalserversdk.models.order_application_context_shipping_preference import (
-    ShippingPreference,
-)
-from paypalserversdk.models.order_request import OrderRequest
-from paypalserversdk.models.orders_card_verification_method import (
-    OrdersCardVerificationMethod,
-)
-from paypalserversdk.models.payment_source import PaymentSource
-from paypalserversdk.models.paypal_experience_landing_page import (
-    PaypalExperienceLandingPage,
-)
-from paypalserversdk.models.paypal_experience_user_action import (
-    PaypalExperienceUserAction,
-)
-from paypalserversdk.models.paypal_wallet import PaypalWallet
-from paypalserversdk.models.paypal_wallet_experience_context import (
-    PaypalWalletExperienceContext,
-)
-from paypalserversdk.models.purchase_unit_request import PurchaseUnitRequest
-from paypalserversdk.models.shipping_details import ShippingDetails
-from paypalserversdk.models.shipping_option import ShippingOption
-from paypalserversdk.models.shipping_type import ShippingType
-from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
+from paypalserversdk.exceptions.api_exception import ApiException
 
 import registration.emails
 from registration.models import *
-from registration.payments import charge_square_payment
+from registration.payments import (
+    TranslatedCartItem,
+    capture_paypal_payment,
+    create_unpaid_paypal_order,
+)
 
 from . import cart, common
 
 logger = logging.getLogger(__name__)
 
 
-paypal_client: PaypalServersdkClient = PaypalServersdkClient(
-    client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
-        o_auth_client_id=settings.PAYPAL_CLIENT_ID,
-        o_auth_client_secret=settings.PAYPAL_CLIENT_SECRET,
-    ),
-    logging_configuration=LoggingConfiguration(
-        log_level=logging.INFO,
-        # Disable masking of sensitive headers for Sandbox testing.
-        # This should be set to True (the default if unset)in production.
-        mask_sensitive_headers=False,
-        request_logging_config=RequestLoggingConfiguration(
-            log_headers=True, log_body=True
-        ),
-        response_logging_config=ResponseLoggingConfiguration(
-            log_headers=True, log_body=True
-        ),
-    ),
-)
+def get_cart_data_from_session(
+    request: HttpRequest,
+) -> tuple[list[Cart], list[OrderItem], str]:
+    """
+    Retrieve cart data from the Django session.
 
+    :param request: The request sent by the client.
+    :return: A tuple consisting of:
 
-orders_controller: OrdersController = paypal_client.orders
-payments_controller: PaymentsController = paypal_client.payments
+        * A list of Cart models
+        * A list of OrderItem models
+        * The discount code applied to the cart, if any
+    """
+
+    cart_ids = request.session.get("cart_items", [])
+    order_ids = request.session.get("order_items", [])
+    return (
+        list(Cart.objects.filter(id__in=cart_ids)),
+        list(OrderItem.objects.filter(id__in=order_ids)),
+        request.session.get("discount", ""),
+    )
 
 
 def do_checkout(
+    paypal_order_id,
     billingData,
     total,
     discount,
@@ -127,7 +88,7 @@ def do_checkout(
                 ),
             )
 
-    status, response = charge_square_payment(order, billingData, request)
+    status, response = capture_paypal_payment(paypal_order_id, order)
 
     if status:
         order.save()
@@ -229,13 +190,10 @@ def get_discount_total(disc, subtotal):
     return 0
 
 
-def get_total(cartItems, orderItems, disc=""):
-    total = 0
-    total_discount = 0
-    if not cartItems and not orderItems:
-        return 0, 0
-
-    for item in cartItems:
+def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Decimal:
+    item_total = 0
+    discount = 0
+    if isinstance(item, Cart):
         post_data = json.loads(item.formData)
         pdp = post_data["priceLevel"]
         price_level = PriceLevel.objects.get(id=pdp["id"])
@@ -243,16 +201,7 @@ def get_total(cartItems, orderItems, disc=""):
 
         options = pdp["options"]
         item_total += getCartItemOptionTotal(options)
-
-        if disc:
-            discount = get_discount_total(disc, item_total)
-            total_discount += discount
-            item_total -= discount
-
-        if item_total > 0:
-            total += item_total
-
-    for item in orderItems:
+    elif isinstance(item, OrderItem):
         item_sub_total = item.priceLevel.basePrice
         eff_level = item.badge.effectiveLevel()
 
@@ -263,13 +212,31 @@ def get_total(cartItems, orderItems, disc=""):
 
         item_total += get_order_item_option_total(item.attendeeoptions_set.all())
 
-        if disc:
-            discount = get_discount_total(disc, item_total)
-            total_discount += discount
-            item_total -= discount
+    if disc:
+        discount = get_discount_total(disc, item_total)
 
+    return item_total, discount
+
+
+def get_total(
+    cartItems: list[Cart], orderItems: list[OrderItem], disc: Optional[str] = ""
+) -> tuple[Decimal, Decimal]:
+    total = 0
+    total_discount = 0
+    if not cartItems and not orderItems:
+        return 0, 0
+
+    for item in cartItems:
+        item_total, discount = get_line_item_total(item, disc)
         if item_total > 0:
             total += item_total
+        total_discount += discount
+
+    for item in orderItems:
+        item_total, discount = get_line_item_total(item, disc)
+        if item_total > 0:
+            total += item_total
+        total_discount += discount
 
     return total, total_discount
 
@@ -315,103 +282,139 @@ def add_attendee_to_assistant(request, attendee):
             pass
 
 
-# TODO
-def validate_cart(cart: Dict[str, Any]) -> Dict[str, Any]:
+@idempotency_key(optional=False)
+def create_paypal_order(request: HttpRequest) -> JsonResponse:
     """
-    Check that the JSON we get matches against what is possible
-    to order.  Since what we get client side is unsanitized, an attack vector
-    would be to create custom-crafted carts which could be used to transfer
-    funds from us to the user or provide free everything.
-    """
-    return cart
+    In the PayPal order flow, this is the first endpoint.
 
+    REST endpoint used by PayPal's frontend script to create an order in
+    PayPal's system after the user clicks the pay with PayPal button. Constructs
+    cart details to send to PayPal, sends it, and returns the response from the
+    PayPal API. The checkout page scripts (the PayPal JavaScript library) use
+    the newly created order ID to capture payment after the user verifies their
+    cart in PayPal.
 
-def register_unpaid_order():
-    raise RuntimeError("Use the actual function call!")
-
-
-# TODO
-def create_order(request: HttpRequest) -> JsonResponse:
-    """
-    In the PayPal order flow, this is the second endpoint.
-
-    REST endpoint used by PayPal's frontend script to create an order after the
-    user enters their information into PayPal.  The object is presumably
-    created by us, but could have been maliciously altered, so we must
-    validate it. Then with the valid order, we construct the call details
-    which get sent to PayPal, WE send those details (so it is secure between
-    us and PayPal), then return an ID to the user. The user then uses that
-    (via the PayPal JavaScript library) to make their payment calls, and call
-    the final step of the ordering process in `capture_order()`.
-
-    :param request: Incoming HTTP request.  The 'cart' item is defined
-        somewhere (probably the webpage) that gets redirected back to us
-        indicating what they ordered.  This object needs validation.
+    :param request: Incoming HTTP request. May contain donation amounts in the
+        body.
 
     :return: JSON response containing the response body from the PayPal Orders
         API.
     """
-    # Taking a stab at what this might look like.
+    # We don't need to get cart items from the client - they're in the session
+    (cart_items, order_items, discount_code) = get_cart_data_from_session(request)
+
+    # Safety valve (in case session times out before checkout is complete)
+    if len(cart_items) == 0 and len(order_items) == 0:
+        common.abort(400, "Session expired or no session is stored for this client")
+
     try:
-        request_body = json.loads(request.body)
-    except ValueError as e:
-        logger.error("Unable to decode JSON for create_order()")
-        return JsonResponse({"success": False})
+        post_data = json.loads(request.body)
+    except (ValueError, JSONDecodeError) as e:
+        logger.exception(e)
+        logger.error("Unable to decode JSON for checkout()")
+        return common.abort(400, "Unable to parse input options")
 
-    order_items = validate_cart(request_body)
-    register_unpaid_order(
-        order_items
-    )  # TODO: find the existing function which does this, update it, and use it.
+    event = Event.objects.get(default=True)
 
-    # use the cart information passed from the front-end to calculate the order amount detals
-    order = orders_controller.create_order(
-        {
-            "body": OrderRequest(
-                intent=CheckoutPaymentIntent.CAPTURE,
-                purchase_units=[
-                    PurchaseUnitRequest(
-                        amount=AmountWithBreakdown(
-                            currency_code="USD",
-                            value="100",
-                            breakdown=AmountBreakdown(
-                                item_total=Money(currency_code="USD", value="100")
-                            ),
-                        ),
-                        items=[
-                            Item(
-                                name=item.itemName,
-                                unit_amount=Money(
-                                    currency_code="USD", value=str(item.individualPrice)
-                                ),
-                                quantity=str(item.quantity),
-                                description=item.description,
-                                sku=item.pk,
-                                category=ItemCategory.DIGITAL_GOODS,
-                            )
-                            for item in request_body["cart"]
-                        ],
-                    )
-                ],
+    discount = Discount.objects.filter(codeName=discount_code)
+    if discount.count() > 0 and discount.first().isValid():
+        discount = discount.first()
+    else:
+        discount = None
+
+    # Process cart item data and calculate totals
+    translated_cart: list[TranslatedCartItem] = []
+    for item in cart_items:
+        parsed_data = json.loads(item.formData)
+        pda = parsed_data["attendee"]
+        pdp = parsed_data["priceLevel"]
+
+        # DO NOT SAVE THESE MODELS
+        attendee = Attendee(
+            preferredName=pda.get("preferredName", ""),
+            firstName=pda["firstName"],
+            lastName=pda["lastName"],
+        )
+        priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
+
+        item_total, discount = get_line_item_total(item, discount_code)
+        translated_cart.append(
+            {
+                "name": str(event) + " " + str(priceLevel) + " - " + str(attendee),
+                "total": item_total,
+                "donation": False,
+            }
+        )
+
+    for item in order_items:
+        item_total, discount = get_line_item_total(item, discount_code)
+        badge = item.badge
+        translated_cart.append(
+            {
+                "name": str(event)
+                + " "
+                + str(item.priceLevel)
+                + " - "
+                + str(badge.attendee),
+                "total": item_total,
+                "donation": False,
+            }
+        )
+
+    subtotal, total_discount = get_total(cart_items, order_items, discount)
+
+    porg = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+
+    if porg < 0:
+        porg = 0
+    if pcharity < 0:
+        pcharity = 0
+
+    if porg > 0:
+        translated_cart.append(
+            {"name": "Donation to " + str(event), "total": porg, "donation": True}
+        )
+
+    if pcharity > 0:
+        translated_cart.append(
+            {
+                "name": "Donation to " + str(event.charity),
+                "total": pcharity,
+                "donation": True,
+            }
+        )
+
+    total = subtotal + porg + pcharity
+
+    # We only want to set up to capture payment if there is payment due
+    if total > 0:
+        try:
+            result = create_unpaid_paypal_order(total, total_discount, translated_cart)
+            return JsonResponse(json.loads(result.text))
+        except ApiException as ex:
+            return JsonResponse(
+                json.loads(ex.response.text), status_code=ex.response_code
             )
-        }
-    )
-
-    return HttpResponse(
-        request_body=json.dumps(order.body), status=200, mimetype="application/json"
-    )
 
 
 # TODO
 @idempotency_key(optional=False)
 def checkout(request: HttpRequest) -> HttpResponse:
     """
-    In the PayPal order flow, this is the first endpoint.  It returns the
-    webpage with PayPal's JavaSceript API.
-
-    This mainly is talkback between the merchant server (us) and the person
-    checking out.  The results get sent back to us from an object we (if not
-    maliciously altered) create.  See `create_order()` for the next step.
+    Finalizes checkout, creating order data and capturing payment.
     """
+
+    try:
+        post_data = json.loads(request.body)
+    except (ValueError, JSONDecodeError) as e:
+        logger.exception(e)
+        logger.error("Unable to decode JSON for checkout()")
+        return common.abort(400, "Unable to parse input options")
+
+    # Expect the order ID to be sent in POST data.
+    if not "orderID" in post_data:
+        return common.abort(400, "Missing PayPal order ID")
 
     event = Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
@@ -422,13 +425,6 @@ def checkout(request: HttpRequest) -> HttpResponse:
     # Safety valve (in case session times out before checkout is complete)
     if len(session_items) == 0 and len(order_items) == 0:
         common.abort(400, "Session expired or no session is stored for this client")
-
-    try:
-        post_data = json.loads(request.body)
-    except (ValueError, JSONDecodeError) as e:
-        logger.exception(e)
-        logger.error("Unable to decode JSON for checkout()")
-        return common.abort(400, "Unable to parse input options")
 
     discount = Discount.objects.filter(codeName=pdisc)
     if discount.count() > 0 and discount.first().isValid():
@@ -443,6 +439,17 @@ def checkout(request: HttpRequest) -> HttpResponse:
 
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
+
+    porg = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    pbill = post_data["billingData"]
+
+    if porg < 0:
+        porg = 0
+    if pcharity < 0:
+        pcharity = 0
+
+    total = subtotal + porg + pcharity
 
     if subtotal == 0:
         status, message, order = doZeroCheckout(discount, cart_items, order_items)
@@ -467,17 +474,6 @@ def checkout(request: HttpRequest) -> HttpResponse:
                 ),
             )
         return common.success()
-
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    pbill = post_data["billingData"]
-
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
-
-    total = subtotal + porg + pcharity
 
     onsite = post_data["onsite"]
     if onsite:
@@ -507,7 +503,15 @@ def checkout(request: HttpRequest) -> HttpResponse:
         message = "Onsite success"
     else:
         status, message, order = do_checkout(
-            pbill, total, discount, cart_items, order_items, porg, pcharity, request
+            post_data["orderID"],
+            pbill,
+            total,
+            discount,
+            cart_items,
+            order_items,
+            porg,
+            pcharity,
+            request,
         )
 
     if status:
@@ -537,26 +541,6 @@ def checkout(request: HttpRequest) -> HttpResponse:
         return common.success()
     else:
         return common.abort(400, message)
-
-
-# TODO
-def capture_order(request: HttpRequest) -> HttpResponse:
-    """
-    This is the third and final endpoint for the merchant server to implement
-    in order to support the PayPal order flow.  We get back from the user a
-    payment validation token.  We take this token and send it to PayPal to
-    validate the payment. We take that response, handle whatever happened with
-    that payment, and register the transaction accordingly.
-    """
-
-    raise RuntimeError("Not implemented.")
-
-    order: ApiResponse = orders_controller.capture_order(
-        {"id": json.loads(request.body), "prefer": "return=representation"}
-    )
-    return HttpResponse(
-        request_body=json.dumps(order.body), status=200, mimetype="application/json"
-    )
 
 
 def deleteOrderItem(id):

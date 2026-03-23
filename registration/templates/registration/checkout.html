@@ -26,7 +26,7 @@
         </tr>
         {% for item in orderItems %}
           <tr class="active">
-            {% if item.attendee %}
+          {% if item.attendee %}
             <td>{% attendee_get_first item.attendee %} {{ item.attendee.lastName }}</td>
             <td>{{ item.priceLevel }}</td>
             <td>${{ item.priceLevel.basePrice }} <a class="deleteAttendee" id="delete_{{ item.id }}">&times; Remove</a></td>
@@ -290,10 +290,17 @@
 
 {% block javascript %}
   {% if total > 0 %}
-    {% if SQUARE_ENVIRONMENT == "sandbox" %}
-      <script type="text/javascript" src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
+  <!-- Initialize the JS-SDK -->
+  {% if PAYPAL_ENVIRONMENT == "sandbox" %}
+      <script
+          src="https://www.paypal.com/sdk/js?client-id={% settings_value 'PAYPAL_CLIENT_ID' %}&buyer-country=US&currency=USD&components=buttons&enable-funding=venmo,card"
+          data-sdk-integration-source="developer-studio"
+      ></script>
     {% else %}
-      <script type="text/javascript" src="https://web.squarecdn.com/v1/square.js"></script>
+      <script
+          src="https://www.paypal.com/sdk/js?client-id={% settings_value 'PAYPAL_CLIENT_ID' %}&components=buttons&enable-funding=venmo,card"
+          data-sdk-integration-source="developer-studio"
+      ></script>
     {% endif %}
   {% endif %}
   <script type="text/javascript">
@@ -302,6 +309,7 @@
       const LOCATION_ID = "{% settings_value 'SQUARE_LOCATION_ID' %}";
 
       /* APIS URLs */
+      const URL_REGISTRATION_CREATEORDER = "{% url 'registration:paypalcreate' %}";
       const URL_REGISTRATION_CHECKOUT = "{% url 'registration:checkout' %}";
       const URL_REGISTRATION_INDEX = "{% url 'registration:index' %}";
       const URL_REGISTRATION_DONE = "{% url 'registration:done' %}";
@@ -316,7 +324,7 @@
   </script>
   <script type="application/javascript" src="{% static 'js/checkout.js' %}"></script>
   {% if total > 0 %}
-    <script type="application/javascript" src="{% static 'js/payments.js' %}"></script>
+    <script type="application/javascript" src="{% static 'js/payments-paypal.js' %}"></script>
   {% else %}
     <script type="application/javascript">
         async function checkout(event) {
