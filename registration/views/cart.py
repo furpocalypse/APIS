@@ -63,7 +63,9 @@ def get_cart(request):
             event = Event.objects.get(name=cartJson["event"])
             evt = event.eventStart
             try:
-                birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+                birthdate = datetime.datetime.strptime(
+                    pda["birthdate"], "%Y-%m-%d"
+                ).replace(tzinfo=ZoneInfo("America/New_York"))
             except ValueError:
                 logger.warning(
                     f"The required field 'birthdate' is not well-formed (got '{pda['birthdate']}')"
@@ -128,7 +130,9 @@ def saveCart(cart):
     pdp = postData["priceLevel"]
     evt = postData["event"]
 
-    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(
+        tzinfo=ZoneInfo("America/New_York")
+    )
 
     event = Event.objects.get(name=evt)
 
@@ -160,7 +164,13 @@ def saveCart(cart):
             )
     attendee.save()
 
-    badge = Badge(badgeName=pda["badgeName"], event=event, attendee=attendee, signature_svg=pda.get("signature_svg"), signature_bitmap=pda.get("signature_bitmap"))
+    badge = Badge(
+        badgeName=pda["badgeName"],
+        event=event,
+        attendee=attendee,
+        signature_svg=pda.get("signature_svg"),
+        signature_bitmap=pda.get("signature_bitmap"),
+    )
     badge.save()
 
     priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))

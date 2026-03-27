@@ -1,13 +1,14 @@
+import datetime
 import random
 import string
-from decimal import Decimal
-import datetime
 import uuid
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+
 
 # Lookup and supporting tables.
 class LookupTable(models.Model):
@@ -83,7 +84,12 @@ class PriceLevelOption(models.Model):
     optionExtraType = models.CharField(
         max_length=100,
         blank=True,
-        choices=[("int", "Quantity"), ("bool", "Yes/No"), ("ShirtSizes", "Shirt Size"), ("string", "String")],
+        choices=[
+            ("int", "Quantity"),
+            ("bool", "Yes/No"),
+            ("ShirtSizes", "Shirt Size"),
+            ("string", "String"),
+        ],
     )
     optionExtraType2 = models.CharField(max_length=100, blank=True)
     optionExtraType3 = models.CharField(max_length=100, blank=True)
@@ -133,11 +139,14 @@ class PriceLevel(models.Model):
     emailVIPEmails = models.CharField(max_length=400, blank=True, default="")
     isMinor = models.BooleanField(default=False)
     min_age = models.IntegerField(default=0)
-    max_age = models.IntegerField(blank=True, null=True,
-                                  help_text="Leave blank for no limit")
+    max_age = models.IntegerField(
+        blank=True, null=True, help_text="Leave blank for no limit"
+    )
     accompanied = models.BooleanField(default=False)
     available_to_attendee = models.BooleanField(default=False, verbose_name="Attendee")
-    available_to_marketplace = models.BooleanField(default=False, verbose_name="Marketplace")
+    available_to_marketplace = models.BooleanField(
+        default=False, verbose_name="Marketplace"
+    )
     available_to_staff = models.BooleanField(default=False, verbose_name="Staff")
 
     class Meta:
@@ -151,6 +160,7 @@ class PriceLevel(models.Model):
         if self.startDate <= today <= self.endDate:
             return True
         return False
+
     get_level_active_status.boolean = True
     get_level_active_status.short_description = "Active"
 
@@ -187,11 +197,17 @@ class BadgeTemplate(models.Model):
     name = models.CharField(max_length=100)
     template = models.TextField()
     paperWidth = models.CharField(max_length=10, null=True, verbose_name="Paper Width")
-    paperHeight = models.CharField(max_length=10, null=True, verbose_name="Paper Height")
-    marginTop = models.CharField(max_length=10, null=True, verbose_name = "Margin Top")
-    marginBottom = models.CharField(max_length=10, null=True, verbose_name = "Margin Bottom")
+    paperHeight = models.CharField(
+        max_length=10, null=True, verbose_name="Paper Height"
+    )
+    marginTop = models.CharField(max_length=10, null=True, verbose_name="Margin Top")
+    marginBottom = models.CharField(
+        max_length=10, null=True, verbose_name="Margin Bottom"
+    )
     marginLeft = models.CharField(max_length=10, null=True, verbose_name="Margin Left")
-    marginRight = models.CharField(max_length=10, null=True, verbose_name = "Margin Right")
+    marginRight = models.CharField(
+        max_length=10, null=True, verbose_name="Margin Right"
+    )
     landscape = models.BooleanField(default=True)
     scale = models.FloatField(default=1.0)
 
@@ -954,7 +970,7 @@ class Firebase(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         verbose_name="Print via MQTT",
-        help_text="Which terminal to use for printing via MQTT, if it should be used at this terminal."
+        help_text="Which terminal to use for printing via MQTT, if it should be used at this terminal.",
     )
     printer_url = models.CharField(max_length=500, null=True, blank=True)
     background_color = models.CharField(max_length=10, default="#0099cc")
@@ -964,16 +980,18 @@ class Firebase(models.Model):
         null=True,
         blank=True,
         default=settings.REGISTER_DEFAULT_WEBVIEW,
-        verbose_name="Web view URL"
+        verbose_name="Web view URL",
     )
     square_terminal_id = models.ForeignKey(
         SquareDevice,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="Square Terminal"
+        verbose_name="Square Terminal",
     )
-    payment_type = models.CharField(max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True)
+    payment_type = models.CharField(
+        max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True
+    )
 
     def __str__(self):
         return str(self.name)

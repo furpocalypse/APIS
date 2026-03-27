@@ -11,7 +11,9 @@ from square.client import Client
 from . import emails
 from .models import *
 
-SQUARE_REQUESTS = Histogram("square_requests", "HTTP requests to Square API", ["endpoint"])
+SQUARE_REQUESTS = Histogram(
+    "square_requests", "HTTP requests to Square API", ["endpoint"]
+)
 
 client = Client(
     timeout=10,
@@ -352,7 +354,11 @@ def process_webhook_refund_update(notification) -> bool:
         )
         return False
     except NotSupportedError:
-        orders = [rec for rec in Order.objects.all() if "id" in rec["apiData"] and rec["apiData"]["id"] == refund_id ]
+        orders = [
+            rec
+            for rec in Order.objects.all()
+            if "id" in rec["apiData"] and rec["apiData"]["id"] == refund_id
+        ]
         if len(orders) == 0:
             logger.warning(
                 f"Got refund.updated webhook update for a refund id not found: {refund_id}"
@@ -509,68 +515,80 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
             uid = f"discount-{badge['id']}"
 
             if discount["percent_off"] > 0:
-                discounts.append({
-                    "uid": uid,
-                    "name": f"Discount {discount['name']}",
-                    "type": "FIXED_PERCENTAGE",
-                    "scope": "LINE_ITEM",
-                    "percentage": str(discount["percent_off"]),
-                })
+                discounts.append(
+                    {
+                        "uid": uid,
+                        "name": f"Discount {discount['name']}",
+                        "type": "FIXED_PERCENTAGE",
+                        "scope": "LINE_ITEM",
+                        "percentage": str(discount["percent_off"]),
+                    }
+                )
             elif discount["amount_off"] > 0:
-                discounts.append({
-                    "uid": uid,
-                    "name": f"Discount {discount['name']}",
-                    "type": "FIXED_AMOUNT",
-                    "scope": "LINE_ITEM",
-                    "amount_money": {
-                        "amount": int(discount["amount_off"] * 100),
-                        "currency": settings.SQUARE_CURRENCY,
-                    },
-                })
+                discounts.append(
+                    {
+                        "uid": uid,
+                        "name": f"Discount {discount['name']}",
+                        "type": "FIXED_AMOUNT",
+                        "scope": "LINE_ITEM",
+                        "amount_money": {
+                            "amount": int(discount["amount_off"] * 100),
+                            "currency": settings.SQUARE_CURRENCY,
+                        },
+                    }
+                )
 
-            badge_applied_discounts.append({
-                "discount_uid": uid,
-            })
+            badge_applied_discounts.append(
+                {
+                    "discount_uid": uid,
+                }
+            )
 
-        line_items.append({
-            "uid": f"badge-{badge['id']}",
-            "name": f"{badge['effectiveLevel']['name']} Badge",
-            "note": f"Badge Name - {badge['badgeName']}",
-            "quantity": "1",
-            "item_type": "ITEM",
-            "base_price_money": {
-                "amount": int(badge['level_subtotal'] * 100),
-                "currency": settings.SQUARE_CURRENCY,
-            },
-            "applied_discounts": badge_applied_discounts,
-        })
+        line_items.append(
+            {
+                "uid": f"badge-{badge['id']}",
+                "name": f"{badge['effectiveLevel']['name']} Badge",
+                "note": f"Badge Name - {badge['badgeName']}",
+                "quantity": "1",
+                "item_type": "ITEM",
+                "base_price_money": {
+                    "amount": int(badge["level_subtotal"] * 100),
+                    "currency": settings.SQUARE_CURRENCY,
+                },
+                "applied_discounts": badge_applied_discounts,
+            }
+        )
 
     if data["charityDonation"] > 0 or data["orgDonation"] > 0:
         event = Event.objects.get(default=True)
 
         if data["charityDonation"] > 0:
-            line_items.append({
-                "uid": "donation-charity",
-                "name": f"Donation to {{ event.charity }}",
-                "quantity": "1",
-                "item_type": "ITEM",
-                "base_price_money": {
-                    "amount": int(data["charityDonation"] * 100),
-                    "currency": settings.SQUARE_CURRENCY,
+            line_items.append(
+                {
+                    "uid": "donation-charity",
+                    "name": f"Donation to {{ event.charity }}",
+                    "quantity": "1",
+                    "item_type": "ITEM",
+                    "base_price_money": {
+                        "amount": int(data["charityDonation"] * 100),
+                        "currency": settings.SQUARE_CURRENCY,
+                    },
                 }
-            })
+            )
 
         if data["orgDonation"] > 0:
-            line_items.append({
-                "uid": "donation-organization",
-                "name": f"Donation to {{ event }}",
-                "quantity": "1",
-                "item_type": "ITEM",
-                "base_price_money": {
-                    "amount": int(data["orgDonation"] * 100),
-                    "currency": settings.SQUARE_CURRENCY,
+            line_items.append(
+                {
+                    "uid": "donation-organization",
+                    "name": f"Donation to {{ event }}",
+                    "quantity": "1",
+                    "item_type": "ITEM",
+                    "base_price_money": {
+                        "amount": int(data["orgDonation"] * 100),
+                        "currency": settings.SQUARE_CURRENCY,
+                    },
                 }
-            })
+            )
 
     order_data = {
         "order": {
@@ -581,7 +599,7 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
             },
             "discounts": discounts,
             "line_items": line_items,
-            "note": f"Reference: {data['reference']}"
+            "note": f"Reference: {data['reference']}",
         }
     }
 
@@ -595,7 +613,9 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
         return None
 
 
-def print_payment_receipt(request, square_device: SquareDevice, payment_id: str) -> bool:
+def print_payment_receipt(
+    request, square_device: SquareDevice, payment_id: str
+) -> bool:
     data = {
         "idempotency_key": get_idempotency_key(request),
         "action": {
@@ -637,7 +657,14 @@ def get_terminals() -> List[dict]:
     return terminals
 
 
-def prompt_terminal_payment(request, device_id: str, total: int, reference: str, note: str, order_id: Optional[str]) -> Any:
+def prompt_terminal_payment(
+    request,
+    device_id: str,
+    total: int,
+    reference: str,
+    note: str,
+    order_id: Optional[str],
+) -> Any:
     data = {
         "idempotency_key": get_idempotency_key(request),
         "checkout": {
@@ -649,7 +676,7 @@ def prompt_terminal_payment(request, device_id: str, total: int, reference: str,
             "device_options": {
                 "device_id": device_id,
             },
-        }
+        },
     }
 
     if order_id:
