@@ -6,9 +6,6 @@ if (window.paypal) {
             color: "gold",
             label: "paypal",
         },
-        message: {
-            amount: 100,
-        },
         async createOrder() {
             try {
                 const response = await postJSON(
@@ -19,21 +16,21 @@ if (window.paypal) {
                     })
                 );
 
-                const orderData = await response.json();
+                const orderResponse = await response.json();
 
-                if (orderData.id) {
-                    return orderData.id;
+                if (orderResponse?.id) {
+                    return orderResponse.id;
                 }
-                const errorDetail = orderData?.details?.[0];
+                const errorDetail = orderResponse?.reason.details?.[0];
                 const errorMessage = errorDetail
-                    ? `${errorDetail.issue} ${errorDetail.description} (${orderData.debug_id})`
-                    : JSON.stringify(orderData);
+                    ? `${errorDetail.issue} ${errorDetail.description} (${orderResponse.debug_id})`
+                    : orderResponse.reason
 
                 throw new Error(errorMessage);
             } catch (error) {
                 console.error(error);
                 displayPaymentResults(
-                    `Could not initiate PayPal Checkout...<br><br>${error}`, true
+                    `Could not initiate PayPal Checkout:<br>${error}`, true
                 );
             }
         },
@@ -61,50 +58,42 @@ if (window.paypal) {
                     })
                 );
 
-                const orderData = await response.json();
+                const paymentResults = await response.json();
                 // Three cases to handle:
                 //   (1) Recoverable INSTRUMENT_DECLINED -> call actions.restart()
                 //   (2) Other non-recoverable errors -> Show a failure message
                 //   (3) Successful transaction -> Show confirmation or thank you message
 
-                const errorDetail = orderData?.details?.[0];
-
-                if (errorDetail?.issue === "INSTRUMENT_DECLINED") {
-                    // (1) Recoverable INSTRUMENT_DECLINED -> call actions.restart()
-                    // recoverable state, per
-                    // https://developer.paypal.com/docs/checkout/standard/customize/handle-funding-failures/
-                    return actions.restart();
-                } else if (errorDetail) {
-                    // (2) Other non-recoverable errors -> Show a failure message
-                    throw new Error(`
-                        Sorry, your payment failed for a mysterious reason 
-                        (${errorDetail.description} [${orderData.debug_id}]).
-                        If the problem persists, please contact
-                        <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a>
-                        for assistance.</p>
-                    `);
-                } else if (!orderData.purchase_units) {
-                    console.log('Capture result', orderData, JSON.stringify(orderData, null, 2));
-                    throw new Error(`
-                        Sorry, your payment failed for a mysterious reason 
-                        If the problem persists, please contact
-                        <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a>
-                        for assistance.</p>
-                    `);
-                } else {
+                if (paymentResults.success) {
                     // (3) Successful transaction -> Show confirmation or thank you message
                     // Or go to another URL:  actions.redirect('thank_you.html');
-                    const transaction =
-                        orderData?.purchase_units?.[0]?.payments?.captures?.[0] ||
-                        orderData?.purchase_units?.[0]?.payments
-                            ?.authorizations?.[0];
                     console.log(
                         "Capture result",
-                        orderData,
-                        JSON.stringify(orderData, null, 2)
+                        paymentResults,
+                        JSON.stringify(paymentResults, null, 2)
                     );
                     displayPaymentResults('');
                     window.location = URL_REGISTRATION_DONE;
+                } else {
+                    const errorDetail = paymentResults.reason.details?.[0];
+                    if (errorDetail?.issue === "INSTRUMENT_DECLINED") {
+                        // (1) Recoverable INSTRUMENT_DECLINED -> call actions.restart()
+                        // recoverable state, per
+                        // https://developer.paypal.com/docs/checkout/standard/customize/handle-funding-failures/
+                        return actions.restart();
+                    } else if (errorDetail) {
+                        // (2) Other non-recoverable errors -> Show a failure message
+                        throw new Error(`
+                            Sorry, your payment failed for the following reason:<br>
+                            ${errorDetail.description} (${paymentResults.debug_id}).<br>
+                            If the problem persists, please contact
+                            <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a>
+                            for assistance.</p>
+                        `);
+                    } else {
+                        // APIS error - likely a failure to send mail.
+                        throw new Error(paymentResults.reason);
+                    }
                 }
             } catch (error) {
                 displayPaymentResults(error, true);

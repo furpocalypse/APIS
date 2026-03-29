@@ -305,7 +305,9 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     # Safety valve (in case session times out before checkout is complete)
     if len(cart_items) == 0 and len(order_items) == 0:
-        common.abort(400, "Session expired or no session is stored for this client")
+        return common.abort(
+            400, "Session expired or no session is stored for this client"
+        )
 
     try:
         post_data = json.loads(request.body)
@@ -391,11 +393,9 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
     if total > 0:
         try:
             result = create_unpaid_paypal_order(total, total_discount, translated_cart)
-            return JsonResponse(json.loads(result.text))
+            return common.success(json.loads(result.text))
         except ApiException as ex:
-            return JsonResponse(
-                json.loads(ex.response.text), status_code=ex.response_code
-            )
+            return common.abort(ex.response_code, json.loads(ex.response.text))
 
 
 # TODO

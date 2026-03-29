@@ -244,19 +244,11 @@
             {% endif %}
 
             <div>
-              <form id="payment-form">
-                <div id="card-container"></div>
-              </form>
               <div id="payment-status-container"></div>
+              <div id="card-container"></div>
             </div>
             <br/>
             {% csrf_token %}
-
-            <div class="row">
-              <div class="col-sm-3 col-sm-offset-9">
-                <button class="btn btn-primary btn-block" id="checkout">Checkout</button>
-              </div>
-            </div>
 
           </form>
         </div>
