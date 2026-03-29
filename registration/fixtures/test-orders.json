@@ -1,0 +1,23 @@
+[
+    {
+        "model": "registration.order",
+        "pk": 1,
+        "fields": {
+            "total": 50,
+            "status": "Pending",
+            "createdDate": "2025-01-01",
+            "settledDate": null,
+            "orgDonation": 0,
+            "charityDonation": 0,
+            "notes": "",
+            "billingName": "John Doe",
+            "billingAddress1": "123 Fake St",
+            "billingAddress2": "Unit A-2",
+            "billingCity": "Nowheresville",
+            "billingState": "AL",
+            "billingCountry": "USA",
+            "billingPostal": "12345",
+            "billingEmail": "someone@somewhere.com"
+        }
+    }
+]

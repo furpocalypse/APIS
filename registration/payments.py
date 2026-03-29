@@ -180,16 +180,16 @@ def capture_paypal_payment(
     try:
         api_response: ApiResponse = orders_controller.capture_order(body)
     except ApiException as ex:
-        api_response = ex.response
+        return False, json.loads(ex.response.text)
 
     logger.debug("---- Capture Completed ----")
     logger.debug(api_response)
 
-    apis_order.apiData = api_response.text
     resp_body = json.loads(api_response.text)
+    apis_order.apiData = resp_body
 
     if "payment_source" in resp_body and "card" in resp_body["payment_source"]:
-        apis_order.lastFour = api_response.body["payment_source"]["card"]["last_digits"]
+        apis_order.lastFour = resp_body["payment_source"]["card"]["last_digits"]
 
     if api_response.is_success():
         apis_order.status = Order.COMPLETED
@@ -206,7 +206,7 @@ def capture_paypal_payment(
 
     logger.debug("---- End Transaction ----")
 
-    return True, api_response.body
+    return True, resp_body
 
 
 # @validate_call
