@@ -18,12 +18,12 @@ hr {
     padding-left: 10px;
 }
 
-#total {
+.total {
     font-size: large;
     font-weight: bolder;
 }
 
-#sub-item {
+.sub-item {
     padding-left: 25px;
 }
 

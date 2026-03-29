@@ -37,9 +37,9 @@
           {% for option in item.options %}
             <tr>
             {% if "number" in option and option.number %}
-              <td id="sub-item">{{ option.name }} x{{ option.number }}</td>
+              <td class="sub-item">{{ option.name }} x{{ option.number }}</td>
             {% else %}
-              <td id="sub-item">{{ option.name }}</td>
+              <td class="sub-item">{{ option.name }}</td>
             {% endif %}
               <td></td>
             {% if option.total == 0 %}
@@ -58,7 +58,7 @@
         {% endif %}
         {% if discount %}
           <tr>
-            <td id="sub-item">Discount - {{ discount.codeName }}</td>
+            <td class="sub-item">Discount - {{ discount.codeName }}</td>
             <td></td>
             {% if discount.amountOff == 0 %}
               <td>- ${{ total_discount|floatformat:2 }}</td>
@@ -68,10 +68,10 @@
           </tr>
         {% endif %}
       {% endfor %}
-        <tr class="success">
+        <tr class="total success">
           <td></td>
-          <td><span id="total">Total</span></td>
-          <td><span id="total">{{ total|floatformat:2 }}</span></td>
+          <td><span>Total</span></td>
+          <td><span id="totalAmount">{{ total|floatformat:2 }}</span></td>
         </tr>
       </table>
 
