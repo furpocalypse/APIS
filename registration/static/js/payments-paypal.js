@@ -32,10 +32,13 @@ if (window.paypal) {
                 throw new Error(errorMessage);
             } catch (error) {
                 console.error(error);
-                resultMessage(`Could not initiate PayPal Checkout...<br><br>${error}`);
+                displayPaymentResults(
+                    `Could not initiate PayPal Checkout...<br><br>${error}`, true
+                );
             }
         },
         async onApprove(data, actions) {
+            hidePaymentResults();
             try {
                 const response = await postJSON(
                     URL_REGISTRATION_CHECKOUT,
@@ -73,11 +76,21 @@ if (window.paypal) {
                     return actions.restart();
                 } else if (errorDetail) {
                     // (2) Other non-recoverable errors -> Show a failure message
-                    throw new Error(
-                        `${errorDetail.description} (${orderData.debug_id})`
-                    );
+                    throw new Error(`
+                        Sorry, your payment failed for a mysterious reason 
+                        (${errorDetail.description} [${orderData.debug_id}]).
+                        If the problem persists, please contact
+                        <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a>
+                        for assistance.</p>
+                    `);
                 } else if (!orderData.purchase_units) {
-                    throw new Error(JSON.stringify(orderData));
+                    console.log('Capture result', orderData, JSON.stringify(orderData, null, 2));
+                    throw new Error(`
+                        Sorry, your payment failed for a mysterious reason 
+                        If the problem persists, please contact
+                        <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a>
+                        for assistance.</p>
+                    `);
                 } else {
                     // (3) Successful transaction -> Show confirmation or thank you message
                     // Or go to another URL:  actions.redirect('thank_you.html');
@@ -85,21 +98,17 @@ if (window.paypal) {
                         orderData?.purchase_units?.[0]?.payments?.captures?.[0] ||
                         orderData?.purchase_units?.[0]?.payments
                             ?.authorizations?.[0];
-                    resultMessage(
-                        `Transaction ${transaction.status}: ${transaction.id}<br>
-            <br>See console for all available details`
-                    );
                     console.log(
                         "Capture result",
                         orderData,
                         JSON.stringify(orderData, null, 2)
                     );
+                    displayPaymentResults('');
+                    window.location = URL_REGISTRATION_DONE;
                 }
             } catch (error) {
+                displayPaymentResults(error, true);
                 console.error(error);
-                resultMessage(
-                    `Sorry, your transaction could not be processed...<br><br>${error}`
-                );
             }
         },
     });
@@ -107,8 +116,23 @@ if (window.paypal) {
 }
 
 
-// Example function to show a result to the user. Your site's UI library can be used instead.
-function resultMessage(message) {
-    const container = document.querySelector("#payment-status-container");
-    container.innerHTML = message;
+// Helper method for displaying the Payment Status on the screen.
+function displayPaymentResults(message, isError) {
+    const statusContainer = document.getElementById('payment-status-container');
+    statusContainer.innerHTML = message;
+
+    if (!isError) {
+        statusContainer.classList.remove('is-failure');
+        statusContainer.classList.add('is-success');
+    } else {
+        statusContainer.classList.remove('is-success');
+        statusContainer.classList.add('is-failure');
+    }
+
+    statusContainer.style.visibility = 'visible';
+}
+
+function hidePaymentResults() {
+    const statusContainer = document.getElementById('payment-status-container');
+    statusContainer.style.visibility = 'hidden';
 }
