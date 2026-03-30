@@ -17,10 +17,10 @@ if (window.paypal) {
                 );
 
                 const orderResponse = await response.json();
-
-                if (orderResponse?.id) {
-                    return orderResponse.id;
+                if (orderResponse?.success && orderResponse?.reason?.id) {
+                    return orderResponse.reason.id;
                 }
+
                 const errorDetail = orderResponse?.reason.details?.[0];
                 const errorMessage = errorDetail
                     ? `${errorDetail.issue} ${errorDetail.description} (${orderResponse.debug_id})`

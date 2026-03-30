@@ -342,7 +342,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         item_total, discount = get_line_item_total(item, discount_code)
         translated_cart.append(
             {
-                "name": str(event) + " " + str(priceLevel) + " - " + str(attendee),
+                "name": "%s %s - %s" % (event, priceLevel, attendee),
                 "total": item_total,
                 "donation": False,
             }
@@ -375,13 +375,13 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     if porg > 0:
         translated_cart.append(
-            {"name": "Donation to " + str(event), "total": porg, "donation": True}
+            {"name": "Donation to %s" % event, "total": porg, "donation": True}
         )
 
     if pcharity > 0:
         translated_cart.append(
             {
-                "name": "Donation to " + str(event.charity),
+                "name": "Donation to %s" % event.charity,
                 "total": pcharity,
                 "donation": True,
             }
@@ -393,7 +393,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
     if total > 0:
         try:
             result = create_unpaid_paypal_order(total, total_discount, translated_cart)
-            return common.success(json.loads(result.text))
+            return common.success(reason=json.loads(result.text))
         except ApiException as ex:
             return common.abort(ex.response_code, json.loads(ex.response.text))
 
