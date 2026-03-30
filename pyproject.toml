@@ -41,5 +41,7 @@ dev = [
     "coveralls>=4.0.2",
 ]
 test = [
-    "coveralls>=4.0.2"
+    "coveralls>=4.0.2",
+    "httpx>=0.27.0",
+    "playwright>=1.40.0",
 ]

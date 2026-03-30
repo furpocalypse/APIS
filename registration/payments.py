@@ -1,9 +1,11 @@
 import logging
 import uuid
+from collections import Counter
 from datetime import datetime
 from typing import Any, List, Optional
 
 from django.conf import settings
+from django.db import transaction
 from django.db.utils import NotSupportedError
 from prometheus_client import Histogram
 from square.client import Client
@@ -30,6 +32,53 @@ refunds_api = client.refunds
 terminals_api = client.terminal
 
 logger = logging.getLogger("registration.payments")
+
+
+def update_capacity_for_status_change(order, old_status, new_status):
+    """Update PriceLevel counters when an order's status changes.
+
+    Must be called BEFORE order.save() so we can still see the old status.
+    Uses select_for_update() internally for atomicity.
+    """
+    if old_status == new_status:
+        return
+
+    items = OrderItem.objects.filter(order=order).values_list(
+        "priceLevel_id", flat=True
+    )
+    counts = Counter(pl_id for pl_id in items if pl_id is not None)
+
+    if not counts:
+        return
+
+    with transaction.atomic():
+        for pl_id, count in counts.items():
+            level = PriceLevel.objects.select_for_update().get(id=pl_id)
+            if level.maxCapacity is None:
+                continue
+
+            old_confirmed = old_status in Order.CONFIRMED_STATUSES
+            old_pending = old_status in Order.PENDING_STATUSES
+            new_confirmed = new_status in Order.CONFIRMED_STATUSES
+            new_pending = new_status in Order.PENDING_STATUSES
+
+            if old_pending and new_confirmed:
+                # Lease confirmed: just decrement reserved
+                level.confirm_reservation(count)
+            elif old_pending and not new_confirmed and not new_pending:
+                # Lease released (failed/cancelled): restore slots
+                level.release_slots(count)
+            elif old_confirmed and not new_confirmed and not new_pending:
+                # Confirmed order refunded/failed: restore slots
+                level.release_confirmed_slots(count)
+            elif not old_confirmed and not old_pending and new_confirmed:
+                # Reactivated order: consume slots
+                level.remainingSlots = F("remainingSlots") - count
+                level.save(update_fields=["remainingSlots"])
+                level.refresh_from_db(fields=["remainingSlots"])
+            elif not old_confirmed and not old_pending and new_pending:
+                # Re-pended order: reserve slots
+                level.reserve_slots(count)
 
 
 def get_idempotency_key(request=None):
@@ -136,6 +185,7 @@ def refresh_payment(order, store_api_data=None):
         if not api_data:
             logger.warning("No order data yet for {0}".format(order.reference))
             return False, "No order data yet for {0}".format(order.reference)
+    old_status = order.status
     order_total = 0
 
     try:
@@ -201,9 +251,11 @@ def refresh_payment(order, store_api_data=None):
         message = "Refunded order has caused charity and organization donation amounts to reset."
         logger.warning(message)
         order.notes += "\n{0}: {1}".format(timezone.now(), message)
+        update_capacity_for_status_change(order, old_status, order.status)
         order.save()
         return False, message
 
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True, None
 
@@ -269,12 +321,14 @@ def refund_payment(order, amount, reason=None, request=None):
 
 
 def refund_cash_payment(order, amount, reason=None):
+    old_status = order.status
     # Change order status
     order.status = Order.REFUNDED
     order.notes += "\nRefund issued {0}: {1}".format(timezone.now(), reason)
 
     # Reset order total
     order.total -= amount
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
     # Record cashdrawer withdraw
@@ -284,6 +338,7 @@ def refund_cash_payment(order, amount, reason=None):
 
 
 def refund_card_payment(order, amount, reason=None, request=None):
+    old_status = order.status
     api_data = order.apiData
     payment_id = api_data["payment"]["id"]
     converted_amount = int(amount * 100)
@@ -336,6 +391,7 @@ def refund_card_payment(order, amount, reason=None, request=None):
     if status in ("REJECTED", "FAILED"):
         order.status = Order.COMPLETED
 
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     message = "Square refund has been submitted and is {0}".format(status)
     logger.debug(message)
@@ -367,6 +423,7 @@ def process_webhook_refund_update(notification) -> bool:
 
     webhook_refund = notification.body["data"]["object"]["refund"]
 
+    old_status = order.status
     output = []
     refunds_list = order.apiData["refunds"]
     for refund in refunds_list:
@@ -379,6 +436,7 @@ def process_webhook_refund_update(notification) -> bool:
         order.status = Order.REFUNDED
 
     order.apiData["refunds"] = output
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -394,9 +452,11 @@ def process_webhook_payment_updated(notification: PaymentWebhookNotification) ->
         return False
 
     # Store order update in api data
+    old_status = order.status
     payment = notification.body["data"]["object"]["payment"]
     order.apiData["payment"] = payment
     update_order_payment_data(order, None, payment)
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -421,7 +481,7 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
         return True
 
     # Store refund in api data
-
+    old_status = order.status
     order.apiData["refunds"].append(webhook_refund)
 
     status = webhook_refund["status"]
@@ -444,6 +504,7 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
     if status in ("REJECTED", "FAILED"):
         order.status = Order.COMPLETED
 
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -462,6 +523,7 @@ def process_webhook_dispute_created_or_updated(
         return False
 
     # Add the dispute API data to the order:
+    old_status = order.status
     order.apiData["dispute"] = webhook_dispute
     order.status = Order.DISPUTE_STATUS_MAP[webhook_dispute["state"]]
     if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
@@ -474,6 +536,7 @@ def process_webhook_dispute_created_or_updated(
         )
         order.orgDonation = 0
         order.charityDonation = 0
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
     # Place a hold on all new disputed orders, and add attendee to the ban list.  Should only do this once,

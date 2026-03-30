@@ -19,6 +19,7 @@ def format_price_level_list(levels):
             "description": level.description,
             "accompanied": level.accompanied,
             "is_minor": level.isMinor,
+            "capacity": level.get_capacity_status(),
             "options": [
                 {
                     "name": option.optionName,

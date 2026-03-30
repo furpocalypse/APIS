@@ -99,15 +99,16 @@
 
   <script type="text/html" id="levelTemplate">
     <div id="levelTemplateColumn" class="col-xs-12 col-sm-6 col-md-6 col-lg-4">
-      <div class="panel price">
-        <div class="panel-heading  text-center">
+      <div class="panel price" data-class="cardClass">
+        <div class="panel-heading text-center">
           <h3 data-content="name"></h3>
+          <div data-content="capacityBadge"></div>
         </div>
         <div class="panel-body text-center">
           <p class="lead" style="font-size:40px"><strong data-content="price"></strong></p>
         </div>
         <div class="panel-footer">
-          <a class="btn btn-lg btn-block btn-danger selectLevel" data-id="levelId">Select</a>
+          <a class="btn btn-lg btn-block btn-danger selectLevel" data-id="levelId" data-content="buttonText">Select</a>
           <a class="btn btn-default btn-block changeLevel">Change Level?</a>
         </div>
       </div>
@@ -221,17 +222,53 @@
               levelData = data;
               $.each(data, function (key, val) {
                   var centsOff = (parseFloat(val.base_price) * discount.percentOff) / 100;
+
+                  // Determine capacity display
+                  var capacityBadge = "";
+                  var cardClass = "";
+                  var buttonText = "Select";
+                  var isDisabled = false;
+
+                  if (val.capacity && val.capacity.max_capacity !== null) {
+                      if (val.capacity.sold_out) {
+                          capacityBadge = '<span class="capacity-badge sold-out">SOLD OUT</span>';
+                          cardClass = "sold-out";
+                          buttonText = "Sold Out";
+                          isDisabled = true;
+                      } else if (val.capacity.show_count) {
+                          var remaining = val.capacity.available_slots;
+                          capacityBadge = '<span class="capacity-badge limited-availability">' +
+                                        remaining + ' slot' + (remaining !== 1 ? 's' : '') + ' remaining</span>';
+                          cardClass = "limited-availability";
+                      }
+                  }
+
                   levelTemplateData.push({
                       name: val.name,
                       price: "$" + (parseFloat(val.base_price) - centsOff - parseFloat(discount.amountOff)),
                       levelId: "level_" + val.id,
-                      selectText: "Select " + val.name
+                      selectText: "Select " + val.name,
+                      capacityBadge: capacityBadge,
+                      cardClass: cardClass,
+                      buttonText: buttonText,
+                      isDisabled: isDisabled
                   });
               });
               if (levelTemplateData.length == 0) {
                   $("#levelContainerAlert").show();
               } else {
                   $("#levelContainer").loadTemplate($("#levelTemplate"), levelTemplateData);
+
+                  // Apply card classes and disable sold-out buttons
+                  $.each(levelTemplateData, function(key, val) {
+                      if (val.cardClass) {
+                          $("#" + val.levelId).closest(".panel").addClass(val.cardClass);
+                      }
+                      if (val.isDisabled) {
+                          $("#" + val.levelId).addClass("disabled").attr("disabled", "disabled");
+                      }
+                  });
+
                   if (levelTemplateData.length == 1) {
                       select_level(1);
                   }
@@ -273,7 +310,14 @@
       });
 
       $(document).ready(function () {
-          $("#levelContainer").on('click', 'a.selectLevel', function () {
+          $("#levelContainer").on('click', 'a.selectLevel', function (e) {
+              // Prevent selecting sold-out tiers
+              if ($(this).hasClass('disabled') || $(this).attr('disabled')) {
+                  e.preventDefault();
+                  alert("This registration level is sold out. Please select a different option.");
+                  return false;
+              }
+
               clearLevels();
               var levelId = $(this).attr('id').split('_')[1];
               select_level(levelId);
@@ -281,6 +325,17 @@
 
           $("#levelContainer").on('click', 'a.changeLevel', function () {
               $("#levelContainer").loadTemplate($("#levelTemplate"), levelTemplateData);
+
+              // Re-apply card classes and disabled state after reloading
+              $.each(levelTemplateData, function(key, val) {
+                  if (val.cardClass) {
+                      $("#" + val.levelId).closest(".panel").addClass(val.cardClass);
+                  }
+                  if (val.isDisabled) {
+                      $("#" + val.levelId).addClass("disabled").attr("disabled", "disabled");
+                  }
+              });
+
               $("#regLevel").val("");
               $(".changeLevel").hide();
           });

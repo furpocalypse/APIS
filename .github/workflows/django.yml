@@ -62,6 +62,8 @@ jobs:
           PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432 -tc "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
           PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432 -tc "CREATE ROLE root WITH LOGIN PASSWORD 'postgres';"
           PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432 -tc "ALTER ROLE root WITH SUPERUSER;"
+      - name: Install Playwright Browsers
+        run: uv run --no-dev --group test playwright install --with-deps
       - name: Run Tests
         run: |
           cp fm_eventmanager/settings.py.travis fm_eventmanager/settings.py
