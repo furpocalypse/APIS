@@ -59,6 +59,13 @@ jobs:
       - name: Install Dependencies
         run: |
           uv sync
+      - name: Enable Postgres Trigram Extension and make root user
+        run: |
+          PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432 -tc "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432 -tc "CREATE ROLE root WITH LOGIN PASSWORD 'postgres';"
+          PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -p 5432 -tc "ALTER ROLE root WITH SUPERUSER;"
+      - name: Install Playwright Browsers
+        run: uv run --no-dev --group test playwright install --with-deps
       - name: Build frontend
         run: |
           cd registration/frontend
@@ -68,7 +75,7 @@ jobs:
         run: |
           cp fm_eventmanager/settings.py.ci fm_eventmanager/settings.py
           uv run python ./manage.py collectstatic --noinput
-          uv run coverage run ./manage.py test registration
+          uv run --no-dev --group test coverage run --branch ./manage.py test registration
         env:
           SQUARE_APPLICATION_ID: ${{ secrets.SQUARE_APPLICATION_ID }}
           SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}

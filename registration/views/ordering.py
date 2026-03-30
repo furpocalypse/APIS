@@ -1,19 +1,90 @@
 import json
 import logging
+import time
+from collections import Counter
 from json import JSONDecodeError
 
 from django.core.signing import TimestampSigner
+from django.db import transaction
 from django.http import JsonResponse
 from idempotency_key.decorators import idempotency_key
 
 from registration import mqtt, tasks
 from registration.forms import OrderForm
 from registration.models import *
-from registration.payments import charge_payment
+from registration.payments import (
+    charge_payment,
+    update_capacity_for_status_change,
+)
 
 from . import cart, common
 
 logger = logging.getLogger(__name__)
+
+
+def _count_price_levels(cartItems, orderItems):
+    """Count items per price level from cart items and/or order items."""
+    counts = Counter()
+    if cartItems:
+        for item in cartItems:
+            post_data = json.loads(item.formData)
+            pl_id = post_data["priceLevel"]["id"]
+            counts[pl_id] += 1
+    if orderItems:
+        for item in orderItems:
+            counts[item.priceLevel.id] += 1
+    return counts
+
+
+def _check_capacity(price_level_counts):
+    """Check capacity for all price levels. Must be called inside transaction.atomic().
+
+    Uses select_for_update() to lock rows and prevent TOCTOU overselling.
+    Returns (levels, error_message) where levels is a list of (PriceLevel, count)
+    tuples on success, or None on failure.
+    """
+    sold_out = []
+    reserved = []
+    levels = []
+    for pl_id, count in price_level_counts.items():
+        level = PriceLevel.objects.select_for_update().get(id=pl_id)
+        result = level.check_capacity_available(count)
+        if result == PriceLevel.CAPACITY_SOLD_OUT:
+            sold_out.append(level.name)
+        elif result == PriceLevel.CAPACITY_RESERVED:
+            reserved.append(level.name)
+        else:
+            levels.append((level, count))
+
+    if sold_out or reserved:
+        parts = []
+        if sold_out:
+            names = ", ".join(sold_out)
+            verb = "is" if len(sold_out) == 1 else "are"
+            parts.append(f"{names} {verb} sold out")
+        if reserved:
+            names = ", ".join(reserved)
+            parts.append(
+                f"All slots for {names} are currently reserved by pending "
+                "payments. Some may become available shortly — please try again "
+                "in a minute."
+            )
+        return None, ". ".join(parts)
+
+    return levels, None
+
+
+def _save_order_items(order, cartItems, orderItems):
+    """Save cart items or order items linked to an order."""
+    if cartItems:
+        for item in cartItems:
+            order_item = cart.saveCart(item)
+            order_item.order = order
+            order_item.save()
+    elif orderItems:
+        for order_item in orderItems:
+            order_item.order = order
+            order_item.save()
 
 
 def do_checkout(
@@ -55,27 +126,68 @@ def do_checkout(
 
     order: Order = form.save(commit=False)
 
-    status, response = charge_payment(order, billingData, request)
+    price_level_counts = _count_price_levels(cartItems, orderItems)
 
-    if status:
-        order.save()
+    try:
+        with transaction.atomic():
+            levels, error = _check_capacity(price_level_counts)
+            if error:
+                return False, error, None
 
-        if cartItems:
-            for item in cartItems:
-                order_item = cart.saveCart(item)
-                order_item.order = order
-                order_item.save()
-        elif orderItems:
-            for order_item in orderItems:
-                order_item.order = order
-                order_item.save()
+            for level, count in levels:
+                level.reserve_slots(count)
 
-        if discount:
-            discount.used = discount.used + 1
-            discount.save()
-        return True, {"errors": []}, order
+            order.status = Order.PENDING
+            order.save()
+            _save_order_items(order, cartItems, orderItems)
 
-    return False, response, order
+        # Order and OrderItems now exist with PENDING status.
+        # Slots are reserved in counters.
+
+        # Attempt payment — charge_payment sets order.status and saves.
+        status, response = charge_payment(order, billingData, request)
+
+        # Use the general-purpose status change handler to update capacity
+        # counters. This handles PENDING→COMPLETED (confirm) and
+        # PENDING→FAILED (release) uniformly.
+        update_capacity_for_status_change(order, Order.PENDING, order.status)
+
+        if status:
+            order.save()
+
+            if cartItems:
+                for item in cartItems:
+                    order_item = cart.saveCart(item)
+                    order_item.order = order
+                    order_item.save()
+            elif orderItems:
+                for order_item in orderItems:
+                    order_item.order = order
+                    order_item.save()
+
+            if discount:
+                discount.used = discount.used + 1
+                discount.save()
+            return True, {"errors": []}, order
+
+        return False, response, order
+
+    except Exception as e:
+        logger.error(f"Error during checkout: {e}")
+        # If the atomic block raised, everything was rolled back — no cleanup.
+        # If charge_payment raised, the order exists as PENDING with reserved slots.
+        if order.id:
+            try:
+                order.refresh_from_db()
+                if order.status == Order.PENDING:
+                    update_capacity_for_status_change(
+                        order, Order.PENDING, Order.FAILED
+                    )
+                    order.status = Order.FAILED
+                    order.save()
+            except Exception as cleanup_error:
+                logger.error(f"Error during checkout cleanup: {cleanup_error}")
+        raise
 
 
 def doZeroCheckout(discount, cartItems, orderItems):
@@ -98,27 +210,36 @@ def doZeroCheckout(discount, cartItems, orderItems):
         discount=discount,
         orgDonation=0,
         charityDonation=0,
-        status="Complete",
+        status=Order.COMPLETED,
         billingType=Order.COMP,
         billingEmail=billingEmail,
         billingName=billingName,
     )
-    order.save()
 
-    if cartItems:
-        for item in cartItems:
-            orderItem = cart.saveCart(item)
-            orderItem.order = order
-            orderItem.save()
-    elif orderItems:
-        for oitem in orderItems:
-            oitem.order = order
-            oitem.save()
+    price_level_counts = _count_price_levels(cartItems, orderItems)
 
-    if discount:
-        discount.used = discount.used + 1
-        discount.save()
-    return True, "", order
+    try:
+        with transaction.atomic():
+            levels, error = _check_capacity(price_level_counts)
+            if error:
+                return False, error, None
+
+            # Directly consume slots — no pending state for zero-cost orders
+            for level, count in levels:
+                level.consume_slots(count)
+
+            order.save()
+            _save_order_items(order, cartItems, orderItems)
+
+            if discount:
+                discount.used = discount.used + 1
+                discount.save()
+
+        return True, "", order
+
+    except Exception as e:
+        logger.error(f"Error during zero-cost checkout: {e}")
+        raise
 
 
 def getCartItemOptionTotal(options):
