@@ -1,0 +1,21 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}{{ view.title|default:"FIDO2" }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script type="text/javascript" src="{% url 'django_fido:javascript_catalog' %}"></script>
+{% block fido2_extrahead %}{% endblock %}
+{% endblock %}
+
+{% block content %}
+{% if messages %}
+<ul class="messagelist">
+    {% for message in messages %}
+    <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% block fido2_content %}{% endblock %}
+{% endblock %}

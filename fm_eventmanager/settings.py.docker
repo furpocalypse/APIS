@@ -114,6 +114,7 @@ INSTALLED_APPS = [
     'django_admin_env_notice',
     'django.contrib.admin',
     'django.contrib.auth',
+    'django_fido',
     'django.contrib.postgres',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -140,6 +141,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'registration.middleware.Fido2VerificationMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
     'idempotency_key.middleware.ExemptIdempotencyKeyMiddleware',
     'maintenance_mode.middleware.MaintenanceModeMiddleware',
@@ -322,8 +324,8 @@ MAINTENANCE_MODE_STATE_FILE_PATH = "/app/fm_eventmanager/maintenance_mode_state.
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ()
 
-# LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
-# LOGIN_URL = 'u2f:login'
+# FIDO2 2FA is handled by Fido2VerificationMiddleware, not LOGIN_URL.
+DJANGO_FIDO_RP_NAME = os.getenv('DJANGO_FIDO_RP_NAME', "APIS Backoffice")
 
 if DEBUG:
     # Adds docker NAT routers and any internal upstream proxies as internal IPs to enable the debug toolbar

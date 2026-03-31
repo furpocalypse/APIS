@@ -3,6 +3,7 @@ configobj==5.0.9
 django>=5.0.0,<6.0.0
 django-admin-env-notice~=0.4
 django-debug-toolbar~=4.3.0
+django-fido>=1.4.2,<2.0.0
 django-extensions~=3.2.3
 django-idempotency-key~=1.3.0
 django-import-export~=3.3.7

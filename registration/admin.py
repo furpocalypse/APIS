@@ -7,7 +7,6 @@ from io import BytesIO
 
 import qrcode
 from django import forms
-from django.urls import re_path
 from django.contrib import admin, auth, messages
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
@@ -17,9 +16,10 @@ from django.db.models import Max
 from django.forms import NumberInput, widgets
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
-from django.urls import path, reverse
+from django.urls import path, re_path, reverse
 from django.utils.html import format_html, urlencode
 from django.utils.safestring import mark_safe
+from django_fido.models import Authenticator
 from import_export import fields, resources
 from import_export.admin import ImportExportModelAdmin
 from nested_inline.admin import NestedModelAdmin, NestedTabularInline
@@ -57,16 +57,90 @@ class UserProfileAdmin(auth.admin.UserAdmin):
         "email",
         "first_name",
         "last_name",
+        "fido2_enabled",
     )
     actions = []
+
+    def fido2_enabled(self, obj):
+        count = Authenticator.objects.filter(user=obj).count()
+        if count > 0:
+            return format_html(
+                '<img src="/static/admin/img/icon-yes.svg" alt="True"> ({} key{})',
+                count,
+                "s" if count > 1 else "",
+            )
+        return format_html('<img src="/static/admin/img/icon-no.svg" alt="False">')
+
+    fido2_enabled.short_description = "FIDO2 2FA"
 
 
 admin.site.unregister(User)
 admin.site.register(User, UserProfileAdmin)
 
 
+class AuthenticatorAdmin(admin.ModelAdmin):
+    list_display = ("user", "label", "create_datetime", "counter")
+    list_filter = ("user",)
+    readonly_fields = (
+        "user",
+        "credential_id_data",
+        "attestation_data",
+        "counter",
+        "create_datetime",
+    )
+    change_list_template = "admin/authenticator_changelist.html"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.user != request.user and not request.user.is_superuser:
+            return False
+        return True
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            qs = qs.filter(user=request.user)
+        return qs
+
+
+admin.site.unregister(Authenticator)
+admin.site.register(Authenticator, AuthenticatorAdmin)
+
+# Move Authenticator from "Django_Fido" group into "Authentication and Authorization"
+_original_get_app_list = admin.AdminSite.get_app_list
+
+
+def _custom_get_app_list(self, request, app_label=None):
+    app_list = _original_get_app_list(self, request, app_label)
+
+    fido_app = None
+    auth_app = None
+    for app in app_list:
+        if app["app_label"] == "django_fido":
+            fido_app = app
+        elif app["app_label"] == "auth":
+            auth_app = app
+
+    if fido_app and auth_app:
+        auth_app["models"].extend(fido_app["models"])
+        app_list.remove(fido_app)
+
+    return app_list
+
+
+admin.AdminSite.get_app_list = _custom_get_app_list
+
+
 class FirebaseAdmin(admin.ModelAdmin):
-    list_display = ("name", "cashdrawer", "print_via_mqtt", "background_color", "webview")
+    list_display = (
+        "name",
+        "cashdrawer",
+        "print_via_mqtt",
+        "background_color",
+        "webview",
+    )
     form = FirebaseForm
 
     def render_change_form(self, request, context, *args, **kwargs):
@@ -77,7 +151,9 @@ class FirebaseAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super(FirebaseAdmin, self).get_urls()
         my_urls = [
-            re_path(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
+            re_path(
+                r"^(.+)/provision/$", self.provision_view, name="firebase_provision"
+            ),
         ]
         return my_urls + urls
 
@@ -921,15 +997,16 @@ def get_attendee_age(attendee):
 def print_badges(modeladmin, request, queryset):
     if getattr(settings, "PRINT_RENDERER", "wkhtmltopdf") == "gotenberg":
         signer = TimestampSigner()
-        data = signer.sign_object({
-            "badge_ids": [badge.id for badge in queryset],
-        })
+        data = signer.sign_object(
+            {
+                "badge_ids": [badge.id for badge in queryset],
+            }
+        )
 
         pdf_path = reverse("registration:pdf") + f"?data={data}"
     else:
         pdf_name = generate_badge_labels(queryset, request)
         pdf_path = reverse("registration:pdf") + f"?file={pdf_name}"
-
 
     response = HttpResponseRedirect(reverse("registration:print"))
     url_params = {"file": pdf_path, "next": request.get_full_path()}
@@ -1429,7 +1506,9 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
             form = self.RefundForm(request.POST)
 
             if form.is_valid():
-                amount = Decimal(form.cleaned_data["amount"]).quantize(registration.views.onsite_admin.TWOPLACES)
+                amount = Decimal(form.cleaned_data["amount"]).quantize(
+                    registration.views.onsite_admin.TWOPLACES
+                )
                 reason = form.cleaned_data.get("reason")
 
                 if amount > order.total:
@@ -1477,7 +1556,18 @@ admin.site.register(Order, OrderAdmin)
 
 
 class PriceLevelAdmin(admin.ModelAdmin):
-    list_display = ("name", "basePrice", "get_level_active_status", "min_age", "max_age", "public", "available_to_attendee", "available_to_marketplace", "available_to_staff", "group")
+    list_display = (
+        "name",
+        "basePrice",
+        "get_level_active_status",
+        "min_age",
+        "max_age",
+        "public",
+        "available_to_attendee",
+        "available_to_marketplace",
+        "available_to_staff",
+        "group",
+    )
 
 
 admin.site.register(PriceLevel, PriceLevelAdmin)
@@ -1601,7 +1691,7 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
         "marginLeft",
         "marginRight",
         "landscape",
-        "scale"
+        "scale",
     )
 
     fieldsets = (
@@ -1609,7 +1699,7 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
             None,
             {
                 "fields": ("name", "template"),
-            }
+            },
         ),
         (
             "Paper Setup",
@@ -1619,7 +1709,7 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
                     "scale",
                     ("paperWidth", "paperHeight"),
                 )
-            }
+            },
         ),
         (
             "Margins And Padding",
@@ -1628,11 +1718,13 @@ class BadgeTemplateAdmin(admin.ModelAdmin):
                     ("marginTop", "marginBottom"),
                     ("marginLeft", "marginRight"),
                 ),
-            }
+            },
         ),
     )
 
+
 admin.site.register(BadgeTemplate, BadgeTemplateAdmin)
+
 
 class SquareDeviceAdmin(admin.ModelAdmin):
     list_display = ("name", "device_type", "device_id")
@@ -1661,7 +1753,8 @@ class SquareDeviceAdmin(admin.ModelAdmin):
         keep_ids = set()
         for device in current_devices:
             SquareDevice.objects.update_or_create(
-                device_id=device["id"], defaults={
+                device_id=device["id"],
+                defaults={
                     "name": device["attributes"]["name"],
                     "device_type": device["attributes"]["type"],
                 },
@@ -1673,5 +1766,6 @@ class SquareDeviceAdmin(admin.ModelAdmin):
                 existing.delete()
 
         return HttpResponseRedirect("../")
+
 
 admin.site.register(SquareDevice, SquareDeviceAdmin)

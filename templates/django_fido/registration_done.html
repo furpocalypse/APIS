@@ -1,0 +1,7 @@
+{% extends "django_fido/base.html" %}
+{% load i18n %}
+
+{% block fido2_content %}
+<p>Your security key has been registered successfully.</p>
+<p><a href="{% url 'admin:index' %}">Return to admin</a></p>
+{% endblock %}

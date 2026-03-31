@@ -1,0 +1,141 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}Security Key Verification{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    #fido2-container {
+        max-width: 500px;
+        margin: 40px auto;
+        text-align: center;
+    }
+    #fido2-container h2 {
+        margin-bottom: 10px;
+    }
+    #fido2-status {
+        margin: 20px 0;
+        padding: 10px;
+        font-size: 14px;
+    }
+    .fido2-error {
+        color: #ba2121;
+        background: #ffc;
+        padding: 10px;
+        border: 1px solid #dda;
+    }
+    #fido2-retry {
+        display: none;
+        margin-top: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="fido2-container">
+    <h2>Security Key Verification Required</h2>
+    <p>Please insert your security key and touch it when it flashes.</p>
+
+    <div id="fido2-status">Preparing challenge...</div>
+
+    <button id="fido2-retry" class="button" onclick="startVerification()">
+        Try Again
+    </button>
+
+    <form method="post" action="{% url 'admin:logout' %}" style="margin-top: 30px;">
+        {% csrf_token %}
+        <button type="submit" style="background: none; border: none; color: #447e9b; cursor: pointer; text-decoration: underline; font-size: inherit;">Log out</button>
+    </form>
+</div>
+
+<script>
+const REQUEST_URL = "{{ request_url }}";
+const VERIFY_URL = "{{ verify_url }}";
+const CSRF_TOKEN = "{{ csrf_token }}";
+
+function b64urlToBytes(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    const raw = atob(s);
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    return buf.buffer;
+}
+
+function bytesToB64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+}
+
+async function startVerification() {
+    const status = document.getElementById('fido2-status');
+    const retry = document.getElementById('fido2-retry');
+    retry.style.display = 'none';
+    status.className = '';
+    status.textContent = 'Requesting challenge...';
+
+    try {
+        const resp = await fetch(REQUEST_URL, {
+            credentials: 'same-origin',
+            headers: {'X-CSRFToken': CSRF_TOKEN},
+        });
+        if (!resp.ok) throw new Error('Failed to get challenge');
+        const options = await resp.json();
+
+        const pk = options.publicKey;
+        const publicKey = {
+            challenge: b64urlToBytes(pk.challenge),
+            rpId: pk.rpId,
+            timeout: pk.timeout || 60000,
+            userVerification: pk.userVerification || 'preferred',
+        };
+        if (pk.allowCredentials) {
+            publicKey.allowCredentials = pk.allowCredentials.map(c => ({
+                type: c.type,
+                id: b64urlToBytes(c.id),
+            }));
+        }
+
+        status.textContent = 'Touch your security key now...';
+
+        const assertion = await navigator.credentials.get({publicKey});
+
+        status.textContent = 'Verifying...';
+
+        const body = {
+            credential_id: bytesToB64(assertion.rawId),
+            client_data: bytesToB64(assertion.response.clientDataJSON),
+            authenticator_data: bytesToB64(assertion.response.authenticatorData),
+            signature: bytesToB64(assertion.response.signature),
+        };
+
+        const verifyResp = await fetch(VERIFY_URL, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN,
+            },
+            body: JSON.stringify(body),
+        });
+
+        const result = await verifyResp.json();
+        if (result.status === 'ok') {
+            status.textContent = 'Verified! Redirecting...';
+            window.location.href = result.redirect;
+        } else {
+            throw new Error(result.message || 'Verification failed');
+        }
+    } catch (err) {
+        status.textContent = 'Verification failed: ' + err.message;
+        status.className = 'fido2-error';
+        retry.style.display = 'inline-block';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', startVerification);
+</script>
+{% endblock %}
