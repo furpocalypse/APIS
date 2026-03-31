@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     'django_admin_env_notice',
     'django.contrib.admin',
     'django.contrib.auth',
+    'django_fido',
     'django.contrib.postgres',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -99,6 +100,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'registration.middleware.Fido2VerificationMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
     'maintenance_mode.middleware.MaintenanceModeMiddleware',
 ]
@@ -186,8 +188,8 @@ SITE_ID = 1
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ()
 
-# LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
-# LOGIN_URL = 'u2f:login'
+# FIDO2 2FA is handled by Fido2VerificationMiddleware, not LOGIN_URL.
+DJANGO_FIDO_RP_NAME = "APIS Backoffice"
 
 INTERNAL_IPS = ['127.0.0.1']
 
