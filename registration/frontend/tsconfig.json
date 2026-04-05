@@ -1,7 +1,25 @@
 {
-    "compilerOptions": {
-        "jsx": "preserve",
-        "jsxImportSource": "solid-js",
-        "strict": true
-    }
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "lib": ["es2023", "dom"],
+    "module": "es2022",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "@components/*": ["./src/components/*"],
+      "@admin/*": ["./src/admin/*"]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "esnext",
+    "types": ["vite/client"],
+    "useDefineForClassFields": true,
+    "verbatimModuleSyntax": true
+  }
 }

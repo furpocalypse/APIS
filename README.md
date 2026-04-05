@@ -5,23 +5,23 @@
 Data Model snapshot (7 December 2020): https://i.imgur.com/A4fPDf5.png
 
 Stack:
-  + Ubuntu 24.04 (LTS)
-  + Postgres
-  + Python 3.11
-  + Django 5.2
-  + Bootstrap 3
-  + jQuery 1.12
+  + Ubuntu 22.04 (LTS)
+  + Python 3.14
+  + Django 6.0
+  + PostgreSQL 16.10
+  + Bootstrap 3/jQuery 1.12
+  + SolidJS
+  + MQTT event passing
 
 ## Features
   + Take payments for pre-registration using [Square][square], both online
-    and in-person with an [Android app][android] as a customer-facing
+    and in-person with an [iPad app][ipad] as a customer-facing
     display, with cash drawer and receipt printer integration.
-  + Manage staff registration and department heirarchies.
+  + Manage staff registration and department hierarchies.
   + Handle dealer applications, registration, and payments.
   + Create limited-use discounts.
   + Handle on-site registration on your own kiosks, or via a public URL.
-  + Populate attendee information by scanning their ID with a simple
-    [browser worker](https://github.com/rechner/py-aamva).
+  + Populate attendee information by scanning their ID.
   + Print badges on the fly with a custom template on any compatible card
     or label printer, with Unicode-supported fonts (Emoji!)
 
@@ -72,16 +72,11 @@ The following was tested on a fresh installation of Ubuntu 20.04.
     # https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-22-04 or
     # https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository.
 
-    # Build base docker image:
-    make build-base-docker-image
-
-    # Edit Dockerfile and replace the first line with output from last command. (The console will remind you.)
-
     # Give yourself permission to run Docker commands
     sudo usermod -aG docker ${USER}
     # Log out and back in to make it take effect
 
-    # Build final image
+    # Build image
     make build-docker-image
 
     # Run in Docker
@@ -90,9 +85,6 @@ The following was tested on a fresh installation of Ubuntu 20.04.
     # Create Superuser
     docker compose exec app /app/manage.py createsuperuser
     # Respond to prompts as needed
-
-    # OPTIONAL: If you intend to run APIS in production, configure your webserver to act as a reverse proxy.
-    # Example docs: https://www.digitalocean.com/community/tutorials/how-to-use-apache-as-a-reverse-proxy-with-mod_proxy-on-ubuntu-16-04
 
     # Run the development server
     make dev
@@ -177,7 +169,18 @@ After getting everything set up by either method above, set up the Postgres data
 
 You should be able to access the APIS instance at http://127.0.0.1:8000 with the superuser account you created.
 
+### Production use
+For production use you will also need an MQTT broker for some features like taking on-site payments with the iPad application.
+Please see [this documentation](https://github.com/furthemore/APIS/wiki/MQTT-Configuration) for notes about configuring a broker.
+
+## Development
+
+### Using [pre-commit](https://pre-commit.com/)
+1. Install: `pip install pre-commit` or `brew install pre-commit`.
+2. then run: `pre-commit install`, this will apply the hooks defined in `.pre-commit-config.yaml` to evey commit
+
 [square]: https://square.com/
+[ipad]: https://github.com/furthemore/APIS-Register-Swift
 [android]: https://github.com/furthemore/APIS-register
 [direnv]: https://direnv.net/
 [uv]: https://docs.astral.sh/uv/

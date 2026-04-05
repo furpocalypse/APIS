@@ -32,7 +32,7 @@ def square_webhook(request):
 
     if not signature_valid:
         logger.warning("Invalid signature in Square request")
-        common.abort(403, "Forbidden: invalid signature")
+        return common.abort(403, "Forbidden: invalid signature")
 
     try:
         request_body = json.loads(request.body)
@@ -47,8 +47,8 @@ def square_webhook(request):
 
     # Check to see if webhook was already stored:
     existing = PaymentWebhookNotification.objects.filter(event_id=event_id)
-    if existing.count() > 0:
-        return common.abort(409, f"Conflict: event_id {event_id} already_exists")
+    if existing.exists():
+        return common.success(200)
 
     # Store the verified event notification
     notification = PaymentWebhookNotification(
@@ -59,17 +59,17 @@ def square_webhook(request):
     )
     try:
         notification.save()
-    except PaymentWebhookNotification.IntegrityError as e:
-        logger.error("Conflict: event_id already exists:")
-        logger.error(e)
-        return common.abort(409, str(e))
+    except IntegrityError as e:
+        logger.warning(f"Conflict: event_id {event_id} already exists")
+        logger.debug(e)
+        return common.success(200)
 
     process_webhook(notification)
 
     return common.success(200)
 
 
-def process_webhook(notification):
+def process_webhook(notification: PaymentWebhookNotification):
     result = False
     if notification.body["type"] == "refund.updated":
         result = payments.process_webhook_refund_update(notification)

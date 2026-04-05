@@ -1,5 +1,6 @@
 import uuid
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
 from django.test import TestCase
@@ -14,7 +15,6 @@ class OnsiteBaseTestCase(TestCase):
     def setUp(self):
         # Create some users
         self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
-        self.admin_user.save()
         self.normal_user = User.objects.create_user(
             "john", "lennon@thebeatles.com", "john"
         )
@@ -22,14 +22,12 @@ class OnsiteBaseTestCase(TestCase):
         self.normal_user.save()
 
         # Create some test terminals to push notifications to
-        self.terminal = Firebase(token="test", name="Terminal 1")
-        self.terminal.save()
+        self.terminal = Firebase.objects.create(token="test", name="Terminal 1")
 
         # At least one event always mandatory
-        self.event = Event(**DEFAULT_EVENT_ARGS)
-        self.event.save()
+        self.event = Event.objects.create(**DEFAULT_EVENT_ARGS)
 
-        self.price_45 = PriceLevel(
+        self.price_45 = PriceLevel.objects.create(
             name="Attendee",
             description="Some test description here",
             basePrice=45.00,
@@ -37,8 +35,7 @@ class OnsiteBaseTestCase(TestCase):
             endDate=now + ten_days,
             public=True,
         )
-        self.price_45.save()
-        self.price_90 = PriceLevel(
+        self.price_90 = PriceLevel.objects.create(
             name="Sponsor",
             description="Woot!",
             basePrice=90.00,
@@ -46,27 +43,29 @@ class OnsiteBaseTestCase(TestCase):
             endDate=now + ten_days,
             public=True,
         )
-        self.price_90.save()
 
-        self.option_conbook = PriceLevelOption(
+        self.option_conbook = PriceLevelOption.objects.create(
             optionName="Conbook", optionPrice=0.00, optionExtraType="bool"
         )
-        self.option_conbook.save()
-        self.option_shirt = PriceLevelOption(
+        self.option_shirt = PriceLevelOption.objects.create(
             optionName="Shirt Size", optionPrice=20.00, optionExtraType="ShirtSizes"
         )
-        self.option_shirt.save()
-        self.option_100_int = PriceLevelOption(
+        self.option_100_int = PriceLevelOption.objects.create(
             optionName="Something Pricy", optionPrice=100.00, optionExtraType="int"
         )
-        self.option_100_int.save()
 
-        self.shirt1 = ShirtSizes(name="Test_Large")
-        self.shirt1.save()
+        self.price_45.priceLevelOptions.set(
+            [self.option_conbook, self.option_shirt, self.option_100_int]
+        )
+        self.price_90.priceLevelOptions.set(
+            [self.option_conbook, self.option_shirt, self.option_100_int]
+        )
+
+        self.shirt1 = ShirtSizes.objects.create(name="Test_Large")
+
+        self.boogeyman_hold = HoldType.objects.create(name="Boogeyman")
 
         self.client = Client()
-        self.boogeyman_hold = HoldType(name="Boogeyman")
-        self.boogeyman_hold.save()
 
     def add_to_cart(self, level, options):
         form_data = {
@@ -113,7 +112,7 @@ class OnsiteBaseTestCase(TestCase):
             reverse("registration:checkout"),
             json.dumps(post_data),
             content_type="application/json",
-            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+            headers={"idempotency-key": str(uuid.uuid4())},
         )
 
         return response
@@ -179,31 +178,32 @@ class TestOnsiteCart(OnsiteBaseTestCase):
         self.assertEqual(response.status_code, 200)
 
 
-@override_settings(**{
-    "MQTT_BROKER": {
-        "host": "localhost",
-        "port": 1883,
-    },
-    "MQTT_JWT_SECRET": "secret==",
-    "MQTT_JWT_ALGORITHM": "HS256",
-    "REGISTER_KEY": "",
-    "REGISTER_PRINTER_URI": "",
-})
+@override_settings(
+    **{
+        "MQTT_BROKER": {
+            "host": "localhost",
+            "port": 1883,
+        },
+        "MQTT_JWT_SECRET": "secret==",
+        "MQTT_JWT_ALGORITHM": "HS256",
+        "REGISTER_KEY": "",
+        "REGISTER_PRINTER_URI": "",
+    }
+)
 class TestOnsiteAdmin(OnsiteBaseTestCase):
     def test_onsite_login_required(self):
         self.client.logout()
         response = self.client.get(reverse("registration:onsite_admin"), follow=True)
         self.assertRedirects(
             response,
-            "/admin/login/?next={0}".format(reverse("registration:onsite_admin")),
+            "/accounts/login/?next={0}".format(reverse("registration:onsite_admin")),
         )
 
     def test_onsite_admin_required(self):
         self.client.logout()
         self.assertTrue(self.client.login(username="john", password="john"))
         response = self.client.get(reverse("registration:onsite_admin"), follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "are not authorized to access this page")
+        self.assertContains(response, "403 Forbidden", status_code=403)
         self.client.logout()
 
     @patch("registration.mqtt.send_mqtt_message")
@@ -212,15 +212,10 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertTrue(self.client.login(username="admin", password="admin"))
         response = self.client.get(reverse("registration:onsite_admin"), follow=True)
         self.assertEqual(response.status_code, 200)
-        settings = json.loads(response.context["settings"])
-        self.assertEqual(len(settings["errors"]), 0)
-        self.assertEqual(len(settings["terminals"]["available"]), 1)
 
         self.terminal.delete()
         response = self.client.get(reverse("registration:onsite_admin"))
         self.assertEqual(response.status_code, 200)
-        errors = [e["code"] for e in json.loads(response.context["settings"])["errors"]]
-        self.assertTrue("ERROR_NO_TERMINAL" in errors)
 
         self.terminal = Firebase(token="test", name="Terminal 1")
         self.terminal.save()
@@ -256,9 +251,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         self.assertEqual(len(response.json()["results"]), 0)
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_admin_cart_no_donations(
-        self, mock_send_mqtt_message
-    ):
+    def test_onsite_admin_cart_no_donations(self, mock_send_mqtt_message):
         # Stage registration
         options = [
             {"id": self.option_conbook.id, "value": "true"},
@@ -288,9 +281,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         # Add to cart
         badge_id = response.json()["results"][0]["id"]
 
-        response = self.client.get(
-            reverse("registration:onsite_add_to_cart"),
-            {"id": badge_id},
+        response = self.client.post(
+            reverse("registration:onsite_add_to_cart") + f"?id={badge_id}",
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.session["cart"], [badge_id])
@@ -307,22 +299,20 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         )
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_set_terminal_status(
-        self, mock_send_mqtt_single
-    ):
+    def test_onsite_set_terminal_status(self, mock_send_mqtt_single):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(
-            reverse("registration:terminal_status"),
-            {"terminal": self.terminal.id, "status": "open"},
+        response = self.client.post(
+            reverse("registration:terminal_status")
+            + f"?{urlencode({'terminal': self.terminal.id, 'status': 'open'})}",
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(mock_send_mqtt_single.call_count, 2)
+        self.assertEqual(mock_send_mqtt_single.call_count, 1)
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_onsite_set_invalid_terminal_status(self, mock_send_mqtt_message):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(
+        response = self.client.post(
             reverse("registration:terminal_status"),
             {"terminal": "notanint", "status": "open"},
         )
@@ -334,11 +324,9 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_mqtt_message.assert_not_called()
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_terminal_dne(
-        self, mock_send_mqtt_message
-    ):
+    def test_onsite_terminal_dne(self, mock_send_mqtt_message):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(
+        response = self.client.post(
             reverse("registration:terminal_status"),
             {"terminal": 1000},
         )
@@ -353,97 +341,32 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         mock_send_mqtt_message.assert_not_called()
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_onsite_terminal_bad_request(
-        self, mock_send_mqtt_message
-    ):
+    def test_onsite_terminal_bad_request(self, mock_send_mqtt_message):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(
+        response = self.client.post(
             reverse("registration:terminal_status"),
         )
 
         message = response.json()
         self.assertEqual(response.status_code, 400)
         self.assertFalse(message["success"])
-        self.assertEqual(
-            message["reason"], "No terminal associated with request"
-        )
+        self.assertEqual(message["reason"], "No terminal associated with request")
         mock_send_mqtt_message.assert_not_called()
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_onsite_enabled_terminal(self, mock_send_mqtt_message):
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        response = self.client.get(
+        response = self.client.post(
             reverse("registration:enable_payment"),
             {"terminal": self.terminal.id},
         )
         self.assertEqual(response.status_code, 200)
 
-    def test_firebase_register_bad_key(self):
-        response = self.client.get(
-            reverse("registration:firebase_register"),
-            {
-                "key": "garbedygook",
-                "token": str(uuid.uuid4()),
-                "name": "Some New Terminal 2",
-            },
-        )
-        message = response.json()
-
-        self.assertEqual(response.status_code, 401)
-        self.assertFalse(message["success"])
-        self.assertEqual(message["reason"], "Incorrect API key")
-
-    def test_firebase_register_bad_request(self):
-        response = self.client.get(
-            reverse("registration:firebase_register"),
-            {"key": settings.REGISTER_KEY},
-        )
-        message = response.json()
-
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(message["success"])
-        self.assertEqual(message["reason"], "Must specify token and name parameter")
-
-    def test_firebase_register_new_token(self):
-        response = self.client.get(
-            reverse("registration:firebase_register"),
-            {
-                "key": settings.REGISTER_KEY,
-                "token": str(uuid.uuid4()),
-                "name": "Some New Terminal 2",
-            },
-        )
-        message = response.json()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(message["success"])
-        self.assertFalse(message["updated"])
-
-    def test_firebase_register_update_token(self):
-        new_token = str(uuid.uuid4())
-        response = self.client.get(
-            reverse("registration:firebase_register"),
-            {
-                "key": settings.REGISTER_KEY,
-                "token": new_token,
-                "name": self.terminal.name,
-            },
-        )
-        message = response.json()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(message["success"])
-        self.assertTrue(message["updated"])
-        self.terminal = Firebase.objects.get(name=self.terminal.name)
-        self.assertEqual(self.terminal.token, new_token)
-
     @patch("registration.mqtt.send_mqtt_message")
-    def test_complete_cash_transaction(
-        self, mock_send_mqtt_message
-    ):
+    def test_complete_cash_transaction(self, mock_send_mqtt_message):
         self.test_onsite_admin_cart_no_donations()
         self.client.get(
-            reverse("registration:onsite_admin"), {"terminal": self.terminal.name}
+            reverse("registration:onsite_admin"), {"terminal": self.terminal.id}
         )
         order = Order.objects.last()
         args = {
@@ -451,8 +374,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             "total": order.total,
             "tendered": order.total,
         }
-        response = self.client.get(
-            reverse("registration:complete_cash_transaction"), args
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()
@@ -476,7 +399,10 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             "paymentId": "JUNK",
         }
         response = self.client.post(
-            reverse("registration:complete_square_transaction"), json.dumps(args), content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {self.terminal.token}"
+            reverse("registration:complete_square_transaction"),
+            json.dumps(args),
+            content_type="application/json",
+            headers={"authorization": f"Bearer {self.terminal.token}"},
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()
@@ -496,7 +422,9 @@ class TestDrawers(OnsiteBaseTestCase):
     def setUp(self):
         super().setUp()
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        self.client.get(reverse("registration:onsite_admin"))
+        self.client.get(
+            reverse("registration:onsite_admin"), {"terminal": self.terminal.id}
+        )
 
     def test_drawerStatusClosed_no_transactions(self):
         response = self.client.get(reverse("registration:drawer_status"))
@@ -605,6 +533,7 @@ class TestDrawers(OnsiteBaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
         mock_send_mqtt_message.assert_called_once()
+
 
 class TestSearchFields(OnsiteBaseTestCase):
     def test_search_fields_parse(self):

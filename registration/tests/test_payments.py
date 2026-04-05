@@ -140,6 +140,7 @@ class PaymentsPayPalTestCase(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super(PaymentsPayPalTestCase, cls).setUpClass()
         reason = cls.check_config()
         if reason != "":
             raise SkipTest(reason)
@@ -157,7 +158,7 @@ class PaymentsPayPalTestCase(TestCase):
     # TESTS START HERE
 
     def test_create_unpaid_paypal_order_single_reg(self):
-        (total, discount, api_response) = self.submit_new_order(self.singleRegistation)
+        total, discount, api_response = self.submit_new_order(self.singleRegistation)
 
         self.assertTrue(api_response.is_success())
         self.assertEqual(api_response.status_code, 201)
@@ -181,7 +182,7 @@ class PaymentsPayPalTestCase(TestCase):
         )
 
     def test_create_unpaid_paypal_order_multi_reg(self):
-        (total, discount, api_response) = self.submit_new_order(self.twoRegistrations)
+        total, discount, api_response = self.submit_new_order(self.twoRegistrations)
 
         self.assertTrue(api_response.is_success())
         self.assertEqual(api_response.status_code, 201)
@@ -213,7 +214,7 @@ class PaymentsPayPalTestCase(TestCase):
         )
 
     def test_create_unpaid_paypal_order_single_reg_with_donation(self):
-        (total, discount, api_response) = self.submit_new_order(
+        total, discount, api_response = self.submit_new_order(
             self.singleRegWithDonation
         )
 
@@ -247,7 +248,7 @@ class PaymentsPayPalTestCase(TestCase):
         )
 
     def test_create_unpaid_paypal_order_multi_reg_with_donation(self):
-        (total, discount, api_response) = self.submit_new_order(
+        total, discount, api_response = self.submit_new_order(
             self.twoRegistrationsWithDonation
         )
 

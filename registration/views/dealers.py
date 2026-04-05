@@ -1,6 +1,6 @@
+import datetime
 import json
 import logging
-import datetime
 from json import JSONDecodeError
 from zoneinfo import ZoneInfo
 
@@ -16,6 +16,7 @@ from django.urls import reverse
 
 import registration.emails
 from registration.models import *
+from registration.services import CreateAttendeeOptions
 
 from . import common
 from .common import clear_session, handler, logger
@@ -23,6 +24,7 @@ from .ordering import do_checkout, doZeroCheckout, get_discount_total
 
 logger = logging.getLogger(__name__)
 form_type = "marketplace"
+
 
 def dealers(request, guid):
     event = Event.objects.get(default=True)
@@ -48,7 +50,7 @@ def find_dealer_to_add_assistant(request, guid):
         "token": guid,
         "event": event,
         "next": reverse("registration:find_dealer_to_add_assistant_post"),
-        "form_type": form_type
+        "form_type": form_type,
     }
     return render(request, "registration/dealer/dealerasst-locate.html", context)
 
@@ -58,8 +60,8 @@ def dealer_asst(request, guid):
     context = {
         "token": guid,
         "event": event,
-        "next": reverse("registration:find_asst_dealer"), 
-        "form_type": form_type
+        "next": reverse("registration:find_asst_dealer"),
+        "form_type": form_type,
     }
     return render(request, "registration/dealer/dealerasst-locate.html", context)
 
@@ -73,7 +75,8 @@ def done_asst_dealer(request):
 def new_dealer(request):
     event = Event.objects.get(default=True)
     venue = event.venue
-    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
+    tz = timezone.get_current_timezone()
+    today = datetime.now(tz=tz)
     context = {"event": event, "venue": venue, "form_type": form_type}
     if event.dealerRegStart <= today <= event.dealerRegEnd:
         return render(request, "registration/dealer/dealer-form.html", context)
@@ -424,12 +427,7 @@ def add_dealer(request):
     orderItem = OrderItem(badge=badge, priceLevel=priceLevel, enteredBy="WEB")
     orderItem.save()
 
-    for option in pdp["options"]:
-        plOption = PriceLevelOption.objects.get(id=int(option["id"]))
-        attendeeOption = AttendeeOptions(
-            option=plOption, orderItem=orderItem, optionValue=option["value"]
-        )
-        attendeeOption.save()
+    CreateAttendeeOptions(orderItem).save_options(pdp["options"])
 
     orderItems = request.session.get("order_items", [])
     orderItems.append(orderItem.id)
@@ -526,7 +524,7 @@ def addNewDealer(request):
     evt = postData["event"]
 
     try:
-        birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+        birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
     except ValueError as e:
         logger.warning(f"Unable to parse birthdate: {pda['birthdate']} - {e}")
         return common.abort(400, f"Unable to parse birthdate: {pda['birthdate']}")

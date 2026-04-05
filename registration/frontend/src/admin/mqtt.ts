@@ -1,73 +1,151 @@
+import mitt, { type Emitter } from "mitt";
 import mqtt from "mqtt";
-import mitt, { Emitter } from "mitt";
+import { type Accessor, type Setter, createSignal } from "solid-js";
 
-import { Accessor, createSignal, Setter } from "solid-js";
-import { ApisMqttConfig } from "../entrypoints/admin";
+import { type AttendeeDetails, urlForOnsiteDetails } from "./api";
+
+export type ApisMqttConfig = {
+  broker: string;
+  auth: ApisMqttAuth;
+};
+
+export type ApisMqttAuth = {
+  user: string;
+  token: string;
+  root_topic: string;
+  print_topic?: string;
+};
 
 export type MqttTopic =
-  | "alert"
-  | "authorize_terminal"
-  | "notification"
-  | "open"
+  | "authorize/square"
+  | "notify/alert"
+  | "notify/info"
+  | "notify/payment"
+  | "notify/scan/id"
+  | "notify/scan/raw"
+  | "notify/scan/shc"
+  | "notify/scan/url"
+  | "presence"
   | "refresh"
-  | "scan/id"
-  | "scan/shc"
+  | "registration/completed"
   | "transfer";
 
 export type MqttEmitter = Emitter<Record<MqttTopic, object | null>>;
 
+const dec2hex = (dec: number) => {
+  return dec.toString(16).padStart(2, "0");
+};
+
 export default class MqttClient {
   public errorMessage: Accessor<string | undefined>;
-  private setErrorMessage: Setter<string | undefined>;
+  private readonly setErrorMessage: Setter<string | undefined>;
+
+  public isConnected: Accessor<boolean>;
+  private readonly setIsConnected: Setter<boolean>;
 
   public emitter: Emitter<Record<MqttTopic, object | null>>;
 
   private client?: mqtt.MqttClient;
-  private config: ApisMqttConfig;
+  private config?: ApisMqttConfig;
 
-  constructor(config: ApisMqttConfig) {
-    this.config = config;
+  constructor() {
+    console.debug("Creating new MQTT client");
+
+    const [isConnected, setIsConnected] = createSignal(false);
+    [this.isConnected, this.setIsConnected] = [isConnected, setIsConnected];
 
     const [errorMessage, setErrorMessage] = createSignal<string>();
-    this.errorMessage = errorMessage;
-    this.setErrorMessage = setErrorMessage;
+    [this.errorMessage, this.setErrorMessage] = [errorMessage, setErrorMessage];
 
     this.emitter = mitt();
+  }
 
-    if (!this.config.auth) return;
+  public async connect(config: ApisMqttConfig) {
+    console.debug("Connecting to MQTT");
 
-    const wildcardTopic = this.getPrefixedTopic("#");
+    await this.disconnect();
 
-    this.client = mqtt.connect(config.broker, {
-      username: config.auth.user,
-      password: config.auth.token,
-      clientId: `admin-${config.auth.user}`,
-      clean: false,
-      protocolVersion: 5,
-      timerVariant: "native",
-      properties: {
-        sessionExpiryInterval: 300,
-      },
+    this.config = config;
+    const wildcardTopic = this.getPrefixedTopic("web/#");
+
+    let connectResolve: (() => void) | undefined;
+    let connectReject: ((err: Error) => void) | undefined;
+
+    const promise = new Promise<void>((resolve, reject) => {
+      connectResolve = resolve;
+      connectReject = reject;
     });
 
-    this.client.on("connect", () => {
-      this.setErrorMessage(undefined);
-      console.debug(`Subscribing to ${wildcardTopic}`);
-      this.client?.subscribe(wildcardTopic, (err) => {
-        if (err) {
-          console.error(`MQTT subscription failed: ${err}`);
-        } else {
-          this.client?.publish(
-            this.getPrefixedTopic("admin_presence"),
-            JSON.stringify(":3")
-          );
-        }
+    try {
+      this.client = mqtt.connect(config.broker, {
+        username: config.auth.user,
+        password: config.auth.token,
+        clientId: `web-${config.auth.user}-${this.getClientId()}`,
+        clean: false,
+        protocolVersion: 5,
+        timerVariant: "native",
+        properties: {
+          sessionExpiryInterval: 300,
+        },
       });
+    } catch (err) {
+      if (err instanceof Error) {
+        this.setErrorMessage(`Connection error: ${err}`);
+      } else {
+        this.setErrorMessage("Connection error");
+      }
+      return;
+    }
+
+    this.client.on("connect", async (packet) => {
+      this.setIsConnected(true);
+      this.setErrorMessage(undefined);
+
+      console.debug(
+        `Connected to MQTT, sessionPresent - ${packet.sessionPresent}, subscribing to ${wildcardTopic}`,
+      );
+
+      try {
+        await this.client?.subscribeAsync(wildcardTopic);
+        await this.client?.publishAsync(
+          this.getPrefixedTopic("web/presence"),
+          JSON.stringify(this.getClientId()),
+        );
+      } catch (err) {
+        console.error(`Could not subscribe: ${err}`);
+
+        if (err instanceof Error) {
+          this.setErrorMessage(`Connection error: ${err}`);
+        } else {
+          this.setErrorMessage("Connection error");
+        }
+        return;
+      }
+
+      if (connectResolve) {
+        connectResolve();
+        connectResolve = undefined;
+      }
     });
 
     this.client.on("error", (err: Error) => {
       console.error(`MQTT error: ${err}`);
       this.setErrorMessage(err.toString());
+
+      if (connectReject) {
+        connectReject(err);
+        connectReject = undefined;
+      }
+    });
+
+    this.client.on("close", () => {
+      console.debug("MQTT close");
+      this.setIsConnected(false);
+    });
+
+    this.client.on("disconnect", (evt) => {
+      console.debug(`MQTT disconnect: ${evt.reasonCode}`);
+      this.setErrorMessage(`Disconnected: ${evt.reasonCode || "Unknown"}`);
     });
 
     this.client.on("reconnect", () => {
@@ -75,14 +153,14 @@ export default class MqttClient {
     });
 
     this.client.on("message", (topic, message) => {
-      let data = message.toString();
+      const data = message.toString();
       console.debug("MQTT message", topic, data);
 
+      const webPrefix = `${config.auth.root_topic}/web/`;
+
       let strippedTopic: MqttTopic;
-      if (topic.startsWith(config.auth.base_topic)) {
-        strippedTopic = topic.slice(
-          config.auth.base_topic.length + 1
-        ) as MqttTopic;
+      if (topic.startsWith(webPrefix)) {
+        strippedTopic = topic.slice(webPrefix.length) as MqttTopic;
       } else {
         console.warn(`Got topic with unexpected prefix: ${topic}`);
         return;
@@ -91,55 +169,80 @@ export default class MqttClient {
       let payload = null;
       try {
         payload = JSON.parse(data);
-      } catch (err) {}
+      } catch {
+        console.warn("Payload was not valid JSON", data);
+      }
 
       switch (strippedTopic) {
-        case "notification":
-          if (payload?.["text"]) {
-            sendNotification(payload["text"]);
+        case "authorize/square":
+          if (payload?.["url"] && payload?.["state"]) {
+            document.cookie = `square_oauth_state=${payload["state"]}; path=/; secure`;
+            globalThis.open(payload["url"], "square_oauth");
           }
           break;
-        case "alert":
+        case "notify/alert":
           if (payload?.["text"]) {
             alert(payload["text"]);
           }
           break;
-        case "authorize_terminal":
-          if (payload?.["url"] && payload?.["state"]) {
-            document.cookie = `square_oauth_state=${payload["state"]}; path=/`;
-            window.open(payload["url"], "square_oauth");
+        case "presence":
+          if (payload && payload !== this.getClientId()) {
+            console.warn("Another device has connected to this station");
+            this.emitter?.emit("presence", payload);
           }
+          break;
         default:
-          this.emitter.emit(strippedTopic, payload);
+          this.emitter?.emit(strippedTopic, payload);
           break;
       }
     });
+
+    await promise;
   }
 
-  public disconnect() {
-    this.client?.end();
+  public async disconnect() {
+    if (!this.client) return;
+
+    console.debug("Disconnect requested, ending client");
+    await this.client.endAsync();
+
+    this.client = undefined;
   }
 
-  public publishMessage(topic: string, payload: string) {
-    this.client?.publish(this.getPrefixedTopic(topic), payload);
+  public async publishPrintMessage(payload: string) {
+    const topic =
+      this.config?.auth.print_topic || this.getPrefixedTopic("station/print");
+    await this.client?.publishAsync(topic, payload);
   }
 
-  public publishPrintMessage(payload: string) {
-    this.client?.publish(
-      this.config.auth.print_topic || this.getPrefixedTopic("action"),
-      payload
+  public async displayRegistration(token: string, details: AttendeeDetails) {
+    const url = urlForOnsiteDetails(details);
+
+    await this.client?.publishAsync(
+      this.getPrefixedTopic("payment/registration/display"),
+      JSON.stringify({ url, token }),
+    );
+  }
+
+  public async cancelRegistration() {
+    await this.client?.publishAsync(
+      this.getPrefixedTopic("payment/registration/cancel"),
+      "",
     );
   }
 
   private getPrefixedTopic(topic: string): string {
-    return `${this.config.auth.base_topic}/${topic}`;
+    return `${this.config!.auth.root_topic}/${topic}`;
   }
-}
 
-function sendNotification(message: string) {
-  if (Notification.permission === "granted") {
-    return new Notification(message);
-  } else {
-    alert(message);
+  private getClientId(): string {
+    let clientId = localStorage.getItem("client-id");
+    if (clientId) return clientId;
+
+    const vals = new Uint8Array(8);
+    globalThis.crypto.getRandomValues(vals);
+    clientId = Array.from(vals, dec2hex).join("");
+    localStorage.setItem("client-id", clientId);
+    return clientId;
   }
 }

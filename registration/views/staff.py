@@ -1,6 +1,6 @@
+import datetime
 import json
 import logging
-import datetime
 from time import timezone
 from zoneinfo import ZoneInfo
 
@@ -10,18 +10,11 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST
 
-import registration.emails
 from registration.models import *
+from registration.services import CreateAttendeeOptions
 
-from .common import (
-    abort,
-    clear_session,
-    get_client_ip,
-    handler,
-    logger,
-    success,
-)
-from .ordering import do_checkout, doZeroCheckout, get_total
+from .common import abort, handler, logger
+from .ordering import get_total
 
 logger = logging.getLogger(__name__)
 form_type = "staff"
@@ -29,13 +22,19 @@ form_type = "staff"
 
 def new_staff(request, guid):
     event = Event.objects.get(default=True)
-    invite = TempToken.objects.get(token=guid)
-    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
+    invite = StaffInvite.objects.get(token=guid)
+    tz = timezone.get_current_timezone()
+    today = datetime.now(tz=tz)
     context = {"token": guid, "event": event, "form_type": form_type}
-    if event.staffRegStart <= today <= event.staffRegEnd or invite.ignore_time_window is True:
-        return render(request, "registration/staff/staff-new.html", context)
+    if (
+        event.staffRegStart <= today <= event.staffRegEnd
+        or invite.ignore_time_window is True
+    ):
+        return render(request, "registration/staff/new-staff.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to slack and email for updates!"
+        )
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -49,7 +48,7 @@ def find_new_staff(request):
         email = post_data["email"]
         token = post_data["token"]
 
-        token = TempToken.objects.get(email__iexact=email, token=token)
+        token = StaffInvite.objects.get(email__iexact=email, token=token)
 
         if token.validUntil < timezone.now():
             return abort(400, "Invalid Token")
@@ -70,12 +69,12 @@ def info_new_staff(request):
     token_value = request.session.get("new_staff")
     context = {"staff": None, "event": event, "form_type": form_type}
     try:
-        context["token"] = TempToken.objects.get(token=token_value)
+        context["token"] = StaffInvite.objects.get(token=token_value)
     except ObjectDoesNotExist:
         return render(
-            request, "registration/staff/staff-new-payment.html", context, status=404
+            request, "registration/staff/new-staff-payment.html", context, status=404
         )
-    return render(request, "registration/staff/staff-new-payment.html", context)
+    return render(request, "registration/staff/new-staff-payment.html", context)
 
 
 def staff_from_post_data(pds, attendee, event, staff):
@@ -109,7 +108,8 @@ def add_new_staff(request):
     else:
         event = Event.objects.get(default=True)
 
-    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+    tz = timezone.get_current_timezone()
+    birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
 
     attendee = Attendee(
         firstName=pda["firstName"],
@@ -135,15 +135,11 @@ def add_new_staff(request):
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 
-    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
-    order_item.save()
+    order_item = OrderItem.objects.create(
+        badge=badge, priceLevel=price_level, enteredBy="WEB"
+    )
 
-    for option in pdp["options"]:
-        pl_option = PriceLevelOption.objects.get(id=int(option["id"]))
-        attendee_option = AttendeeOptions(
-            option=pl_option, orderItem=order_item, optionValue=option["value"]
-        )
-        attendee_option.save()
+    CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
     order_items = request.session.get("order_items", [])
     order_items.append(order_item.id)
@@ -153,7 +149,7 @@ def add_new_staff(request):
     if discount:
         request.session["discount"] = discount.codeName
 
-    tokens = TempToken.objects.filter(email=attendee.email)
+    tokens = StaffInvite.objects.filter(email=attendee.email)
     for token in tokens:
         token.used = True
         token.save()
@@ -161,14 +157,17 @@ def add_new_staff(request):
     return JsonResponse({"success": True})
 
 
-def staff_index(request, guid):
+def returning_staff(request, guid):
     event = Event.objects.get(default=True)
-    today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
+    tz = timezone.get_current_timezone()
+    today = datetime.now(tz=tz)
     context = {"token": guid, "event": event, "form_type": form_type}
     if event.staffRegStart <= today <= event.staffRegEnd:
-        return render(request, "registration/staff/staff-locate.html", context)
+        return render(request, "registration/staff/returning-staff.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to slack and email for updates!"
+        )
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -182,13 +181,13 @@ def staff_done(request):
 
 
 @require_POST
-def find_staff(request):
+def find_returning_staff(request):
     try:
         post_data = json.loads(request.body)
         email = post_data["email"]
         token = post_data["token"]
     except (json.JSONDecodeError, KeyError) as e:
-        logger.warning(f"Unable to find staff: bad request - {request.body}")
+        logger.warning(f"Unable to find returning staff: bad request - {request.body}")
         return abort(400, str(e))
 
     try:
@@ -202,13 +201,15 @@ def find_staff(request):
     return JsonResponse({"success": True, "message": "STAFF"})
 
 
-def info_staff(request):
+def info_returning_staff(request):
     event = Event.objects.get(default=True)
     context = {"staff": None, "event": event, "form_type": form_type}
 
     staff_id = request.session.get("staff_id")
     if staff_id is None:
-        return render(request, "registration/staff/staff-payment.html", context)
+        return render(
+            request, "registration/staff/returning-staff-payment.html", context
+        )
 
     staff = Staff.objects.get(id=staff_id)
     if staff:
@@ -229,15 +230,16 @@ def info_staff(request):
             "badge": badge,
             "event": event,
             "paid_total": paid_total,
+            "form_type": form_type,
         }
-    return render(request, "registration/staff/staff-payment.html", context)
+    return render(request, "registration/staff/returning-staff-payment.html", context)
 
 
-def add_staff(request):
+def add_returning_staff(request):
     try:
         postData = json.loads(request.body)
     except ValueError as e:
-        logger.error("Unable to decode JSON for add_staff()")
+        logger.error("Unable to decode JSON for add_returning_staff()")
         return JsonResponse({"success": False})
 
     # create attendee from request post
@@ -255,7 +257,8 @@ def add_staff(request):
     if not attendee:
         return JsonResponse({"success": False, "message": "Attendee not found"})
 
-    birthdate = datetime.datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+    tz = timezone.get_current_timezone()
+    birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
 
     attendee.preferredName = pda.get("preferredName", "")
     attendee.firstName = pda["firstName"]
@@ -308,15 +311,11 @@ def add_staff(request):
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 
-    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
-    order_item.save()
+    order_item = OrderItem.objects.create(
+        badge=badge, priceLevel=price_level, enteredBy="WEB"
+    )
 
-    for option in pdp["options"]:
-        pl_option = PriceLevelOption.objects.get(id=int(option["id"]))
-        attendee_option = AttendeeOptions(
-            option=pl_option, orderItem=order_item, optionValue=option["value"]
-        )
-        attendee_option.save()
+    CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
     order_items = request.session.get("order_items", [])
     order_items.append(order_item.id)

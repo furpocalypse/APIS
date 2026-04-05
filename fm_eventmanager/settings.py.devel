@@ -63,6 +63,7 @@ LOGGING = {
 
 ADMINS = [('Super Adminton', 'admin@example.com'),]
 SERVER_EMAIL = "no-reply@example.com"
+DEFAULT_FROM_EMAIL = SERVER_EMAIL
 
 ALLOWED_HOSTS = ['*']
 
@@ -76,17 +77,22 @@ INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.postgres',
     'django.contrib.contenttypes',
-    'django.contrib.sessions',
+    'django.contrib.humanize',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
+    'django.contrib.sessions',
     'django.contrib.sites',
+    'django.contrib.staticfiles',
     'widget_tweaks',
     'mathfilters',
     'nested_inline',
     'import_export',
     'django_extensions',
     'maintenance_mode',
+    'allauth',
+    'allauth.account',
+    'allauth.mfa',
     'registration',
+    'django_vite',
 ]
 
 MIDDLEWARE = [
@@ -98,6 +104,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
     'maintenance_mode.middleware.MaintenanceModeMiddleware',
 ]
 
@@ -123,8 +130,6 @@ TEMPLATES = [
         },
     },
 ]
-
-WSGI_APPLICATION = 'fm_eventmanager.wsgi.application'
 
 
 # Database
@@ -184,11 +189,22 @@ USE_TZ = True
 
 SITE_ID = 1
 
-MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
-MAINTENANCE_MODE_IGNORE_URLS = ()
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
 
-# LOGIN_REDIRECT_URL = 'u2f:two-factor-settings'
-# LOGIN_URL = 'u2f:login'
+ACCOUNT_ADAPTER = "fm_eventmanager.adapters.account.RegistrationAccountAdapter"
+
+MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
+MFA_PASSKEY_LOGIN_ENABLED = True
+MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = True
+MFA_ADAPTER = "allauth.mfa.adapter.DefaultMFAAdapter"
+
+LOGIN_REDIRECT_URL = "admin:index"
+
+MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
+MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
 
 INTERNAL_IPS = ['127.0.0.1']
 
@@ -249,3 +265,7 @@ ENVIRONMENT_NAME = "Development Server"
 ENVIRONMENT_COLOR = "#999999"
 ENVIRONMENT_TEXT_COLOR = "#FFFFFF"
 ENVIRONMENT_FLOAT = True
+
+DJANGO_VITE_STATIC_URL_PREFIX = "bundler"
+
+VALIDATE_TEMPLATES_IGNORE_APPS = ["allauth"]

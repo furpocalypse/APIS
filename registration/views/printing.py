@@ -5,19 +5,19 @@ from typing import Union
 from django.conf import settings
 from django.contrib import messages
 from django.core.signing import TimestampSigner
-from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.template import Context, Template
 from gotenberg_client import GotenbergClient
 from gotenberg_client.options import (
-    MarginType,
+    Measurement,
     PageMarginsType,
     PageOrientation,
     PageSize,
 )
 
 from registration import mqtt
-from registration.models import Badge, Dealer, Staff
+from registration.models import Badge, Dealer, Firebase, PrintHistory, Staff
 
 logger = logging.getLogger(__name__)
 
@@ -30,33 +30,7 @@ def printNametag(request):
     return render(request, "registration/printing.html", context)
 
 
-def servePDF(request):
-    if getattr(settings, "PRINT_RENDERER", "wkhtmltopdf") == "gotenberg":
-        return pdfFromGotenberg(request)
-    else:
-        return pdfFromDisk(request)
-
-
-def pdfFromDisk(request: HttpRequest) -> Union[FileResponse, JsonResponse]:
-    name = request.GET.get("file", None)
-    if not name or not isinstance(name, str):
-        return JsonResponse(
-            {"success": False, "reason": "Name was missing"}, status=400
-        )
-
-    root_dir = getattr(settings, "PDF_DIRECTORY", "/tmp")
-    try:
-        path = Path(root_dir).joinpath(Path(name).name)
-        f = open(path, "rb")
-    except IOError:
-        return JsonResponse({"success": False, "reason": "IO error"}, status=404)
-
-    response = FileResponse(f, content_type="application/pdf")
-    response["Access-Control-Allow-Origin"] = "*"
-    return response
-
-
-def pdfFromGotenberg(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
+def servePDF(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
     data = request.GET.get("data", None)
     if not data:
         return JsonResponse({"success": False, "reason": "Missing data"}, status=400)
@@ -90,8 +64,15 @@ def pdfFromGotenberg(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
             )
 
         level = str(level)
-        if Staff.objects.filter(attendee=badge.attendee, event=badge.event).exists():
+        if staff := Staff.objects.filter(
+            attendee=badge.attendee, event=badge.event
+        ).first():
             level = "Staff"
+
+            if not staff.checkedIn and data_obj["source"] == PrintHistory.ONSITE:
+                staff.checkedIn = True
+                staff.save()
+
         elif Dealer.objects.filter(attendee=badge.attendee, event=badge.event).exists():
             level = "Dealer"
 
@@ -107,21 +88,24 @@ def pdfFromGotenberg(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
         pdfs = []
 
         for badge_template_id, badges in badge_groups.items():
-            (badge_template, template) = badge_templates[badge_template_id]
+            badge_template, template = badge_templates[badge_template_id]
             context = Context({"badges": badges})
             rendered = str(template.render(context))
 
             with client.chromium.html_to_pdf() as route:
                 response = (
                     route.size(
-                        PageSize(badge_template.paperWidth, badge_template.paperHeight)
+                        PageSize(
+                            Measurement(badge_template.paperWidth),
+                            Measurement(badge_template.paperHeight),
+                        )
                     )
                     .margins(
                         PageMarginsType(
-                            MarginType(badge_template.marginTop),
-                            MarginType(badge_template.marginBottom),
-                            MarginType(badge_template.marginLeft),
-                            MarginType(badge_template.marginRight),
+                            Measurement(badge_template.marginTop),
+                            Measurement(badge_template.marginBottom),
+                            Measurement(badge_template.marginLeft),
+                            Measurement(badge_template.marginRight),
                         )
                     )
                     .orient(
@@ -133,7 +117,7 @@ def pdfFromGotenberg(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
                     )
                     .scale(badge_template.scale)
                     .string_resource(rendered, "index.html")
-                    .render_expr("window.badgeReady === true")
+                    .render_expression("window.badgeReady === true")
                     .run()
                 )
                 pdfs.append(response.content)
@@ -154,16 +138,22 @@ def pdfFromGotenberg(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
                 response = req.run()
                 finalPdf = response.content
 
-        http_resp = HttpResponse()
-        http_resp.headers["content-type"] = "application/pdf"
-        http_resp.write(finalPdf)
+    http_resp = HttpResponse()
+    http_resp["content-type"] = "application/pdf"
+    http_resp.write(finalPdf)
 
-        for badge in queryset:
-            badge.printed = True
-            badge.save()
+    terminal = None
+    if terminal_name := data_obj.get("terminal", None):
+        terminal = Firebase.objects.get(name=terminal_name)
 
-        if terminal := data_obj.get("terminal", None):
-            topic = f"{mqtt.get_topic('admin', terminal)}/refresh"
-            mqtt.send_mqtt_message(topic, None)
+    for badge in queryset:
+        badge.printed = True
+        badge.save()
+        PrintHistory.objects.create(
+            badge=badge, firebase=terminal, source=data_obj["source"]
+        )
 
-        return http_resp
+    if terminal:
+        mqtt.send_mqtt_message(mqtt.get_topic("web/refresh", name=terminal.name))
+
+    return http_resp

@@ -1,17 +1,14 @@
 from contextlib import contextmanager
 from datetime import timedelta
-from pathlib import Path
-from unittest.mock import patch
-from urllib.parse import urlparse
 
+import httpx
+import respx
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 from django.utils import timezone
-import httpx
-import respx
 
 from registration.models import (
     Attendee,
@@ -101,7 +98,7 @@ class TestRegistrationPrinting(TestCase):
     def _badge_generates_pdf(self) -> dict:
         self.assertTrue(self.client.login(username="admin", password="admin"))
 
-        response = self.client.get(
+        response = self.client.post(
             reverse("registration:onsite_print_badges") + f"?id={self.badge.pk}"
         )
         self.assertEqual(response.status_code, 200)
@@ -116,21 +113,7 @@ class TestRegistrationPrinting(TestCase):
 
         return data
 
-    def test_print_wkhtmltopdf(self):
-        settings.PRINT_RENDERER = "wkhtmltopdf"
-        with patch("subprocess.check_call", return_value=0) as patched:
-            data = self._badge_generates_pdf()
-        self.assertEqual(patched.call_count, 1)
-        args = patched.call_args[0][0]
-        # Last argument is always the filename with path
-        arg_filename = Path(args[-1]).name
-        response_filename = urlparse(data["file"]).query.removeprefix("file=")
-        self.assertEqual(arg_filename, response_filename)
-        # wkhtmltopdf responses return a direct path to the file
-        self.assertIn("?file=", data["file"])
-
     def test_print_gotenberg(self):
-        settings.PRINT_RENDERER = "gotenberg"
         with patch_gotenberg(hasattr(settings, "GOTENBERG_HOST")):
             data = self._badge_generates_pdf()
         # gotenberg responses return a signed data parameter with badge IDs

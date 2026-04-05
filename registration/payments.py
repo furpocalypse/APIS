@@ -30,7 +30,7 @@ from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 from prometheus_client import Histogram
 from pydantic import validate_call
 
-from . import emails
+from . import tasks
 from .models import *
 
 SQUARE_REQUESTS = Histogram(
@@ -230,78 +230,76 @@ def charge_square_payment(
         JSON response.
     """
 
-    idempotency_key = get_idempotency_key(request)
-    converted_total = int(order.total * 100)
+    # idempotency_key = get_idempotency_key(request)
+    # converted_total = int(order.total * 100)
 
-    amount = {"amount": converted_total, "currency": settings.SQUARE_CURRENCY}
+    # amount = MoneyParams(amount=converted_total, currency=settings.SQUARE_CURRENCY)
 
-    order.billingPostal = cc_data["postal"]
-    billing_address = {
-        "postal_code": cc_data["postal"],
-    }
+    # order.billingPostal = cc_data["postal"]
 
-    try:
-        billing_address.update(
-            {
-                "address_line_1": cc_data["address1"],
-                "address_line_2": cc_data["address2"],
-                "locality": cc_data["city"],
-                "administrative_district_level_1": cc_data["state"],
-                "postal_code": cc_data["postal"],
-                "country": cc_data["country"],
-                "buyer_email_address": cc_data["email"],
-                "first_name": cc_data["cc_firstname"],
-                "last_name": cc_data["cc_lastname"],
-            }
-        )
-    except KeyError as e:
-        logger.debug("One or more billing address field omited - skipping")
+    # try:
+    #     billing_address = AddressParams(
+    #         address_line1=cc_data["address1"],
+    #         address_line2=cc_data["address2"],
+    #         locality=cc_data["city"],
+    #         administrative_district_level1=cc_data["state"],
+    #         postal_code=cc_data["postal"],
+    #         country=cc_data["country"],
+    #         first_name=cc_data["cc_firstname"],
+    #         last_name=cc_data["cc_lastname"],
+    #     )
+    # except KeyError:
+    #     logger.debug("One or more billing address field omited - skipping")
+    #     billing_address = AddressParams(postal_code=cc_data["postal"])
 
-    body = {
-        "idempotency_key": idempotency_key,
-        "source_id": cc_data["source_id"],
-        "autocomplete": True,
-        "amount_money": amount,
-        "reference_id": order.reference,
-        "billing_address": billing_address,
-        "location_id": settings.SQUARE_LOCATION_ID,
-    }
+    # logger.debug("---- Begin Transaction ----")
 
-    if "verificationToken" in cc_data:
-        body["verificationToken"] = cc_data["verificationToken"]
+    # try:
+    #     with SQUARE_REQUESTS.labels(endpoint="create_payment").time():
+    #         api_response = client.payments.create(
+    #             idempotency_key=idempotency_key,
+    #             source_id=cc_data["source_id"],
+    #             autocomplete=True,
+    #             amount_money=amount,
+    #             reference_id=order.reference,
+    #             billing_address=billing_address,
+    #             location_id=settings.SQUARE_LOCATION_ID,
+    #             verification_token=cc_data.get("verificationToken"),
+    #             buyer_email_address=cc_data.get("email"),
+    #         )
+    # except ApiError as e:
+    #     logger.debug(e.errors)
+    #     logger.debug("---- Transaction Failed ----")
+    #     order.status = Order.FAILED
+    #     order.apiData = e.body
+    #     order.save()
+    #     return False, e.body
 
-    logger.debug("---- Begin Transaction ----")
-    logger.debug(body)
+    # logger.debug("---- Charge Submitted ----")
 
-    with SQUARE_REQUESTS.labels(endpoint="create_payment").time():
-        api_response = {}
-        # api_response = payments_api.create_payment(body)
+    # # Square still returns data for failed payments
+    # order.apiData = api_response.model_dump()
 
-    logger.debug("---- Charge Submitted ----")
-    logger.debug(api_response)
+    # if (
+    #     api_response.payment
+    #     and api_response.payment.id
+    #     and api_response.payment.status != "FAILED"
+    # ):
+    #     if api_response.payment.card_details and api_response.payment.card_details.card:
+    #         order.lastFour = str(api_response.payment.card_details.card.last4)
 
-    # Square still returns data for failed payments
-    order.apiData = api_response.body
-
-    if "payment" in api_response.body:
-        order.lastFour = api_response.body["payment"]["card_details"]["card"]["last_4"]
-
-    if api_response.is_success():
-        order.status = Order.COMPLETED
-        order.notes = "Square: #" + api_response.body["payment"]["id"][:4]
-        order.save()
-
-    elif api_response.is_error():
-        logger.debug(api_response.errors)
-        message = api_response.errors
-        logger.debug("---- Transaction Failed ----")
-        order.status = Order.FAILED
-        order.save()
-        return False, {"errors": message}
-
-    logger.debug("---- End Transaction ----")
-
-    return True, api_response.body
+    #     logger.debug("---- End Transaction ----")
+    #     order.status = Order.COMPLETED
+    #     order.notes = "Square: #" + api_response.payment.id[:4]
+    #     order.save()
+    #     return True, None
+    # else:
+    #     logger.debug(api_response.errors)
+    #     logger.debug("---- Transaction Failed ----")
+    #     order.status = Order.FAILED
+    #     order.save()
+    #     return False, {"errors": [e.model_dump() for e in api_response.errors or []]}
+    return False, {"errors": ["Square support has been removed!"]}
 
 
 def format_errors(errors: List) -> str:
@@ -313,7 +311,7 @@ def format_errors(errors: List) -> str:
     """
     error_string = ""
     for error in errors:
-        error_string += "{e[category]} - {e[code]}: {e[detail]}\n".format(e=error)
+        error_string += f"{error.category} - {error.code}: {error.detail}\n"
     return error_string
 
 
@@ -333,85 +331,84 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
         success status is ``False``.
     """
     # Function raises ValueError if there's a problem decoding the stored data
-    if store_api_data:
-        api_data = store_api_data
-    else:
-        api_data = order.apiData
-        if not api_data:
-            logger.warning("No order data yet for {0}".format(order.reference))
-            return False, "No order data yet for {0}".format(order.reference)
-    order_total = 0
+    # if store_api_data:
+    #     api_data = store_api_data
+    # else:
+    #     api_data = order.apiData
+    #     if not api_data:
+    #         logger.warning("No order data yet for {0}".format(order.reference))
+    #         return False, "No order data yet for {0}".format(order.reference)
+    # order_total = 0
 
-    try:
-        payment_id = api_data["payment"]["id"]
-    except KeyError:
-        logger.warning("Refresh payment: MISSING_PAYMENT_ID")
-        return False, "MISSING_PAYMENT_ID"
-    with SQUARE_REQUESTS.labels(endpoint="get_payment").time():
-        payments_response = {}
-        # payments_response = payments_api.get_payment(payment_id)
+    # try:
+    #     payment_id = api_data["payment"]["id"]
+    # except KeyError:
+    #     logger.warning("Refresh payment: MISSING_PAYMENT_ID")
+    #     return False, "MISSING_PAYMENT_ID"
+    # with SQUARE_REQUESTS.labels(endpoint="get_payment").time():
+    #     payments_response = payments_api.get_payment(payment_id)
 
-    payment = payments_response.body.get("payment")
-    if payments_response.is_success():
-        api_data["payment"] = payment
-        order_total = update_order_payment_data(order, order_total, payment)
-    else:
-        return False, format_errors(payments_response.errors)
+    # payment = payments_response.body.get("payment")
+    # if payments_response.is_success():
+    #     api_data["payment"] = payment
+    #     order_total = update_order_payment_data(order, order_total, payment)
+    # else:
+    #     return False, format_errors(payments_response.errors or [])
 
-    # FIXME: Payments API call includes references to any refunds associated with that payment in `refund_ids`
-    # We should use that here instead.
-    refunds = []
-    refund_errors = []
-    refunded_money = payment.get("refunded_money")
+    # # FIXME: Payments API call includes references to any refunds associated with that payment in `refund_ids`
+    # # We should use that here instead.
+    # refunds = []
+    # refund_errors = []
+    # refunded_money = payments_response.payment.refunded_money
 
-    if refunded_money:
-        order_total -= refunded_money["amount"]
-    refund_ids = payment.get("refund_ids", [])
+    # if refunded_money:
+    #     order_total -= refunded_money.amount
+    # refund_ids = payments_response.payment.refund_ids or []
 
-    stored_refunds = api_data.get("refunds")
-    # Keep any potentially pending refunds that may fail (which wouldn't show up in payment.refund_ids)
-    if stored_refunds:
-        stored_refund_ids = [
-            refund["id"] for refund in stored_refunds if refund["id"] not in refund_ids
-        ]
-        refund_ids.extend(stored_refund_ids)
+    # stored_refunds = api_data.get("refunds")
+    # # Keep any potentially pending refunds that may fail (which wouldn't show up in payment.refund_ids)
+    # if stored_refunds:
+    #     stored_refund_ids = [
+    #         refund["id"] for refund in stored_refunds if refund["id"] not in refund_ids
+    #     ]
+    #     refund_ids.extend(stored_refund_ids)
 
-    for refund_id in refund_ids:
-        with SQUARE_REQUESTS.labels(endpoint="get_payment_refund").time():
-            refunds_response = {}
-            # refunds_response = refunds_api.get_payment_refund(refund_id)
+    # for refund_id in refund_ids:
+    #     with SQUARE_REQUESTS.labels(endpoint="get_payment_refund").time():
+    #         refunds_response = refunds_api.get_payment_refund(refund_id)
 
-        if refunds_response.is_success():
-            refund = refunds_response.body.get("refund")
-            if refund:
-                refunds.append(refund)
-                status = refund.get("status")
-                if status == "COMPLETED":
-                    order.status = Order.REFUNDED
-                elif status == "PENDING":
-                    order.status = Order.REFUND_PENDING
-        else:
-            refund_errors.append(format_errors(payments_response.errors))
+    #             if refunds_response.errors:
+    #                 refund_errors.append(format_errors(refunds_response.errors))
+    #             elif refunds_response.refund:
+    #                 refunds.append(refunds_response.refund.model_dump())
+    #                 status = refunds_response.refund.status
+    #                 if status == "COMPLETED":
+    #                     order.status = Order.REFUNDED
+    #                 elif status == "PENDING":
+    #                     order.status = Order.REFUND_PENDING
+    #     except ApiError as e:
+    #         refund_errors.append(format_errors(e.errors))
 
-    api_data["refunds"] = refunds
+    # api_data["refunds"] = refunds
 
-    if refund_errors:
-        return False, "; ".join(refund_errors)
+    # if refund_errors:
+    #     return False, "; ".join(refund_errors)
 
-    order.apiData = api_data
-    order.total = Decimal(order_total) / 100
+    # order.apiData = api_data
+    # order.total = Decimal(order_total) / 100
 
-    if order.orgDonation + order.charityDonation > order.total:
-        order.orgDonation = 0
-        order.charityDonation = order.total
-        message = "Refunded order has caused charity and organization donation amounts to reset."
-        logger.warning(message)
-        order.notes += "\n{0}: {1}".format(timezone.now(), message)
-        order.save()
-        return False, message
+    # if order.orgDonation + order.charityDonation > order.total:
+    #     order.orgDonation = 0
+    #     order.charityDonation = order.total
+    #     message = "Refunded order has caused charity and organization donation amounts to reset."
+    #     logger.warning(message)
+    #     order.notes += "\n{0}: {1}".format(timezone.now(), message)
+    #     order.save()
+    #     return False, message
 
-    order.save()
-    return True, None
+    # order.save()
+    # return True, None
+    return False, "Square support has been removed!"
 
 
 def update_order_payment_data(order: Order, order_total: float, payment) -> float:
@@ -432,20 +429,20 @@ def update_order_payment_data(order: Order, order_total: float, payment) -> floa
              will be the amount inside of the ``payment`` data.
     """
     try:
-        order.lastFour = payment["card_details"]["card"]["last_4"]
+        order.lastFour = payment.card_details.card.last4
     except KeyError:
         logger.warning("Unable to update last_4 details for order")
-    status = payment.get("status")
+    status = payment.status
     if status == "COMPLETED":
         order.status = Order.COMPLETED
-        order_total = payment["total_money"]["amount"]
+        order_total = payment.total_money.amount
     elif status == "FAILED":
         order.status = Order.FAILED
     elif status == "APPROVED":
         # Payment was only captured, approved, and never settled (not usually what we do)
         # https://developer.squareup.com/docs/payments-api/overview#payments-api-workflow
         order.status = Order.CAPTURED
-        order_total = payment["total_money"]["amount"]
+        order_total = payment.total_money.amount
     elif status == "CANCELED":
         order.status = Order.FAILED
     return order_total
@@ -526,63 +523,61 @@ def refund_card_payment(
     :param request: Original HTTP request from Django. Unused.
     :return: A tuple of a boolean success status and an accompanying message.
     """
-    api_data = order.apiData
-    payment_id = api_data["payment"]["id"]
-    converted_amount = int(amount * 100)
+    # api_data = order.apiData
+    # payment_id = api_data["payment"]["id"]
+    # converted_amount = int(amount * 100)
 
-    body = {
-        "payment_id": payment_id,
-        "idempotency_key": str(uuid.uuid4()),
-        "amount_money": {
-            "amount": converted_amount,
-            "currency": settings.SQUARE_CURRENCY,
-        },
-    }
-    if reason:
-        body["reason"] = reason
+    # try:
+    #     with SQUARE_REQUESTS.labels(endpoint="refund_payment").time():
+    #         api_response = client.refunds.refund_payment(
+    #             idempotency_key=get_idempotency_key(request),
+    #             payment_id=payment_id,
+    #             amount_money=MoneyParams(
+    #                 amount=converted_amount, currency=settings.SQUARE_CURRENCY
+    #             ),
+    #             reason=reason,
+    #         )
+    # except ApiError as e:
+    #     errors = format_errors(e.errors)
+    #     logger.error("Error in square refund: {0}".format(errors))
+    #     return False, errors
 
-    with SQUARE_REQUESTS.labels(endpoint="refund_payment").time():
-        result = {}
-        # result = refunds_api.refund_payment(body)
-    logger.debug(result.body)
+    # if api_response.errors:
+    #     errors = format_errors(api_response.errors)
+    #     logger.error("Error in square refund: {0}".format(errors))
+    #     return False, errors
 
-    if result.is_error():
-        errors = format_errors(result.errors)
-        logger.error("Error in square refund: {0}".format(errors))
-        return False, errors
+    # stored_refunds = api_data.get("refunds", [])
 
-    stored_refunds = api_data.get("refunds")
-    if stored_refunds is None:
-        stored_refunds = []
+    # status = api_response.refund.status
+    # stored_refunds.append(api_response.refund.model_dump())
+    # api_data["refunds"] = stored_refunds
+    # order.apiData = api_data
 
-    status = result.body["refund"]["status"]
-    stored_refunds.append(result.body["refund"])
-    api_data["refunds"] = stored_refunds
-    order.apiData = api_data
+    # if status == "COMPLETED":
+    #     order.status = Order.REFUNDED
+    # if status == "PENDING":
+    #     order.status = Order.REFUND_PENDING
 
-    if status == "COMPLETED":
-        order.status = Order.REFUNDED
-    if status == "PENDING":
-        order.status = Order.REFUND_PENDING
+    # if status in ("COMPLETED", "PENDING"):
+    #     order.total -= amount
+    #     # Reset org & charity donations if the remaining total isn't enough to cover them:
+    #     if order.orgDonation + order.charityDonation > order.total:
+    #         order.orgDonation = 0
+    #         order.charityDonation = order.total
+    #         logger.warning(
+    #             "Refunded order has caused charity and organization donation amounts to reset."
+    #         )
+    #         order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
 
-    if status in ("COMPLETED", "PENDING"):
-        order.total -= amount
-        # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
-            order.orgDonation = 0
-            order.charityDonation = order.total
-            logger.warning(
-                "Refunded order has caused charity and organization donation amounts to reset."
-            )
-            order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
+    # if status in ("REJECTED", "FAILED"):
+    #     order.status = Order.COMPLETED
 
-    if status in ("REJECTED", "FAILED"):
-        order.status = Order.COMPLETED
-
-    order.save()
-    message = "Square refund has been submitted and is {0}".format(status)
-    logger.debug(message)
-    return True, message
+    # order.save()
+    # message = "Square refund has been submitted and is {0}".format(status)
+    # logger.debug(message)
+    # return True, message
+    return False, "Square support has been removed!"
 
 
 def process_webhook_refund_update(notification: PaymentWebhookNotification) -> bool:
@@ -611,7 +606,7 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
     webhook_refund = notification.body["data"]["object"]["refund"]
 
     output = []
-    refunds_list = order.apiData["refunds"]
+    refunds_list = order.apiData.get("refunds", [])
     for refund in refunds_list:
         if refund["id"] == refund_id:
             output.append(webhook_refund)
@@ -637,10 +632,10 @@ def process_webhook_payment_updated(notification: PaymentWebhookNotification) ->
         return False
 
     # Store order update in api data
-    payment = notification.body["data"]["object"]["payment"]
-    order.apiData["payment"] = payment
-    update_order_payment_data(order, None, payment)
-    order.save()
+    # payment = Payment.model_validate(notification.body["data"]["object"]["payment"])
+    # order.apiData["payment"] = payment.model_dump()
+    # update_order_payment_data(order, 0, payment)
+    # order.save()
     return True
 
 
@@ -665,7 +660,9 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
 
     # Store refund in api data
 
-    order.apiData["refunds"].append(webhook_refund)
+    refunds = order.apiData.get("refunds", [])
+    refunds.append(webhook_refund)
+    order.apiData["refunds"] = refunds
 
     status = webhook_refund["status"]
     if status == "COMPLETED":
@@ -741,7 +738,7 @@ def process_webhook_dispute_created_or_updated(
             ban.save()
 
             # Send an email about it
-            emails.send_chargeback_notice_email(order)
+            tasks.send_chargeback_notice_email_task.delay(order.id)
 
     return True
 
@@ -755,114 +752,112 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
     :type data: dict
     :return: The created order's ID.
     """
-    discounts = []
-    line_items = []
+    # discounts = []
+    # line_items = []
 
-    for badge in data["result"]:
-        badge_applied_discounts = []
+    # for badge in data["result"]:
+    #     badge_applied_discounts = []
 
-        if badge["discount"]:
-            discount = badge["discount"]
-            uid = f"discount-{badge['id']}"
+    #     if badge["discount"]:
+    #         discount = badge["discount"]
+    #         uid = f"discount-{badge['id']}"
 
-            if discount["percent_off"] > 0:
-                discounts.append(
-                    {
-                        "uid": uid,
-                        "name": f"Discount {discount['name']}",
-                        "type": "FIXED_PERCENTAGE",
-                        "scope": "LINE_ITEM",
-                        "percentage": str(discount["percent_off"]),
-                    }
-                )
-            elif discount["amount_off"] > 0:
-                discounts.append(
-                    {
-                        "uid": uid,
-                        "name": f"Discount {discount['name']}",
-                        "type": "FIXED_AMOUNT",
-                        "scope": "LINE_ITEM",
-                        "amount_money": {
-                            "amount": int(discount["amount_off"] * 100),
-                            "currency": settings.SQUARE_CURRENCY,
-                        },
-                    }
-                )
+    #         if discount["percent_off"] > 0:
+    #             discounts.append(
+    #                 OrderLineItemDiscountParams(
+    #                     uid=uid,
+    #                     name=f"Discount {discount['name']}",
+    #                     type="FIXED_PERCENTAGE",
+    #                     scope="LINE_ITEM",
+    #                     percentage=str(discount["percent_off"]),
+    #                 )
+    #             )
+    #         elif discount["amount_off"] > 0:
+    #             discounts.append(
+    #                 OrderLineItemDiscountParams(
+    #                     uid=uid,
+    #                     name=f"Discount {discount['name']}",
+    #                     type="FIXED_AMOUNT",
+    #                     scope="LINE_ITEM",
+    #                     amount_money=MoneyParams(
+    #                         amount=int(discount["amount_off"] * 100),
+    #                         currency=settings.SQUARE_CURRENCY,
+    #                     ),
+    #                 )
+    #             )
 
-            badge_applied_discounts.append(
-                {
-                    "discount_uid": uid,
-                }
-            )
+    #         badge_applied_discounts.append(
+    #             OrderLineItemAppliedDiscountParams(discount_uid=uid)
+    #         )
 
-        line_items.append(
-            {
-                "uid": f"badge-{badge['id']}",
-                "name": f"{badge['effectiveLevel']['name']} Badge",
-                "note": f"Badge Name - {badge['badgeName']}",
-                "quantity": "1",
-                "item_type": "ITEM",
-                "base_price_money": {
-                    "amount": int(badge["level_subtotal"] * 100),
-                    "currency": settings.SQUARE_CURRENCY,
-                },
-                "applied_discounts": badge_applied_discounts,
-            }
-        )
+    #     line_items.append(
+    #         OrderLineItemParams(
+    #             uid=f"badge-{badge['id']}",
+    #             name=f"{badge['effectiveLevel']['name']} Badge",
+    #             note=f"Badge Name - {badge['badgeName']}",
+    #             quantity="1",
+    #             item_type="ITEM",
+    #             base_price_money=MoneyParams(
+    #                 amount=int(badge["level_subtotal"] * 100),
+    #                 currency=settings.SQUARE_CURRENCY,
+    #             ),
+    #             applied_discounts=badge_applied_discounts,
+    #         )
+    #     )
 
-    if data["charityDonation"] > 0 or data["orgDonation"] > 0:
-        event = Event.objects.get(default=True)
+    # if data["charityDonation"] > 0 or data["orgDonation"] > 0:
+    #     event = Event.objects.get(default=True)
 
-        if data["charityDonation"] > 0:
-            line_items.append(
-                {
-                    "uid": "donation-charity",
-                    "name": f"Donation to {{ event.charity }}",
-                    "quantity": "1",
-                    "item_type": "ITEM",
-                    "base_price_money": {
-                        "amount": int(data["charityDonation"] * 100),
-                        "currency": settings.SQUARE_CURRENCY,
-                    },
-                }
-            )
+    #     if data["charityDonation"] > 0:
+    #         line_items.append(
+    #             OrderLineItemParams(
+    #                 uid="donation-charity",
+    #                 name=f"Donation to {event.charity}",
+    #                 quantity="1",
+    #                 item_type="ITEM",
+    #                 base_price_money=MoneyParams(
+    #                     amount=int(data["charityDonation"] * 100),
+    #                     currency=settings.SQUARE_CURRENCY,
+    #                 ),
+    #             )
+    #         )
 
-        if data["orgDonation"] > 0:
-            line_items.append(
-                {
-                    "uid": "donation-organization",
-                    "name": f"Donation to {{ event }}",
-                    "quantity": "1",
-                    "item_type": "ITEM",
-                    "base_price_money": {
-                        "amount": int(data["orgDonation"] * 100),
-                        "currency": settings.SQUARE_CURRENCY,
-                    },
-                }
-            )
+    #     if data["orgDonation"] > 0:
+    #         line_items.append(
+    #             OrderLineItemParams(
+    #                 uid="donation-organization",
+    #                 name=f"Donation to {event}",
+    #                 quantity="1",
+    #                 item_type="ITEM",
+    #                 base_price_money=MoneyParams(
+    #                     amount=int(data["orgDonation"] * 100),
+    #                     currency=settings.SQUARE_CURRENCY,
+    #                 ),
+    #             )
+    #         )
 
-    order_data = {
-        "order": {
-            "location_id": settings.SQUARE_LOCATION_ID,
-            "reference_id": data["reference"],
-            "source": {
-                "name": terminal_name,
-            },
-            "discounts": discounts,
-            "line_items": line_items,
-            "note": f"Reference: {data['reference']}",
-        }
-    }
+    # try:
+    #     with SQUARE_REQUESTS.labels(endpoint="create_order").time():
+    #         api_response = client.orders.create(
+    #             idempotency_key=str(uuid.uuid4()),
+    #             order=OrderParams(
+    #                 location_id=settings.SQUARE_LOCATION_ID,
+    #                 reference_id=data["reference"],
+    #                 source=OrderSourceParams(name=terminal_name),
+    #                 discounts=discounts,
+    #                 line_items=line_items,
+    #             ),
+    #         )
+    # except ApiError as e:
+    #     logger.error("failed to create order: %s", e.errors)
+    #     return None
 
-    with SQUARE_REQUESTS.labels(endpoint="create_order").time():
-        result = {}
-        # result = orders_api.create_order(order_data)
-
-    if result.is_success():
-        return result.body["order"]["id"]
-    else:
-        logger.error("failed to create order: %s", result.errors)
-        return None
+    # if api_response.order:
+    #     return api_response.order.id
+    # else:
+    #     logger.error("failed to create order: %s", api_response.errors)
+    #     return None
+    return None
 
 
 def print_payment_receipt(
@@ -875,29 +870,32 @@ def print_payment_receipt(
     :param payment_id: Payment ID to print a reciept for.
     :return: A boolean value indicating the success of the print request.
     """
-    data = {
-        "idempotency_key": get_idempotency_key(request),
-        "action": {
-            "device_id": square_device.device_id,
-            "type": "RECEIPT",
-            "receipt_options": {
-                "payment_id": payment_id,
-                "print_only": True,
-            },
-        },
-    }
+    # try:
+    #     with SQUARE_REQUESTS.labels(endpoint="create_terminal_action").time():
+    #         api_response = client.terminal.actions.create(
+    #             idempotency_key=get_idempotency_key(request),
+    #             action=TerminalActionParams(
+    #                 device_id=square_device.device_id,
+    #                 type="RECEIPT",
+    #                 receipt_options=ReceiptOptionsParams(
+    #                     payment_id=payment_id,
+    #                     print_only=True,
+    #                 ),
+    #             ),
+    #         )
+    # except ApiError as e:
+    #     logger.error("Could not print receipt: %s", e.errors)
+    #     return False
 
-    with SQUARE_REQUESTS.labels(endpoint="create_terminal_action").time():
-        result = {}
-        # result = terminals_api.create_terminal_action(data)
-
-    if result.is_error():
-        logger.error("could not print receipt: %s", result.errors)
-
-    return result.is_success()
+    # if api_response.errors:
+    #     logger.error("Could not print receipt: %s", api_response.errors)
+    #     return False
+    # else:
+    #     return True
+    return True
 
 
-def get_terminals() -> List[dict]:
+def get_terminals() -> List:
     """
     Gets the list of terminals defined in the payment processor.
 
@@ -908,23 +906,12 @@ def get_terminals() -> List[dict]:
     :raises Exception: The API fails to get the device list.
     :return: A List of parsed JSON dictionaries describing the terminals.
     """
+    # api_response = client.devices.list()
+    api_response = []
+
     terminals = []
-
-    cursor = None
-    while True:
-        result = {}
-        # result = devices_api.list_devices(cursor=cursor)
-        if result.is_error():
-            raise Exception("Unable to get Square devices")
-
-        for device in result.body["devices"]:
-            terminals.append(device)
-
-        if "cursor" in result.body:
-            cursor = result.body["cursor"]
-        else:
-            break
-
+    for device in api_response:
+        terminals.append(device)
     return terminals
 
 
@@ -952,24 +939,20 @@ def prompt_terminal_payment(
     :param order_id: The ID of the order being checked out.
     :return: The ApiResponse produced by the payment processor.
     """
-    data = {
-        "idempotency_key": get_idempotency_key(request),
-        "checkout": {
-            "amount_money": {
-                "amount": total,
-                "currency": settings.SQUARE_CURRENCY,
-            },
-            "reference_id": reference,
-            "device_options": {
-                "device_id": device_id,
-            },
-        },
-    }
-
     if order_id:
-        data["checkout"]["order_id"] = order_id
+        checkout_note = None
     else:
-        data["checkout"]["note"] = note
+        checkout_note = note
+        order_id = None
 
     return {}
-    # return terminals_api.create_terminal_checkout(data)
+    # return client.terminal.checkouts.create(
+    #     idempotency_key=get_idempotency_key(request),
+    #     checkout=TerminalCheckoutParams(
+    #         amount_money=MoneyParams(amount=total, currency=settings.SQUARE_CURRENCY),
+    #         reference_id=reference,
+    #         device_options=DeviceCheckoutOptionsParams(device_id=device_id),
+    #         order_id=order_id,
+    #         note=checkout_note,
+    #     ),
+    # )

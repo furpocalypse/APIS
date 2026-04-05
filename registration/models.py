@@ -1,13 +1,17 @@
 import random
 import string
-from decimal import Decimal
-import datetime
 import uuid
-from zoneinfo import ZoneInfo
+from datetime import datetime
+from decimal import Decimal
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
+
+# Uppercase letters and digits, excluding visually ambiguous characters: 0/O, 1/I, 5/S, 8/B, 2/Z
+VISUALLY_UNAMBIGUOUS_CHARS = "ACDEFGHJKLMNPQRTUVWXY3467"
+
 
 # Lookup and supporting tables.
 class LookupTable(models.Model):
@@ -49,6 +53,9 @@ class Discount(models.Model):
     oneTime = models.BooleanField(default=False)
     used = models.IntegerField(default=0)
     reason = models.CharField(max_length=100, blank=True)
+    sponsoring_department = models.ForeignKey(
+        "Department", on_delete=models.SET_NULL, null=True
+    )
 
     def __str__(self):
         return self.codeName
@@ -83,15 +90,20 @@ class PriceLevelOption(models.Model):
     optionExtraType = models.CharField(
         max_length=100,
         blank=True,
-        choices=[("int", "Quantity"), ("bool", "Yes/No"), ("ShirtSizes", "Shirt Size"), ("string", "String")],
+        choices=[
+            ("int", "Quantity"),
+            ("bool", "Yes/No"),
+            ("ShirtSizes", "Shirt Size"),
+            ("string", "String"),
+        ],
     )
-    optionExtraType2 = models.CharField(max_length=100, blank=True)
-    optionExtraType3 = models.CharField(max_length=100, blank=True)
     optionImage = models.ImageField(upload_to=content_file_name, blank=True, null=True)
     required = models.BooleanField(default=False)
     active = models.BooleanField(default=False)
     rank = models.IntegerField(default=0)
     description = models.TextField(blank=True)
+    public = models.BooleanField(default=True)
+    requires_fulfillment = models.BooleanField(default=True)
 
     class Meta:
         db_table = "registration_price_level_option"
@@ -133,11 +145,14 @@ class PriceLevel(models.Model):
     emailVIPEmails = models.CharField(max_length=400, blank=True, default="")
     isMinor = models.BooleanField(default=False)
     min_age = models.IntegerField(default=0)
-    max_age = models.IntegerField(blank=True, null=True,
-                                  help_text="Leave blank for no limit")
+    max_age = models.IntegerField(
+        blank=True, null=True, help_text="Leave blank for no limit"
+    )
     accompanied = models.BooleanField(default=False)
     available_to_attendee = models.BooleanField(default=False, verbose_name="Attendee")
-    available_to_marketplace = models.BooleanField(default=False, verbose_name="Marketplace")
+    available_to_marketplace = models.BooleanField(
+        default=False, verbose_name="Marketplace"
+    )
     available_to_staff = models.BooleanField(default=False, verbose_name="Staff")
 
     class Meta:
@@ -147,10 +162,12 @@ class PriceLevel(models.Model):
         return self.name
 
     def get_level_active_status(self):
-        today = datetime.datetime.now().replace(tzinfo=ZoneInfo("America/New_York"))
+        tz = timezone.get_current_timezone()
+        today = datetime.now(tz=tz)
         if self.startDate <= today <= self.endDate:
             return True
         return False
+
     get_level_active_status.boolean = True
     get_level_active_status.short_description = "Active"
 
@@ -187,11 +204,17 @@ class BadgeTemplate(models.Model):
     name = models.CharField(max_length=100)
     template = models.TextField()
     paperWidth = models.CharField(max_length=10, null=True, verbose_name="Paper Width")
-    paperHeight = models.CharField(max_length=10, null=True, verbose_name="Paper Height")
-    marginTop = models.CharField(max_length=10, null=True, verbose_name = "Margin Top")
-    marginBottom = models.CharField(max_length=10, null=True, verbose_name = "Margin Bottom")
+    paperHeight = models.CharField(
+        max_length=10, null=True, verbose_name="Paper Height"
+    )
+    marginTop = models.CharField(max_length=10, null=True, verbose_name="Margin Top")
+    marginBottom = models.CharField(
+        max_length=10, null=True, verbose_name="Margin Bottom"
+    )
     marginLeft = models.CharField(max_length=10, null=True, verbose_name="Margin Left")
-    marginRight = models.CharField(max_length=10, null=True, verbose_name = "Margin Right")
+    marginRight = models.CharField(
+        max_length=10, null=True, verbose_name="Margin Right"
+    )
     landscape = models.BooleanField(default=True)
     scale = models.FloatField(default=1.0)
 
@@ -386,19 +409,25 @@ class Department(models.Model):
 # End lookup and supporting tables
 
 
-def get_token(length):
+def get_random_token(length):
     return "".join(
-        random.SystemRandom().choice(string.ascii_uppercase + string.digits)
-        for _ in range(length)
+        random.SystemRandom().choice(VISUALLY_UNAMBIGUOUS_CHARS) for _ in range(length)
     )
 
 
-def getRegistrationToken():
-    return get_token(15)
+def get_registration_token():
+    return get_random_token(15)
 
 
-class TempToken(models.Model):
-    token = models.CharField(max_length=200, default=getRegistrationToken)
+def generate_discount_code():
+    rng = random.SystemRandom()
+    half = "".join(rng.choice(VISUALLY_UNAMBIGUOUS_CHARS) for _ in range(5))
+    other_half = "".join(rng.choice(VISUALLY_UNAMBIGUOUS_CHARS) for _ in range(5))
+    return f"{half}-{other_half}"
+
+
+class StaffInvite(models.Model):
+    token = models.CharField(max_length=200, default=get_registration_token)
     email = models.CharField(max_length=200)
     ignore_time_window = models.BooleanField(
         default=False,
@@ -412,6 +441,7 @@ class TempToken(models.Model):
 
     class Meta:
         db_table = "registration_temp_token"
+        verbose_name = "staff invite"
 
     def __str__(self):
         return self.token
@@ -483,11 +513,10 @@ class Badge(models.Model):
     )
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     registeredDate = models.DateTimeField(null=True)
-    registrationToken = models.CharField(max_length=200, default=getRegistrationToken)
+    registrationToken = models.CharField(max_length=200, default=get_registration_token)
     badgeName = models.CharField(max_length=200, blank=True)
     badgeNumber = models.IntegerField(null=True, blank=True)
     printed = models.BooleanField(default=False)
-    printCount = models.IntegerField(default=0)
     signature_svg = models.TextField(null=True, blank=True)
     signature_bitmap = models.TextField(null=True, blank=True)
 
@@ -575,7 +604,7 @@ class Staff(models.Model):
     attendee = models.ForeignKey(
         Attendee, null=True, blank=True, on_delete=models.CASCADE
     )
-    registrationToken = models.CharField(max_length=200, default=getRegistrationToken)
+    registrationToken = models.CharField(max_length=200, default=get_registration_token)
     department = models.ForeignKey(
         Department, null=True, blank=True, on_delete=models.SET_NULL
     )
@@ -614,7 +643,7 @@ class Staff(models.Model):
         return badge
 
     def resetToken(self):
-        self.registrationToken = getRegistrationToken()
+        self.registrationToken = get_registration_token()
         self.save()
         return
 
@@ -623,7 +652,7 @@ class Dealer(models.Model):
     attendee = models.ForeignKey(
         Attendee, null=True, blank=True, on_delete=models.SET_NULL
     )
-    registrationToken = models.CharField(max_length=200, default=getRegistrationToken)
+    registrationToken = models.CharField(max_length=200, default=get_registration_token)
     approved = models.BooleanField(default=False)
     tableNumber = models.IntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
@@ -681,7 +710,7 @@ class Dealer(models.Model):
         return badge
 
     def resetToken(self):
-        self.registrationToken = getRegistrationToken()
+        self.registrationToken = get_registration_token()
         self.save()
         return
 
@@ -691,7 +720,7 @@ class DealerAsst(models.Model):
     attendee = models.ForeignKey(
         Attendee, null=True, blank=True, on_delete=models.CASCADE
     )
-    registrationToken = models.CharField(max_length=200, default=getRegistrationToken)
+    registrationToken = models.CharField(max_length=200, default=get_registration_token)
     name = models.CharField(max_length=400)
     email = models.CharField(max_length=200)
     license = models.CharField(max_length=50)
@@ -798,15 +827,17 @@ class Order(models.Model):
         max_digits=8,
         decimal_places=2,
         null=True,
-        default=0,
+        default=Decimal(0),
         verbose_name="Organization Donation",
+        validators=[MinValueValidator(0)],
     )
     charityDonation = models.DecimalField(
         max_digits=8,
         decimal_places=2,
         null=True,
-        default=0,
+        default=Decimal(0),
         verbose_name="Charity Donation",
+        validators=[MinValueValidator(0)],
     )
     notes = models.TextField(blank=True)
     billingName = models.CharField(max_length=200, blank=True, verbose_name="Name")
@@ -899,8 +930,10 @@ class AttendeeOptions(models.Model):
     option = models.ForeignKey(PriceLevelOption, on_delete=models.CASCADE)
     orderItem = models.ForeignKey(OrderItem, on_delete=models.CASCADE)
     optionValue = models.CharField(max_length=200)
-    optionValue2 = models.CharField(max_length=200, blank=True)
-    optionValue3 = models.CharField(max_length=200, blank=True)
+    fulfilled_at = models.DateTimeField(null=True, blank=True)
+    fulfilled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
 
     class Meta:
         db_table = "registration_attendee_options"
@@ -954,9 +987,13 @@ class Firebase(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         verbose_name="Print via MQTT",
-        help_text="Which terminal to use for printing via MQTT, if it should be used at this terminal."
+        help_text="Which terminal to use for printing via MQTT, if it should be used at this terminal.",
     )
-    printer_url = models.CharField(max_length=500, null=True, blank=True)
+    print_via_payment = models.BooleanField(
+        default=False,
+        verbose_name="Print via payment",
+        help_text="When MQTT printing is enabled, print via payment device instead of station.",
+    )
     background_color = models.CharField(max_length=10, default="#0099cc")
     foreground_color = models.CharField(max_length=10, default="#ffffff")
     webview = models.CharField(
@@ -964,16 +1001,18 @@ class Firebase(models.Model):
         null=True,
         blank=True,
         default=settings.REGISTER_DEFAULT_WEBVIEW,
-        verbose_name="Web view URL"
+        verbose_name="Web view URL",
     )
     square_terminal_id = models.ForeignKey(
         SquareDevice,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="Square Terminal"
+        verbose_name="Square Terminal",
     )
-    payment_type = models.CharField(max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True)
+    payment_type = models.CharField(
+        max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True
+    )
 
     def __str__(self):
         return str(self.name)
@@ -1020,21 +1059,35 @@ class Cashdrawer(models.Model):
 
 
 class ReservedBadgeNumbers(models.Model):
-    event = models.ForeignKey(Event, on_delete=models.CASCADE)
-    badgeNumber = models.IntegerField()
-    priceLevel = models.ForeignKey(
-        PriceLevel, null=True, blank=True, on_delete=models.SET_NULL
-    )
+    badgeNumber = models.IntegerField(unique=True)
     notes = models.TextField(blank=True)
 
     def __str__(self):
-        return "<Reserved Badge Number({0}, event={1})>".format(
-            self.event, self.badgeNumber
-        )
+        return f"<Reserved Badge Number({self.badgeNumber})>"
 
     class Meta:
         db_table = "registration_reserved_badge_numbers"
-        verbose_name_plural = "Reserved Badge Numbers"
+        verbose_name_plural = "Reserved badge numbers"
+
+
+class PrintHistory(models.Model):
+    ONSITE = "onsite"
+    ADMIN = "admin"
+    SOURCE_CHOICES = (
+        (ONSITE, "Onsite"),
+        (ADMIN, "Admin"),
+    )
+
+    badge = models.ForeignKey(Badge, on_delete=models.CASCADE)
+    firebase = models.ForeignKey(
+        Firebase, on_delete=models.SET_NULL, null=True, verbose_name="Terminal"
+    )
+    source = models.CharField(choices=SOURCE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "registration_print_history"
+        verbose_name_plural = "Print history"
 
 
 # vim: ts=4 sts=4 sw=4 expandtab smartindent
