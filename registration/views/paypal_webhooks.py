@@ -14,6 +14,16 @@ from registration.views import common
 logger = logging.getLogger(__name__)
 
 
+def verify_paypal_webhook_signature(request) -> bool:
+    """Verify PayPal webhook signature by calling PayPal's verification API.
+
+    TODO: Implement actual PayPal signature verification using
+    POST /v1/notifications/verify-webhook-signature. This is a stub
+    that always returns False (fail-closed) until properly implemented.
+    """
+    return False
+
+
 @require_POST
 @csrf_exempt
 def paypal_webhook(request):
