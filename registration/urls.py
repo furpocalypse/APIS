@@ -342,6 +342,11 @@ urlpatterns = [
         registration.views.webhooks.square_webhook,
         name="square_webhook",
     ),
+    re_path(
+        r"webhook/paypal/v1",
+        registration.views.paypal_webhooks.paypal_webhook,
+        name="paypal_webhook",
+    ),
     path(
         "terminal/square/token",
         registration.views.onsite_admin.terminal_square_token,
