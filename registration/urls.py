@@ -8,6 +8,7 @@ import registration.views.dealers
 import registration.views.onsite
 import registration.views.onsite_admin
 import registration.views.ordering
+import registration.views.paypal_webhooks
 import registration.views.pricelevels
 import registration.views.printing
 import registration.views.staff
