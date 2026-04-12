@@ -5,6 +5,7 @@ from typing import Optional, TypedDict
 
 from django.conf import settings
 from django.http import HttpRequest
+from django.utils import timezone
 from paypalserversdk.api_helper import APIHelper
 from paypalserversdk.configuration import Environment
 from paypalserversdk.controllers.orders_controller import OrdersController
@@ -20,6 +21,7 @@ from paypalserversdk.logging.configuration.api_logging_configuration import (
 from paypalserversdk.models.amount_breakdown import AmountBreakdown
 from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
 from paypalserversdk.models.capture_status import CaptureStatus
+from paypalserversdk.models.captured_payment import CapturedPayment
 from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
 from paypalserversdk.models.item import Item
 from paypalserversdk.models.item_category import ItemCategory
@@ -184,6 +186,132 @@ def capture_paypal_payment(
     return True, api_response.body
 
 
+def refresh_payment(
+    order: ApisOrder, store_api_data: dict = None
+) -> tuple[bool, str | None]:
+    """
+    Queries the payment gateway to update payment information on an order.
+
+    :param order: The :class:`Order` to update.
+    :param store_api_data: Optional data. If not supplied, this function will
+        pull from the ``apiData`` property of the ``order``.
+    :return: A tuple of a boolean success status, and a string error if the
+        success status is ``False``.
+    """
+    if store_api_data:
+        api_data = store_api_data
+    else:
+        api_data = order.apiData
+        if not api_data:
+            logger.warning("No order data yet for {0}".format(order.reference))
+            return False, "No order data yet for {0}".format(order.reference)
+    order_total = 0
+
+    try:
+        api_data = PayPalOrder.from_dictionary(api_data)
+        with PAYPAL_REQUESTS.labels(endpoint="refresh_order").time():
+            refresh_response = orders_controller.get_order({"id": api_data.id})
+    except ApiException as ex:
+        error = json.loads(ex.response.text)
+        return False, error.message
+    except (AttributeError, IndexError, KeyError, TypeError):
+        logger.warning("Refresh payment: MISSING_PAYMENT_ID")
+        return False, "MISSING_PAYMENT_ID"
+
+    if refresh_response.is_error():
+        return False, refresh_response.body.message
+
+    try:
+        fresh_order: PayPalOrder = refresh_response.body
+        payment: CapturedPayment = fresh_order.purchase_units[0].payments.captures[0]
+    except (AttributeError, IndexError, TypeError):
+        return False, "Malformed payment data!"
+
+    if hasattr(fresh_order, "payment_source") and hasattr(
+        fresh_order.payment_source, "card"
+    ):
+        order.lastFour = fresh_order.payment_source.card.last_digits
+    else:
+        order.lastFour = ""
+
+    order_total = update_order_payment_data(order, order_total, payment)
+
+    message = None
+    if hasattr(fresh_order.purchase_units[0].payments, "refunds"):
+        message = update_order_refund_data(
+            order, fresh_order.purchase_units[0].payments.refunds
+        )
+
+    order.apiData = APIHelper.to_dictionary(fresh_order)
+    order.total = order_total
+    order.save()
+
+    return message == None, message
+
+
+def update_order_payment_data(
+    order: ApisOrder, order_total: int, payment: CapturedPayment
+) -> float:
+    """
+    Updates payment data in an APIS Order object based on info returned from
+    the PayPal API.
+
+    Based on given payment data, attempts to set the status of the order
+    (``"COMPLETED"``, ``"FAILED"``, or ``"CAPTURED"``), and returns the amount
+    that was charged. Does not save the Order.
+
+    :param order: The :class:`Order` to be updated.
+    :param order_total: The total amount charged.
+    :param payment: Payment data returned from PayPal.
+    :return: The total charge amount that should be logged. If the order failed,
+             it will be the same as the ``order_total`` param. Otherwise, it
+             will be the amount inside of the ``payment`` data.
+    """
+    status = payment.status
+    if status == CaptureStatus.COMPLETED:
+        order.status = ApisOrder.COMPLETED
+        order_total = float(payment.amount.value)
+    if status == CaptureStatus.DECLINED:
+        order.status = ApisOrder.FAILED
+    if status == CaptureStatus.PARTIALLY_REFUNDED:
+        order.status = ApisOrder.REFUNDED
+    if status == CaptureStatus.PENDING:
+        order.status = ApisOrder.PENDING
+        order_total = float(payment.amount.value)
+    if status == CaptureStatus.REFUNDED:
+        order.status = ApisOrder.REFUNDED
+    if status == CaptureStatus.FAILED:
+        order.status = ApisOrder.FAILED
+    return order_total
+
+
+def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | None:
+    """Updates the order status based on given refund data. The order will not
+    be saved.
+
+    :param order: The APIS :class:`Order` to update.
+    :param refunds: A list of PayPal `Refund` models.
+    :return: A message if side-effects happened (e.g. charity reset), None
+        otherwise.
+    """
+    pending = filter(lambda r: r.status == RefundStatus.PENDING, refunds)
+    completed = filter(lambda r: r.status == RefundStatus.PENDING, refunds)
+    if len(pending):
+        order.status = ApisOrder.REFUND_PENDING
+    elif len(completed):
+        order.status = ApisOrder.REFUNDED
+
+    if order.orgDonation + order.charityDonation > order.total:
+        order.orgDonation = 0
+        order.charityDonation = order.total
+        message = "Refunded order has caused charity and organization donation amounts to reset."
+        logger.warning(message)
+        order.notes += "\n{0}: {1}".format(timezone.now(), message)
+        return message
+
+    return None
+
+
 def refund_payment(
     order: ApisOrder,
     amount: float,
@@ -196,7 +324,7 @@ def refund_payment(
     Ripped wholesale from original payments.py until a more unified API can be
     figured out.
 
-    :param order: The order that the payment refund should belong to.
+    :param order: The APIS :class:`Order` that the payment refund should belong to.
     :param amount: The amount being refunded.
     :param reason: The reason for the refund.
     :param request: Unused.
@@ -227,7 +355,7 @@ def refund_card_payment(
 ) -> tuple[bool, str]:
     """Process a refund for a card-based payment.
 
-    :param order: The APIS Order model being refunded.
+    :param order: The APIS :class:`Order` model being refunded.
     :param amount: The amount of money being refunded.
     :param reason: Optional reason to log for the refund.
     :param request: Original HTTP request from Django. Unused.
@@ -329,7 +457,7 @@ def get_available_refund_amount(order: PayPalOrder) -> float:
     PayPal order purchase unit, based on captured payments and already-processed
     refunds.
 
-    :param unit: A PurchaseUnit object attached to an order.
+    :param order: A PayPal Order model.
     :return: The total amount of money available
     """
     unit: PurchaseUnit = None

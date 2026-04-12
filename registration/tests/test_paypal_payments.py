@@ -7,11 +7,12 @@ from paypalserversdk.api_helper import APIHelper
 from paypalserversdk.http.api_response import ApiResponse
 from paypalserversdk.http.http_response import HttpResponse
 from paypalserversdk.models.capture_status import CaptureStatus
+from paypalserversdk.models.order import Order as PayPalOrder
 from paypalserversdk.models.refund import Refund
 from paypalserversdk.models.refund_status import RefundStatus
 
 from registration.models import Attendee, Event, Order, PriceLevel
-from registration.paypal_payments import refund_card_payment
+from registration.paypal_payments import refresh_payment, refund_card_payment
 from registration.tests.common import (
     DEFAULT_EVENT_ARGS,
     TEST_ATTENDEE_ARGS,
@@ -36,7 +37,7 @@ def generate_refund_mock(
 
 
 def create_api_response(
-    body: str, body_type: Type, code: Optional[int] = 200
+    body: str | dict, body_type: Type, code: Optional[int] = 200
 ) -> ApiResponse:
     """Creates an ApiResponse object to be used in a mock.
 
@@ -45,6 +46,9 @@ def create_api_response(
     :param code: HTTP response code.
     :return: A constructed ApiResponse
     """
+    if isinstance(body, dict):
+        body = json.dumps(body)
+
     return ApiResponse(
         HttpResponse(
             status_code=code,
@@ -55,6 +59,165 @@ def create_api_response(
         ),
         body_type.from_dictionary(json.loads(body)),
     )
+
+
+@tag("paypal")
+class TestPaymentRefresh(OrdersTestCase):
+    def setUp(self):
+        super().setUp()
+        self.event = Event(**DEFAULT_EVENT_ARGS)
+        self.event.save()
+
+        self.captured_payment_response = create_api_response(
+            {
+                "id": "test_order",
+                "payment_source": {"card": {"last_digits": "1234"}},
+                "purchase_units": [
+                    {
+                        "payments": {
+                            "captures": [
+                                {
+                                    "status": CaptureStatus.COMPLETED,
+                                    "id": "test_order_payment",
+                                    "amount": {
+                                        "currency_code": "USD",
+                                        "value": "95.00",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ],
+            },
+            PayPalOrder,
+        )
+
+        self.declined_payment_response = create_api_response(
+            {
+                "id": "test_order",
+                "payment_source": {"card": {"last_digits": "1234"}},
+                "purchase_units": [
+                    {
+                        "payments": {
+                            "captures": [
+                                {
+                                    "status": CaptureStatus.DECLINED,
+                                    "id": "test_order_payment",
+                                    "amount": {
+                                        "currency_code": "USD",
+                                        "value": "95.00",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ],
+            },
+            PayPalOrder,
+        )
+
+        self.refund_complete_response = create_api_response(
+            {
+                "id": "test_order",
+                "payment_source": {"card": {"last_digits": "1234"}},
+                "purchase_units": [
+                    {
+                        "payments": {
+                            "captures": [
+                                {
+                                    "status": CaptureStatus.COMPLETED,
+                                    "id": "test_order_payment",
+                                    "amount": {
+                                        "currency_code": "USD",
+                                        "value": "95.00",
+                                    },
+                                }
+                            ]
+                        },
+                        "refunds": [
+                            {
+                                "status": RefundStatus.COMPLETED,
+                                "id": "test_order_refund",
+                                "amount": {
+                                    "currency_code": "USD",
+                                    "value": "%.2f" % self.price_45.basePrice,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            PayPalOrder,
+        )
+
+        self.refund_pending_response = create_api_response(
+            {
+                "id": "test_order",
+                "payment_source": {"card": {"last_digits": "1234"}},
+                "purchase_units": [
+                    {
+                        "payments": {
+                            "captures": [
+                                {
+                                    "status": CaptureStatus.COMPLETED,
+                                    "id": "test_order_payment",
+                                    "amount": {
+                                        "currency_code": "USD",
+                                        "value": "95.00",
+                                    },
+                                }
+                            ]
+                        },
+                        "refunds": [
+                            {
+                                "status": RefundStatus.COMPLETED,
+                                "id": "test_order_refund",
+                                "amount": {
+                                    "currency_code": "USD",
+                                    "value": "%.2f" % self.price_45.basePrice,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            PayPalOrder,
+        )
+
+        self.test_order = Order()
+        self.test_order.total = self.price_45.basePrice + 50
+        self.test_order.orgDonation = 25
+        self.test_order.charityDonation = 25
+        self.test_order.status = Order.PENDING
+        self.test_order.apiData = {
+            "id": "test_order",
+            "payment_source": {"card": {"last_digits": "1234"}},
+            "purchase_units": {
+                "payments": [
+                    {
+                        "status": CaptureStatus.PENDING,
+                        "id": "test_order_payment",
+                        "amount": {"currency_code": "USD", "value": "95.00"},
+                    }
+                ]
+            },
+        }
+        self.test_order.save()
+
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.get_order")
+    def test_captured_payment_refresh(self, mock_get_order: Mock):
+        mock_get_order.return_value = self.captured_payment_response
+        result, message = refresh_payment(self.test_order)
+
+        mock_get_order.assert_called_once()
+        self.assertTrue(result, message)
+        self.assertIsNone(message)
+
+        self.test_order.refresh_from_db()
+        self.assertEqual(self.price_45.basePrice + 50, self.test_order.total)
+        self.assertEqual(Order.COMPLETED, self.test_order.status)
+        self.assertEqual(25, self.test_order.orgDonation)
+        self.assertEqual(25, self.test_order.charityDonation)
 
 
 @tag("paypal")
