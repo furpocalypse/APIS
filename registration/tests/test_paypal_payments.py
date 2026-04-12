@@ -74,7 +74,7 @@ class TestPayPalRefunds(OrdersTestCase):
         self.part_refund_10_body = generate_refund_mock(
             "SUCCESS_PARTIAL_10", RefundStatus.COMPLETED, 10, "ten dollars off"
         )
-        self.part_refund_10_body = generate_refund_mock(
+        self.part_refund_half_body = generate_refund_mock(
             "SUCCESS_PARTIAL_HALF",
             RefundStatus.COMPLETED,
             self.price_45.basePrice / 2,
@@ -227,7 +227,7 @@ class TestPayPalRefunds(OrdersTestCase):
     @patch(
         "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
     )
-    def test_full_refund(self, mock_refund_captured_payment: Mock):
+    def test_first_full_refund(self, mock_refund_captured_payment: Mock):
         mock_refund_captured_payment.return_value = create_api_response(
             self.full_refund_body, Refund, 201
         )
@@ -257,3 +257,87 @@ class TestPayPalRefunds(OrdersTestCase):
         )
         self.assertEqual(RefundStatus.COMPLETED, refund_data["status"])
         self.assertEqual("full refund", refund_data["note_to_payer"])
+
+    @patch(
+        "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
+    )
+    def test_first_partial_refund(self, mock_refund_captured_payment: Mock):
+        mock_refund_captured_payment.return_value = create_api_response(
+            self.part_refund_half_body, Refund, 201
+        )
+
+        result, message = refund_card_payment(
+            self.order_no_refund, self.price_45.basePrice / 2, "some reason"
+        )
+
+        mock_refund_captured_payment.assert_called_once()
+        self.assertTrue(result)
+        self.assertEqual(message, "PayPal refund has been submitted and is COMPLETED")
+
+        self.order_no_refund.refresh_from_db()
+
+        self.assertEqual(self.price_45.basePrice / 2, self.order_no_refund.total)
+        self.assertTrue(
+            "refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"]
+        )
+        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"][
+            "refunds"
+        ]
+        self.assertEqual(1, len(refund_list))
+        refund_data = refund_list[0]
+        self.assertEqual("SUCCESS_PARTIAL_HALF", refund_data["id"])
+        self.assertEqual(
+            "%.2f" % (self.price_45.basePrice / 2), refund_data["amount"]["value"]
+        )
+        self.assertEqual(RefundStatus.COMPLETED, refund_data["status"])
+        self.assertEqual("half off", refund_data["note_to_payer"])
+
+    @patch(
+        "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
+    )
+    def test_first_multiple_refunds(self, mock_refund_captured_payment: Mock):
+        mock_refund_captured_payment.return_value = create_api_response(
+            self.part_refund_10_body, Refund, 201
+        )
+        result, message = refund_card_payment(self.order_no_refund, 10, "some reason")
+
+        mock_refund_captured_payment.assert_called_once()
+        self.assertTrue(result)
+        self.assertEqual(message, "PayPal refund has been submitted and is COMPLETED")
+
+        mock_refund_captured_payment.return_value = create_api_response(
+            self.part_refund_half_body, Refund, 201
+        )
+        result, message = refund_card_payment(
+            self.order_no_refund, self.price_45.basePrice / 2, "some reason"
+        )
+
+        self.assertEqual(2, len(mock_refund_captured_payment.mock_calls))
+        self.assertTrue(result)
+        self.assertEqual(message, "PayPal refund has been submitted and is COMPLETED")
+
+        self.order_no_refund.refresh_from_db()
+
+        self.assertEqual(
+            self.price_45.basePrice - (self.price_45.basePrice / 2) - 10,
+            self.order_no_refund.total,
+        )
+        self.assertTrue(
+            "refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"]
+        )
+        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"][
+            "refunds"
+        ]
+        self.assertEqual(2, len(refund_list))
+
+        self.assertEqual("SUCCESS_PARTIAL_10", refund_list[0]["id"])
+        self.assertEqual("%.2f" % 10, refund_list[0]["amount"]["value"])
+        self.assertEqual(RefundStatus.COMPLETED, refund_list[0]["status"])
+        self.assertEqual("ten dollars off", refund_list[0]["note_to_payer"])
+
+        self.assertEqual("SUCCESS_PARTIAL_HALF", refund_list[1]["id"])
+        self.assertEqual(
+            "%.2f" % (self.price_45.basePrice / 2), refund_list[1]["amount"]["value"]
+        )
+        self.assertEqual(RefundStatus.COMPLETED, refund_list[1]["status"])
+        self.assertEqual("half off", refund_list[1]["note_to_payer"])

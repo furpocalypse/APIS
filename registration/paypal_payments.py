@@ -265,7 +265,7 @@ def refund_card_payment(
     }
     if amount < available:  # Full refund needs no body
         args["body"] = RefundRequest(
-            amount=Money(currency_code=settings.PAYPAL_CURRENCY, amount=str(amount)),
+            amount=Money(currency_code=settings.PAYPAL_CURRENCY, value=str(amount)),
             note_to_payer=reason,
         )
 
@@ -342,6 +342,7 @@ def get_available_refund_amount(order: PayPalOrder) -> float:
             if capture.status in [
                 CaptureStatus.COMPLETED,
                 CaptureStatus.PARTIALLY_REFUNDED,
+                CaptureStatus.REFUNDED,
             ]:
                 total_captured += float(capture.amount.value)
         if hasattr(unit.payments, "refunds"):
