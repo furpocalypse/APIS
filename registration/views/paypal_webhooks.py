@@ -9,7 +9,7 @@ from django.db import IntegrityError
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from registration import payments
+from registration import paypal_webhook_handlers as pph
 from registration.models import PaymentWebhookNotification
 from registration.views import common
 
@@ -160,6 +160,7 @@ def paypal_webhook(request):
 
     # Store the verified event notification
     notification = PaymentWebhookNotification(
+        integration="paypal",
         event_id=event_id,
         event_type=event_type,
         body=request_body,
@@ -177,22 +178,31 @@ def paypal_webhook(request):
     return common.success(200)
 
 
+_HANDLERS = {
+    "PAYMENT.CAPTURE.REFUNDED": pph.handle_capture_refunded,
+    "PAYMENT.CAPTURE.REVERSED": pph.handle_capture_reversed,
+    "PAYMENT.SALE.REFUNDED": pph.handle_sale_refunded_v1,
+    "CUSTOMER.DISPUTE.CREATED": pph.handle_dispute_created,
+    "CUSTOMER.DISPUTE.UPDATED": pph.handle_dispute_updated,
+    "CUSTOMER.DISPUTE.RESOLVED": pph.handle_dispute_resolved,
+}
+
+
 def process_webhook(notification: PaymentWebhookNotification):
-    # TODO: This dispatcher still routes to Square handlers using Square event
-    # names. A PayPal-specific dispatcher rewrite is tracked as a follow-up
-    # (see issue #6 / dispatcher-rewrite plan). For now we only update the
-    # top-level field read so idempotency + storage paths use PayPal's
-    # ``event_type`` key rather than Square's ``type``.
     event_type = notification.body.get("event_type")
-    result = False
-    if event_type == "refund.updated":
-        result = payments.process_webhook_refund_update(notification)
-    elif event_type == "refund.created":
-        result = payments.process_webhook_refund_created(notification)
-    elif event_type == "payment.updated":
-        result = payments.process_webhook_payment_updated(notification)
-    elif event_type in ("dispute.created", "dispute.state.updated"):
-        result = payments.process_webhook_dispute_created_or_updated(notification)
+    handler = _HANDLERS.get(event_type)
+    if handler is None:
+        logger.info("PayPal webhook: no handler for event_type %r", event_type)
+        result = False
+    else:
+        try:
+            result = handler(notification)
+        except Exception:
+            logger.exception(
+                "PayPal webhook handler for %s crashed; marking unprocessed",
+                event_type,
+            )
+            result = False
 
     notification.processed = result
-    notification.save()
+    notification.save(update_fields=["processed"])

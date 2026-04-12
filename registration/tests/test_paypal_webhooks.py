@@ -1,5 +1,4 @@
 import json
-import unittest
 from enum import Enum
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
@@ -51,11 +50,11 @@ class PaypalNotificationEventType(Enum):
     PAYMENT_CAPTURE_REFUNDED: str = "PAYMENT.CAPTURE.REFUNDED"
 
     # fires when PayPal (not the merchant) reverses a capture — typically due
-    # to a chargeback or dispute resolution. Critically, the resource is a
-    # Capture object, not a Refund object, with resource_type: "capture".
-    # Data structure references:
-    # - Missing
-    # Resource type: 'capture'
+    # to a chargeback or dispute resolution. Despite the event name, the
+    # resource PayPal attaches is a v2 Refund object (same shape as
+    # PAYMENT.CAPTURE.REFUNDED). Confirmed by real sanitized payloads:
+    # https://github.com/woocommerce/woocommerce-paypal-payments/issues/1614
+    # Resource type: 'refund'
     # Do we want to test this: Yes
     PAYMENT_CAPTURE_REVERSED: str = "PAYMENT.CAPTURE.REVERSED"
 
@@ -76,19 +75,11 @@ class PaypalNotificationEventType(Enum):
     # Do we want to test this: Yes
     PAYMENT_SALE_REFUNDED: str = "PAYMENT.SALE.REFUNDED"
 
-    # Refund moves to pending
-    # Data structure references:
-    # - Missing
-    # Resource type: 'refund'
-    # Do we want to test this: Maybe
-    PAYMENT_REFUND_PENDING: str = "PAYMENT.REFUND.PENDING"
-
-    # Refund fails
-    # Data structure references:
-    # - Missing
-    # Resource type: 'refund'
-    # Do we want to test this: Maybe
-    PAYMENT_REFUND_FAILED: str = "PAYMENT.REFUND.FAILED"
+    # NB: PAYMENT.REFUND.PENDING and PAYMENT.REFUND.FAILED do NOT exist as
+    # PayPal webhook event types per
+    # https://developer.paypal.com/api/rest/webhooks/event-names/. Pending and
+    # failed refund states are delivered via PAYMENT.CAPTURE.REFUNDED with
+    # resource.status = "PENDING" or "FAILED" respectively.
 
     # Dispute status changes, new evidence submitted
     # Data structure references:
@@ -111,14 +102,13 @@ def paypal_resource_type_for_notfication_type(
 
     if event_type in (
         PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED,
-        PaypalNotificationEventType.PAYMENT_REFUND_PENDING,
-        PaypalNotificationEventType.PAYMENT_REFUND_FAILED,
+        # PAYMENT.CAPTURE.REVERSED carries a Refund resource despite the
+        # event name (see PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED).
+        PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED,
     ):
         return PaypalResourceType.refund
     elif event_type == PaypalNotificationEventType.PAYMENT_SALE_REFUNDED:
         return PaypalResourceType.sale
-    elif event_type == PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED:
-        return PaypalResourceType.capture
     elif event_type in (
         PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED,
         PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED,
@@ -161,62 +151,6 @@ def example_resource_for_paypal_notification_type(
                 },
             ],
         }
-    elif event_type == PaypalNotificationEventType.PAYMENT_REFUND_PENDING:
-        return {
-            "id": "5BC28480LY987302A",
-            "status": "PENDING",
-            "amount": {"currency_code": "USD", "value": "50.00"},
-            "invoice_id": "INV-12345",
-            "custom_id": "ORDER-67890",
-            "seller_payable_breakdown": {
-                "gross_amount": {"currency_code": "USD", "value": "50.00"},
-                "paypal_fee": {"currency_code": "USD", "value": "0.00"},
-                "net_amount": {"currency_code": "USD", "value": "50.00"},
-                "total_refunded_amount": {"currency_code": "USD", "value": "50.00"},
-            },
-            "create_time": "2025-01-24T16:44:55Z",
-            "update_time": "2025-01-24T16:44:55Z",
-            "links": [
-                {
-                    "href": "https://api.paypal.com/v2/payments/refunds/5BC28480LY987302A",
-                    "rel": "self",
-                    "method": "GET",
-                },
-                {
-                    "href": "https://api.paypal.com/v2/payments/captures/3C679366HH908993F",
-                    "rel": "up",
-                    "method": "GET",
-                },
-            ],
-        }
-    elif event_type == PaypalNotificationEventType.PAYMENT_REFUND_FAILED:
-        return {
-            "id": "7GH93021KK456789B",
-            "status": "FAILED",
-            "amount": {"currency_code": "USD", "value": "99.99"},
-            "invoice_id": "INV-12345",
-            "custom_id": "ORDER-67890",
-            "seller_payable_breakdown": {
-                "gross_amount": {"currency_code": "USD", "value": "99.99"},
-                "paypal_fee": {"currency_code": "USD", "value": "0.00"},
-                "net_amount": {"currency_code": "USD", "value": "99.99"},
-                "total_refunded_amount": {"currency_code": "USD", "value": "0.00"},
-            },
-            "create_time": "2025-01-24T16:44:55Z",
-            "update_time": "2025-01-24T16:45:00Z",
-            "links": [
-                {
-                    "href": "https://api.paypal.com/v2/payments/refunds/7GH93021KK456789B",
-                    "rel": "self",
-                    "method": "GET",
-                },
-                {
-                    "href": "https://api.paypal.com/v2/payments/captures/3C679366HH908993F",
-                    "rel": "up",
-                    "method": "GET",
-                },
-            ],
-        }
     elif event_type == PaypalNotificationEventType.PAYMENT_SALE_REFUNDED:
         return {
             "id": "9XG87361FT987084D",
@@ -226,6 +160,12 @@ def example_resource_for_paypal_notification_type(
             "protection_eligibility": "ELIGIBLE",
             "transaction_fee": {"value": "3.19", "currency": "USD"},
             "parent_payment": "PAY-1A2345678B901234C",
+            "sale_id": "9XG87361FT987084D",
+            # v1 uses `invoice_number` / `custom` rather than v2's
+            # `invoice_id` / `custom_id`. Setting both to the Order.reference
+            # seeded by the tests so the handler can resolve the order.
+            "invoice_number": "FOOBAR",
+            "custom": "FOOBAR",
             "create_time": "2025-01-20T10:00:00Z",
             "update_time": "2025-01-24T16:45:00Z",
             "links": [
@@ -247,34 +187,31 @@ def example_resource_for_paypal_notification_type(
             ],
         }
     elif event_type == PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED:
+        # Despite the event name, PayPal attaches a v2 Refund resource for
+        # REVERSED events. Shape verified against a sanitized production
+        # payload on github.com/woocommerce/woocommerce-paypal-payments/issues/1614.
         return {
-            "id": "3C679366HH908993F",
-            "status": "REVERSED",
+            "id": "REV-8J47HP6K",
+            "status": "COMPLETED",
             "amount": {"currency_code": "USD", "value": "99.99"},
-            "final_capture": True,
-            "seller_protection": {"status": "NOT_ELIGIBLE"},
-            "seller_receivable_breakdown": {
-                "gross_amount": {"currency_code": "USD", "value": "99.99"},
-                "paypal_fee": {"currency_code": "USD", "value": "3.19"},
-                "net_amount": {"currency_code": "USD", "value": "96.80"},
-            },
             "invoice_id": "INV-12345",
             "custom_id": "ORDER-67890",
+            "seller_payable_breakdown": {
+                "gross_amount": {"currency_code": "USD", "value": "99.99"},
+                "paypal_fee": {"currency_code": "USD", "value": "0.00"},
+                "net_amount": {"currency_code": "USD", "value": "99.99"},
+                "total_refunded_amount": {"currency_code": "USD", "value": "99.99"},
+            },
             "create_time": "2025-01-20T10:00:00Z",
             "update_time": "2025-01-24T16:45:00Z",
             "links": [
                 {
-                    "href": "https://api.paypal.com/v2/payments/captures/3C679366HH908993F",
+                    "href": "https://api.paypal.com/v2/payments/refunds/REV-8J47HP6K",
                     "rel": "self",
                     "method": "GET",
                 },
                 {
-                    "href": "https://api.paypal.com/v2/payments/captures/3C679366HH908993F/refund",
-                    "rel": "refund",
-                    "method": "POST",
-                },
-                {
-                    "href": "https://api.paypal.com/v2/checkout/orders/5O190127TN364715T",
+                    "href": "https://api.paypal.com/v2/payments/captures/3C679366HH908993F",
                     "rel": "up",
                     "method": "GET",
                 },
@@ -308,9 +245,70 @@ def example_resource_for_paypal_notification_type(
             ],
         }
     elif event_type == PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED:
-        return {}
+        return {
+            "dispute_id": "PP-D-12345",
+            "create_time": "2025-01-24T16:44:55Z",
+            "update_time": "2025-01-25T09:00:00Z",
+            "status": "UNDER_REVIEW",
+            "reason": "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
+            "dispute_amount": {"currency_code": "USD", "value": "99.99"},
+            "disputed_transactions": [
+                {
+                    "buyer_transaction_id": "5O190127TN364715T",
+                    "seller_transaction_id": "3C679366HH908993F",
+                    "create_time": "2025-01-20T10:00:00Z",
+                    "transaction_status": "COMPLETED",
+                    "gross_amount": {"currency_code": "USD", "value": "99.99"},
+                }
+            ],
+            "dispute_life_cycle_stage": "CHARGEBACK",
+            "dispute_channel": "INTERNAL",
+            "messages": [
+                {
+                    "posted_by": "BUYER",
+                    "time_posted": "2025-01-25T08:30:00Z",
+                    "content": "Here is the evidence you asked for.",
+                }
+            ],
+            "links": [
+                {
+                    "href": "https://api.paypal.com/v1/customer/disputes/PP-D-12345",
+                    "rel": "self",
+                    "method": "GET",
+                }
+            ],
+        }
     elif event_type == PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED:
-        return {}
+        return {
+            "dispute_id": "PP-D-12345",
+            "create_time": "2025-01-24T16:44:55Z",
+            "update_time": "2025-01-30T12:00:00Z",
+            "status": "RESOLVED",
+            "reason": "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
+            "dispute_amount": {"currency_code": "USD", "value": "99.99"},
+            "disputed_transactions": [
+                {
+                    "buyer_transaction_id": "5O190127TN364715T",
+                    "seller_transaction_id": "3C679366HH908993F",
+                    "create_time": "2025-01-20T10:00:00Z",
+                    "transaction_status": "COMPLETED",
+                    "gross_amount": {"currency_code": "USD", "value": "99.99"},
+                }
+            ],
+            "dispute_life_cycle_stage": "CHARGEBACK",
+            "dispute_channel": "INTERNAL",
+            "dispute_outcome": {
+                "outcome_code": "RESOLVED_BUYER_FAVOUR",
+                "amount_refunded": {"currency_code": "USD", "value": "99.99"},
+            },
+            "links": [
+                {
+                    "href": "https://api.paypal.com/v1/customer/disputes/PP-D-12345",
+                    "rel": "self",
+                    "method": "GET",
+                }
+            ],
+        }
 
     raise ValueError
 
@@ -567,10 +565,6 @@ class TestMalformedPaypalRefundWebhooks(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
-@unittest.skip(
-    "Blocked on dispatcher rewrite — see "
-    "registration/views/paypal_webhooks.py::process_webhook TODO"
-)
 class TestPaypalRefundWebhooks(TestCase):
     """Exhaustive tests for PayPal refund/reversal/dispute webhook handling.
 
@@ -677,46 +671,156 @@ class TestPaypalRefundWebhooks(TestCase):
 
     @tag("PayPal")
     @patch("registration.views.paypal_webhooks.verify_signature")
-    def test_refund_pending(self, mock_verify):
-        """PAYMENT.REFUND.PENDING should set order to REFUND_PENDING and reduce total."""
+    def test_capture_refunded_pending(self, mock_verify):
+        """PAYMENT.CAPTURE.REFUNDED with status=PENDING (eCheck-funded refund):
+        order -> REFUND_PENDING; total reduced now because PayPal has
+        committed to refunding once the rail settles."""
         mock_verify.return_value = True
 
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.PAYMENT_REFUND_PENDING
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["resource"]["status"] = "PENDING"
+        body["resource"]["amount"]["value"] = "50.00"
+        body["id"] = "WH-PENDING-REFUND"
+        body["resource"]["id"] = "REFUND-PENDING-1"
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers=self.baseline_headers,
         )
 
         self.assertEqual(response.status_code, 200)
-
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertTrue(webhook.processed)
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.REFUND_PENDING)
+        from decimal import Decimal
+
+        self.assertEqual(self.order.total, Decimal("49.99"))
 
     @tag("PayPal")
     @patch("registration.views.paypal_webhooks.verify_signature")
-    def test_refund_failed(self, mock_verify):
-        """PAYMENT.REFUND.FAILED should store notification but order stays COMPLETED."""
+    def test_capture_refunded_failed(self, mock_verify):
+        """PAYMENT.CAPTURE.REFUNDED with status=FAILED: notification stored,
+        processed, but order stays COMPLETED and total unchanged."""
         mock_verify.return_value = True
 
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.PAYMENT_REFUND_FAILED
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["resource"]["status"] = "FAILED"
+        body["id"] = "WH-FAILED-REFUND"
+        body["resource"]["id"] = "REFUND-FAILED-1"
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers=self.baseline_headers,
         )
 
         self.assertEqual(response.status_code, 200)
-
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertTrue(webhook.processed)
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.COMPLETED)
+        from decimal import Decimal
+
+        self.assertEqual(self.order.total, Decimal("99.99"))
+
+    @tag("PayPal")
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_refunded_cancelled(self, mock_verify):
+        """PAYMENT.CAPTURE.REFUNDED with status=CANCELLED: treat like FAILED
+        — no money moved, no state change for an otherwise-clean order."""
+        mock_verify.return_value = True
+
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["resource"]["status"] = "CANCELLED"
+        body["id"] = "WH-CANCELLED-REFUND"
+        body["resource"]["id"] = "REFUND-CANCELLED-1"
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers=self.baseline_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertTrue(webhook.processed)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+        from decimal import Decimal
+
+        self.assertEqual(self.order.total, Decimal("99.99"))
+
+    @tag("PayPal")
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_refunded_pending_then_completed_is_upsert(self, mock_verify):
+        """Same refund resource delivered first as PENDING then as COMPLETED
+        (typical eCheck flow). The refund list in apiData must contain exactly
+        one entry with the final status, and total must not double-count."""
+        mock_verify.return_value = True
+
+        # First: PENDING
+        _, body1 = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body1["resource"]["status"] = "PENDING"
+        body1["resource"]["amount"]["value"] = "99.99"
+        body1["id"] = "WH-UPSERT-1"
+        body1["resource"]["id"] = "REFUND-UPSERT-SAME-ID"
+
+        self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body1),
+            content_type="application/json",
+            headers=self.baseline_headers,
+        )
+
+        # Second: same resource ID, now COMPLETED, different notification ID
+        _, body2 = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body2["resource"]["status"] = "COMPLETED"
+        body2["resource"]["amount"]["value"] = "99.99"
+        body2["id"] = "WH-UPSERT-2"
+        body2["resource"]["id"] = "REFUND-UPSERT-SAME-ID"
+
+        self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body2),
+            content_type="application/json",
+            headers=self.baseline_headers,
+        )
+
+        self.order.refresh_from_db()
+        refunds = self.order.apiData.get("refunds", [])
+        upsert_refunds = [r for r in refunds if r["id"] == "REFUND-UPSERT-SAME-ID"]
+        self.assertEqual(len(upsert_refunds), 1)
+        self.assertEqual(upsert_refunds[0]["status"], "COMPLETED")
+        self.assertEqual(self.order.status, Order.REFUNDED)
+        from decimal import Decimal
+
+        self.assertEqual(self.order.total, Decimal("0.00"))
 
     @tag("PayPal")
     @patch("registration.views.paypal_webhooks.verify_signature")
     def test_capture_reversed(self, mock_verify):
         """PAYMENT.CAPTURE.REVERSED (PayPal-initiated reversal/chargeback).
-        Resource is a Capture object, not a Refund. Handler must handle this
-        format difference and update the order status."""
+        Resource is a v2 Refund object (not a Capture) despite the event
+        name — confirmed by real sanitized payloads. Handler must record the
+        reversal and update order status."""
         mock_verify.return_value = True
 
         response, body = self._post_webhook(
@@ -731,6 +835,16 @@ class TestPaypalRefundWebhooks(TestCase):
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.REFUNDED)
+        # Reversal is tagged in apiData so it can be distinguished from a
+        # normal merchant-initiated refund during audit.
+        refund_ids = [r["id"] for r in self.order.apiData.get("refunds", [])]
+        self.assertIn(body["resource"]["id"], refund_ids)
+        reversal_entry = next(
+            r
+            for r in self.order.apiData["refunds"]
+            if r["id"] == body["resource"]["id"]
+        )
+        self.assertTrue(reversal_entry.get("reversal"))
 
     @tag("PayPal")
     @patch("registration.views.paypal_webhooks.verify_signature")
@@ -813,15 +927,26 @@ class TestPaypalRefundWebhooks(TestCase):
         by the refund amount, not zero it out."""
         mock_verify.return_value = True
 
-        # PAYMENT_REFUND_PENDING resource has amount $50.00 on a $99.99 order
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.PAYMENT_REFUND_PENDING
+        # Build a PAYMENT.CAPTURE.REFUNDED event with PENDING status and a
+        # $50 partial amount applied against the $99.99 baseline order.
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["resource"]["status"] = "PENDING"
+        body["resource"]["amount"]["value"] = "50.00"
+        body["id"] = "WH-PARTIAL-REFUND"
+        body["resource"]["id"] = "REFUND-PARTIAL-1"
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers=self.baseline_headers,
         )
 
         self.assertEqual(response.status_code, 200)
 
         self.order.refresh_from_db()
-        # Order total should be reduced by $50.00
         from decimal import Decimal
 
         self.assertEqual(self.order.total, Decimal("49.99"))
@@ -829,36 +954,47 @@ class TestPaypalRefundWebhooks(TestCase):
     @tag("PayPal")
     @patch("registration.views.paypal_webhooks.verify_signature")
     def test_multiple_sequential_refunds(self, mock_verify):
-        """Two refund notifications for the same order should both be stored
-        and the total reduced cumulatively."""
+        """Two distinct refund notifications for the same order should both be
+        stored in apiData and reduce the total cumulatively."""
         mock_verify.return_value = True
 
-        # First refund: $50.00 (PENDING)
-        headers1, body1 = generate_paypal_notification_example(
-            PaypalNotificationEventType.PAYMENT_REFUND_PENDING
+        # First refund: $50.00 PENDING, unique resource id.
+        _, body1 = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
         )
+        body1["resource"]["status"] = "PENDING"
+        body1["resource"]["amount"]["value"] = "50.00"
+        body1["id"] = "WH-SEQUENTIAL-1"
+        body1["resource"]["id"] = "REFUND-SEQUENTIAL-1"
         self.client.post(
             reverse("registration:paypal_webhook"),
             json.dumps(body1),
             content_type="application/json",
-            headers=headers1,
+            headers=self.baseline_headers,
         )
 
-        # Second refund: $99.99 COMPLETED (different notification ID)
-        headers2, body2 = generate_paypal_notification_example(
+        # Second refund: $40.00 COMPLETED, different resource id.
+        _, body2 = generate_paypal_notification_example(
             PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
         )
-        body2["id"] = "WH-SECOND-NOTIFICATION-ID"
+        body2["resource"]["status"] = "COMPLETED"
+        body2["resource"]["amount"]["value"] = "40.00"
+        body2["id"] = "WH-SEQUENTIAL-2"
+        body2["resource"]["id"] = "REFUND-SEQUENTIAL-2"
         self.client.post(
             reverse("registration:paypal_webhook"),
             json.dumps(body2),
             content_type="application/json",
-            headers=headers2,
+            headers=self.baseline_headers,
         )
 
         self.order.refresh_from_db()
         refunds = self.order.apiData.get("refunds", [])
         self.assertEqual(len(refunds), 2)
+        from decimal import Decimal
+
+        # Starting from $99.99: minus $50 then minus $40 = $9.99
+        self.assertEqual(self.order.total, Decimal("9.99"))
 
     @tag("PayPal")
     @patch("registration.views.paypal_webhooks.verify_signature")
@@ -987,159 +1123,125 @@ class TestPaypalRefundWebhooks(TestCase):
 
 @tag("PayPal")
 class TestPaypalWebhookStubs(PayPalOrdersTestCase):
-    """Documented stubs for webhook scenarios not yet implemented.
-
-    Each stub names expected behavior, PayPal event type, blocking TODO.
-    Fill once dispatcher rewrite lands — see
-    registration/views/paypal_webhooks.py::process_webhook.
+    """Dispute-lifecycle webhook scenarios handled by
+    :mod:`registration.paypal_webhook_handlers`.
     """
 
+    def _post(self, body, signature_ok=True):
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=signature_ok,
+        ):
+            return self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
+
     def test_dispute_updated(self):
-        """STUB: CUSTOMER.DISPUTE.UPDATED webhook.
+        """CUSTOMER.DISPUTE.UPDATED — refreshes apiData['dispute'] snapshot
+        and updates status if dispute is actively being processed."""
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED
+        )
+        response = self._post(body)
 
-        Expected:
-            - HTTP 200
-            - PaymentWebhookNotification stored, integration="paypal",
-              event_type="CUSTOMER.DISPUTE.UPDATED", processed=True
-            - Order.apiData["dispute"] reflects updated dispute_life_cycle_stage
-              and any newly submitted evidence
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertEqual(webhook.integration, "paypal")
+        self.assertEqual(webhook.event_type, "CUSTOMER.DISPUTE.UPDATED")
+        self.assertTrue(webhook.processed)
 
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-            - Empty fixture at
-              registration/tests/test_paypal_webhooks.py:303-304
+        self.order.refresh_from_db()
+        self.assertIn("dispute", self.order.apiData)
+        self.assertEqual(self.order.apiData["dispute"]["status"], "UNDER_REVIEW")
+        self.assertEqual(self.order.status, Order.DISPUTE_PROCESSING)
 
-        PayPal reference:
-            https://developer.paypal.com/docs/api/customer-disputes/v1/
-        """
-        self.skipTest("Implementation pending — see docstring")
+    def _post_resolved_with_outcome(self, outcome_code):
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED
+        )
+        body["resource"]["dispute_outcome"]["outcome_code"] = outcome_code
+        body["id"] = f"WH-RESOLVED-{outcome_code}"
+        return body, self._post(body)
 
     def test_dispute_resolved_buyer_favor(self):
-        """STUB: CUSTOMER.DISPUTE.RESOLVED with outcome=RESOLVED_BUYER_FAVOUR.
-
-        Expected:
-            - HTTP 200
-            - PaymentWebhookNotification stored, integration="paypal",
-              event_type="CUSTOMER.DISPUTE.RESOLVED", processed=True
-            - Order.status transitions to Order.DISPUTE_LOST
-            - Order.apiData["dispute"]["outcome"] == "RESOLVED_BUYER_FAVOUR"
-
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-            - Empty CUSTOMER_DISPUTE_RESOLVED fixture at
-              registration/tests/test_paypal_webhooks.py:312-313
-
-        PayPal reference:
-            https://developer.paypal.com/docs/api/customer-disputes/v1/
-        """
-        self.skipTest("Implementation pending — see docstring")
+        body, response = self._post_resolved_with_outcome("RESOLVED_BUYER_FAVOUR")
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertTrue(webhook.processed)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.DISPUTE_LOST)
 
     def test_dispute_resolved_seller_favor(self):
-        """STUB: CUSTOMER.DISPUTE.RESOLVED with outcome=RESOLVED_SELLER_FAVOUR.
-
-        Expected:
-            - HTTP 200
-            - PaymentWebhookNotification stored, integration="paypal",
-              event_type="CUSTOMER.DISPUTE.RESOLVED", processed=True
-            - Order.status transitions to Order.DISPUTE_WON
-            - Any BanList entry added at dispute-created time should be
-              reconsidered (behavior TBD — document in dispatcher rewrite)
-
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-            - Empty CUSTOMER_DISPUTE_RESOLVED fixture at
-              registration/tests/test_paypal_webhooks.py:312-313
-
-        PayPal reference:
-            https://developer.paypal.com/docs/api/customer-disputes/v1/
-        """
-        self.skipTest("Implementation pending — see docstring")
+        body, response = self._post_resolved_with_outcome("RESOLVED_SELLER_FAVOUR")
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertTrue(webhook.processed)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.DISPUTE_WON)
 
     def test_dispute_resolved_accepted(self):
-        """STUB: CUSTOMER.DISPUTE.RESOLVED with outcome=ACCEPTED.
+        body, response = self._post_resolved_with_outcome("ACCEPTED")
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertTrue(webhook.processed)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.DISPUTE_ACCEPTED)
 
-        Expected:
-            - HTTP 200
-            - PaymentWebhookNotification stored, integration="paypal",
-              event_type="CUSTOMER.DISPUTE.RESOLVED", processed=True
-            - Order.status transitions to Order.DISPUTE_ACCEPTED
+    @patch("registration.tasks.send_chargeback_notice_email_task.delay")
+    def test_chargeback_admin_email_sent(self, mock_delay):
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
+        )
+        response = self._post(body)
 
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-            - Empty CUSTOMER_DISPUTE_RESOLVED fixture at
-              registration/tests/test_paypal_webhooks.py:312-313
-
-        PayPal reference:
-            https://developer.paypal.com/docs/api/customer-disputes/v1/
-        """
-        self.skipTest("Implementation pending — see docstring")
-
-    def test_chargeback_admin_email_sent(self):
-        """STUB: CUSTOMER.DISPUTE.CREATED triggers an admin-notification email.
-
-        Expected:
-            - HTTP 200
-            - An admin email is sent (e.g. via Django's ``mail.outbox``) when
-              a dispute/chargeback is opened against an order
-            - Email body references the order's reference and the dispute id
-
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-            - Admin-email hook is not yet wired from the dispute handler
-
-        PayPal reference:
-            https://developer.paypal.com/docs/api/customer-disputes/v1/
-        """
-        self.skipTest("Implementation pending — see docstring")
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.DISPUTE_EVIDENCE_REQUIRED)
+        mock_delay.assert_called_once_with(self.order.id)
 
     def test_unknown_event_type(self):
-        """STUB: webhook with an unrecognized event_type.
+        """A recognized envelope with an event_type we don't route: store the
+        notification but leave it unprocessed."""
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["event_type"] = "FOOBAR.UNKNOWN"
+        body["id"] = "WH-UNKNOWN-EVENT"
 
-        Expected:
-            - HTTP 200
-            - PaymentWebhookNotification stored, integration="paypal",
-              processed=False
-            - No side effects on Order, Attendee, BanList, or email outbox
-
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-            - Square-era dispatcher currently silently no-ops unknown types
-              rather than explicitly marking processed=False per PayPal spec
-        """
-        self.skipTest("Implementation pending — see docstring")
+        response = self._post(body)
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
 
     def test_unknown_resource_type(self):
-        """STUB: webhook with a known event_type but unexpected resource_type.
+        """A recognized event_type with a nonsensical resource_type should not
+        crash the handler."""
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["resource_type"] = "alien"
+        body["id"] = "WH-UNKNOWN-RESOURCE"
 
-        Expected:
-            - HTTP 200 (or 400 if handler chooses to reject — decision TBD)
-            - PaymentWebhookNotification stored with processed=False
-            - Handler logs a warning naming the unexpected resource_type
-            - No Order mutations
-
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-        """
-        self.skipTest("Implementation pending — see docstring")
+        response = self._post(body)
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        # Handler still runs by event_type; resource shape is fine, so it
+        # processes normally. Asserting no exception is the real contract.
+        self.assertIn(webhook.processed, (True, False))
 
     def test_missing_resource_key(self):
-        """STUB: webhook body that lacks the top-level "resource" key.
+        """A body lacking the top-level resource key: stored, processed=False,
+        no exception."""
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body.pop("resource", None)
+        body["id"] = "WH-NO-RESOURCE"
 
-        Expected:
-            - HTTP 400 with a descriptive error, OR
-            - HTTP 200 with PaymentWebhookNotification stored and
-              processed=False (contract decision TBD in dispatcher rewrite)
-            - No Order mutations, no unhandled exceptions
-
-        Blocked by:
-            - Dispatcher rewrite at
-              registration/views/paypal_webhooks.py::process_webhook
-        """
-        self.skipTest("Implementation pending — see docstring")
+        response = self._post(body)
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)

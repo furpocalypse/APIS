@@ -103,7 +103,18 @@ def create_unpaid_paypal_order(
     total: str | int | Decimal,
     discount: str | int | Decimal,
     cart_items: list[TranslatedCartItem],
+    apis_reference: str | None = None,
 ) -> ApiResponse:
+    """Create an unpaid PayPal order.
+
+    ``apis_reference`` is an internal correlation key set on the PayPal
+    purchase unit as both ``invoice_id`` and ``custom_id``. PayPal mirrors
+    these back on every downstream event (capture, refund, dispute), so
+    webhook handlers can resolve to the local ``Order`` by matching
+    ``Order.reference``. Callers must pass the same value that will become
+    ``Order.reference`` when the Order row is later created by
+    ``capture_paypal_payment``.
+    """
     registrations = []
     donations = []
     donation_total = 0
@@ -126,23 +137,26 @@ def create_unpaid_paypal_order(
         # else:
         #     registrations.append(pp_item)
 
-    purchase_units = [
-        PurchaseUnitRequest(
-            reference_id="registration",
-            amount=AmountWithBreakdown(
-                currency_code="USD",
-                value=str(total),
-                breakdown=AmountBreakdown(
-                    item_total=Money(
-                        currency_code="USD",
-                        value=str(Decimal(str(total)) - Decimal(str(discount))),
-                    ),
-                    discount=Money(currency_code="USD", value=str(discount)),
+    purchase_unit_kwargs = dict(
+        reference_id="registration",
+        amount=AmountWithBreakdown(
+            currency_code="USD",
+            value=str(total),
+            breakdown=AmountBreakdown(
+                item_total=Money(
+                    currency_code="USD",
+                    value=str(Decimal(str(total)) - Decimal(str(discount))),
                 ),
+                discount=Money(currency_code="USD", value=str(discount)),
             ),
-            items=registrations,
-        )
-    ]
+        ),
+        items=registrations,
+    )
+    if apis_reference:
+        purchase_unit_kwargs["invoice_id"] = apis_reference
+        purchase_unit_kwargs["custom_id"] = apis_reference
+
+    purchase_units = [PurchaseUnitRequest(**purchase_unit_kwargs)]
 
     # for donationItem in donations:
     #     purchase_units.append(PurchaseUnitRequest(
