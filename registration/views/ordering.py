@@ -13,10 +13,10 @@ from registration.forms import OrderForm
 from registration.models import *
 from registration.payments import charge_payment
 from registration.paypal_payments import (
-    TranslatedCartItem,
     capture_paypal_payment,
     create_unpaid_paypal_order,
 )
+from registration.types import TranslatedCartItem
 
 from . import cart, common
 
@@ -486,13 +486,6 @@ def checkout(request):
         return common.abort(
             400, "Session expired or no session is stored for this client"
         )
-
-    try:
-        post_data = json.loads(request.body)
-    except (ValueError, JSONDecodeError) as e:
-        logger.exception(e)
-        logger.error("Unable to decode JSON for checkout()")
-        return common.abort(400, "Unable to parse input options")
 
     discount = Discount.objects.filter(codeName=pdisc)
     if discount.count() > 0 and discount.first().isValid():

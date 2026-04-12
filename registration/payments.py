@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Literal, Optional, TypeAlias
+from typing import List, Optional
 
 from django.conf import settings
 from django.db.utils import NotSupportedError
@@ -32,6 +32,7 @@ from square.types.payment import Payment
 
 from . import tasks
 from .models import *
+from .types import BillingData
 
 SQUARE_REQUESTS = Histogram(
     "square_requests", "HTTP requests to Square API", ["endpoint"]
@@ -44,23 +45,6 @@ if settings.SQUARE_ENVIRONMENT == "sandbox":
     environment = SquareEnvironment.SANDBOX
 
 client = Square(token=settings.SQUARE_ACCESS_TOKEN, environment=environment)
-
-BillingData: TypeAlias = dict[
-    Literal[
-        "source_id",
-        "cc_firstname",
-        "cc_lastname",
-        "email",
-        "address1",
-        "address2",
-        "city",
-        "state",
-        "postal",
-        "country",
-        "verificationToken",
-    ],
-    str,
-]
 
 
 def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
