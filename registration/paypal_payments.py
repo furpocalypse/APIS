@@ -1,10 +1,11 @@
 import json
 import logging
 from decimal import Decimal
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 from django.conf import settings
 from django.http import HttpRequest
+from paypalserversdk.api_helper import APIHelper
 from paypalserversdk.configuration import Environment
 from paypalserversdk.controllers.orders_controller import OrdersController
 from paypalserversdk.controllers.payments_controller import PaymentsController
@@ -18,16 +19,24 @@ from paypalserversdk.logging.configuration.api_logging_configuration import (
 )
 from paypalserversdk.models.amount_breakdown import AmountBreakdown
 from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
+from paypalserversdk.models.capture_status import CaptureStatus
 from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
 from paypalserversdk.models.item import Item
 from paypalserversdk.models.item_category import ItemCategory
 from paypalserversdk.models.money import Money
+from paypalserversdk.models.order import Order as PayPalOrder
 from paypalserversdk.models.order_request import OrderRequest
+from paypalserversdk.models.orders_capture import OrdersCapture
+from paypalserversdk.models.purchase_unit import PurchaseUnit
 from paypalserversdk.models.purchase_unit_request import PurchaseUnitRequest
+from paypalserversdk.models.refund import Refund
+from paypalserversdk.models.refund_request import RefundRequest
+from paypalserversdk.models.refund_status import RefundStatus
 from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 from prometheus_client import Histogram
 
-from .models import *
+from .models import Order as ApisOrder
+from .payments import refund_cash_payment
 
 PAYPAL_REQUESTS = Histogram(
     "paypal_requests", "HTTP requests to Paypal API", ["endpoint"]
@@ -137,7 +146,7 @@ def create_unpaid_paypal_order(
 
 
 def capture_paypal_payment(
-    paypal_order_id: int | str, apis_order: Order
+    paypal_order_id: int | str, apis_order: ApisOrder
 ) -> tuple[bool, dict]:
     body = {"id": paypal_order_id, "prefer": "return=representation"}
     logger.debug("---- Begin Capture ----")
@@ -158,18 +167,187 @@ def capture_paypal_payment(
         apis_order.lastFour = api_response.body["payment_source"]["card"]["last_digits"]
 
     if api_response.is_success():
-        apis_order.status = Order.COMPLETED
+        apis_order.status = ApisOrder.COMPLETED
         apis_order.notes = "PayPal: #" + resp_body["id"][:4]
         apis_order.save()
 
-    elif api_response.is_error():
+    if api_response.is_error():
         logger.debug(resp_body["errors"])
         message = resp_body["errors"]
         logger.debug("---- Transaction Failed ----")
-        apis_order.status = Order.FAILED
+        apis_order.status = ApisOrder.FAILED
         apis_order.save()
         return False, {"errors": message}
 
     logger.debug("---- End Transaction ----")
 
     return True, api_response.body
+
+
+def refund_payment(
+    order: ApisOrder,
+    amount: float,
+    reason: Optional[str] = None,
+    request: Optional[HttpRequest] = None,
+) -> tuple[bool, str | None]:
+    """
+    Determines whether an order can be refunded, and processes the refund id so.
+
+    Ripped wholesale from original payments.py until a more unified API can be
+    figured out.
+
+    :param order: The order that the payment refund should belong to.
+    :param amount: The amount being refunded.
+    :param reason: The reason for the refund.
+    :param request: Unused.
+    :return: A Tuple of a `bool` and a `str`, indicating success status and a
+             message in the case of an error.
+    """
+
+    if order.status == ApisOrder.FAILED:
+        return False, "Failed orders cannot be refunded."
+    if order.billingType == ApisOrder.CREDIT:
+        result, message = refund_card_payment(order, amount, reason, request=None)
+        return result, message
+    if order.billingType == ApisOrder.CASH:
+        result, message = refund_cash_payment(order, amount, reason)
+        return result, message
+    if order.billingType == ApisOrder.COMP:
+        return False, "Comped orders cannot be refunded."
+    if order.billingType == ApisOrder.UNPAID:
+        return False, "Unpaid orders cannot be refunded."
+    return False, "Not sure how to refund order type {0}!".format(order.billingType)
+
+
+def refund_card_payment(
+    order: ApisOrder,
+    amount: float,
+    reason: Optional[str] = None,
+    request: Optional[HttpRequest] = None,
+) -> tuple[bool, str]:
+    """Process a refund for a card-based payment.
+
+    :param order: _description_
+    :param amount: _description_
+    :param reason: Optional reason to log for the refund.
+    :param request: Original HTTP request from Django. Unused.
+    :return: A tuple of a boolean success status and an accompanying message.
+    """
+
+    api_data = PayPalOrder.from_dictionary(order.apiData)
+    if api_data == None:
+        return (False, "APIS Order %s has malformed or missing order data!" % order.id)
+    # All APIS-generated PayPal Orders will have one purchase unit and one
+    # capture per purchase unit. Multiple captures only happen when sending
+    # intent=AUTHORIZE to the Orders API and we don't do that.
+    capture: OrdersCapture = None
+    try:
+        capture = api_data.purchase_units[0].payments.captures[0]
+    except AttributeError, IndexError, TypeError:
+        return (False, "Can't find payment capture data for APIS Order %s!" % order.id)
+    available = get_available_refund_amount(api_data)
+    if available <= 0:
+        return (
+            False,
+            "PayPal Order %s has already been refunded in full!" % api_data.id,
+        )
+    if amount > available:
+        return (
+            False,
+            (
+                "Refund on PayPal Order %s (%d) cannot exceed available "
+                "refund amount %d!" % (api_data.id, amount, available)
+            ),
+        )
+    args = {
+        "id": capture.id,
+        "prefer": "representation",
+    }
+    if amount < available:  # Full refund needs no body
+        args["body"] = RefundRequest(
+            amount=Money(currency_code=settings.PAYPAL_CURRENCY, amount=str(amount)),
+            note_to_payer=reason,
+        )
+
+    logger.debug("---- Begin Refund ----")
+    logger.debug(args)
+
+    try:
+        with PAYPAL_REQUESTS.labels(endpoint="refund_payment").time():
+            api_response = payments_controller.refund_captured_payment(args)
+    except ApiException as e:
+        logger.error("Error in PayPal refund: {0}".format(e.reason))
+        api_response = e.response
+
+    logger.debug("---- Refund Completed ----")
+    logger.debug(api_response)
+
+    resp_raw_body = json.loads(api_response.text)
+
+    if api_response.is_error():
+        logger.debug(resp_raw_body["errors"])
+        message = resp_raw_body["errors"]
+        logger.debug("---- Transaction Failed ----")
+        return False, message
+
+    refund: Refund = api_response.body
+    status: RefundStatus = refund.status
+    stored_refunds: list[Refund] = getattr(
+        api_data.purchase_units[0].payments, "refunds", []
+    )
+    stored_refunds.append(refund)
+    setattr(api_data.purchase_units[0].payments, "refunds", stored_refunds)
+    order.apiData = APIHelper.to_dictionary(api_data)
+
+    if status == RefundStatus.COMPLETED:
+        order.status = ApisOrder.REFUNDED
+    if status == RefundStatus.PENDING:
+        order.status = ApisOrder.REFUND_PENDING
+
+    if status in (RefundStatus.COMPLETED, RefundStatus.PENDING):
+        order.total -= amount
+        # Reset org & charity donations if the remaining total isn't enough to cover them:
+        if order.orgDonation + order.charityDonation > order.total:
+            order.orgDonation = 0
+            order.charityDonation = order.total
+            logger.warning(
+                "Refunded order has caused charity and organization donation amounts to reset."
+            )
+            order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
+
+    if status in (RefundStatus.CANCELLED, RefundStatus.FAILED):
+        order.status = ApisOrder.COMPLETED
+
+    order.save()
+    message = "PayPal refund has been submitted and is %s" % status
+    logger.debug(message)
+    return True, message
+
+
+def get_available_refund_amount(order: PayPalOrder) -> float:
+    """Calculates the amount of money available to be refunded from a given
+    PayPal order purchase unit, based on captured payments and already-processed
+    refunds.
+
+    :param unit: A PurchaseUnit object attached to an order.
+    :type unit: PurchaseUnit
+    :return: The total amount of money available
+    :rtype: float
+    """
+    unit: PurchaseUnit = None
+    capture: OrdersCapture = None
+    refund: Refund = None
+    total_captured: float = 0
+    total_refunded: float = 0
+    for unit in order.purchase_units:
+        for capture in unit.payments.captures:
+            if capture.status in [
+                CaptureStatus.COMPLETED,
+                CaptureStatus.PARTIALLY_REFUNDED,
+            ]:
+                total_captured += float(capture.amount.value)
+        if hasattr(unit.payments, "refunds"):
+            for refund in unit.payments.refunds:
+                if refund.status == RefundStatus.COMPLETED:
+                    total_refunded += float(refund.amount.value)
+    return total_captured - total_refunded
