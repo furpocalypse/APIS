@@ -243,7 +243,7 @@ def refund_card_payment(
     capture: OrdersCapture = None
     try:
         capture = api_data.purchase_units[0].payments.captures[0]
-    except AttributeError, IndexError, TypeError:
+    except (AttributeError, IndexError, TypeError):
         return (False, "Can't find payment capture data for APIS Order %s!" % order.id)
     available = get_available_refund_amount(api_data)
     if available <= 0:
