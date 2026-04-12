@@ -1,7 +1,9 @@
 import json
+from typing import Optional, Type
 from unittest.mock import Mock, patch
 
 from django.test import tag
+from paypalserversdk.api_helper import APIHelper
 from paypalserversdk.http.api_response import ApiResponse
 from paypalserversdk.http.http_response import HttpResponse
 from paypalserversdk.models.capture_status import CaptureStatus
@@ -33,7 +35,30 @@ def generate_refund_mock(
     }""" % locals()
 
 
+def create_api_response(
+    body: str, body_type: Type, code: Optional[int] = 200
+) -> ApiResponse:
+    """Creates an ApiResponse object to be used in a mock.
+
+    :param body: The response body. Should be valid JSON.
+    :param body_type: The PayPal SDK model class to instantiate from the body.
+    :param code: HTTP response code.
+    :return: A constructed ApiResponse
+    """
+    return ApiResponse(
+        HttpResponse(
+            status_code=code,
+            reason_phrase="Doesn't matter much",
+            headers=[],
+            text=body,
+            request=None,
+        ),
+        body_type.from_dictionary(json.loads(body)),
+    )
+
+
 @tag("paypal")
+@tag("refund")
 class TestPayPalRefunds(OrdersTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -203,23 +228,20 @@ class TestPayPalRefunds(OrdersTestCase):
         "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
     )
     def test_full_refund(self, mock_refund_captured_payment: Mock):
-        mock_refund_captured_payment.return_value = ApiResponse(
-            HttpResponse(
-                status_code=201,
-                reason_phrase="blah",
-                headers=[],
-                text=self.full_refund_body,
-                request=None,
-            ),
-            Refund.from_dictionary(json.loads(self.full_refund_body)),
+        mock_refund_captured_payment.return_value = create_api_response(
+            self.full_refund_body, Refund, 201
         )
+
         result, message = refund_card_payment(
             self.order_no_refund, self.price_45.basePrice, "some reason"
         )
+
         mock_refund_captured_payment.assert_called_once()
         self.assertTrue(result)
         self.assertEqual(message, "PayPal refund has been submitted and is COMPLETED")
+
         self.order_no_refund.refresh_from_db()
+
         self.assertEqual(0, self.order_no_refund.total)
         self.assertTrue(
             "refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"]
