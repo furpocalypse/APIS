@@ -1,6 +1,7 @@
 import json
 import logging
 from decimal import Decimal
+from json import JSONDecodeError
 from typing import Optional, TypedDict
 
 from django.conf import settings
@@ -23,6 +24,7 @@ from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
 from paypalserversdk.models.capture_status import CaptureStatus
 from paypalserversdk.models.captured_payment import CapturedPayment
 from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
+from paypalserversdk.models.error_details import ErrorDetails
 from paypalserversdk.models.item import Item
 from paypalserversdk.models.item_category import ItemCategory
 from paypalserversdk.models.money import Money
@@ -74,6 +76,27 @@ class TranslatedCartItem(TypedDict):
 
 orders_controller: OrdersController = client.orders
 payments_controller: PaymentsController = client.payments
+
+
+def format_errors(api_response: ApiResponse) -> str:
+    """
+    Formats a list of Square API errors to lines of text.
+
+    :param errors: A list of Square API errors.
+    :return: Lines of text in the format of: ``<category> - <code>: <details>``
+    """
+    error_string = ""
+    resp_dict: dict = json.loads(api_response.text)
+    errors: list[ErrorDetails] = [
+        ErrorDetails.from_dictionary(error) for error in resp_dict.get("errors", [])
+    ]
+    logger.debug(errors)
+    for error in errors:
+        error_string += error.issue
+        if hasattr(error, "description"):
+            error_string += f" - {error.description}"
+        error_string += "\n"
+    return error_string
 
 
 def create_unpaid_paypal_order(
@@ -157,32 +180,46 @@ def capture_paypal_payment(
     logger.debug("---- Begin Capture ----")
     logger.debug(body)
 
+    api_response: ApiResponse = None
     try:
-        api_response: ApiResponse = orders_controller.capture_order(body)
+        with PAYPAL_REQUESTS.labels(endpoint="capture_order").time():
+            api_response = orders_controller.capture_order(body)
     except ApiException as ex:
-        api_response = ex.response
-
-    logger.debug("---- Capture Completed ----")
-    logger.debug(api_response)
-
-    apis_order.apiData = api_response.text
-    resp_body = json.loads(api_response.text)
-
-    if "payment_source" in resp_body and "card" in resp_body["payment_source"]:
-        apis_order.lastFour = resp_body["payment_source"]["card"]["last_digits"]
-
-    if api_response.is_success():
-        apis_order.status = ApisOrder.COMPLETED
-        apis_order.notes = "PayPal: #" + resp_body["id"][:4]
-        apis_order.save()
+        unknown_msg = "An unknown PayPal error occurred during payment capture"
+        try:
+            error = json.loads(ex.response.text)
+        except (ValueError, JSONDecodeError):
+            return False, {"errors": [unknown_msg]}
+        return False, error.get("message", {"errors": [unknown_msg]})
+    finally:
+        logger.debug("---- Capture Completed ----")
+        logger.debug(api_response)
 
     if api_response.is_error():
-        logger.debug(resp_body["errors"])
-        message = resp_body["errors"]
         logger.debug("---- Transaction Failed ----")
+        errors = format_errors(api_response)
         apis_order.status = ApisOrder.FAILED
         apis_order.save()
-        return False, {"errors": message}
+        return False, {"errors": errors}
+
+    try:
+        apis_order.apiData = json.loads(api_response.text)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.exception(e)
+        message = "Unable to decode response from PayPal in capture_paypal_payment"
+        logger.error(message)
+        return False, {"errors": [message]}
+
+    order_data: PayPalOrder = PayPalOrder.from_dictionary(apis_order.apiData)
+
+    if hasattr(order_data, "payment_source") and hasattr(
+        order_data.payment_source, "card"
+    ):
+        apis_order.lastFour = order_data.payment_source.card.last_digits
+
+    apis_order.status = ApisOrder.COMPLETED
+    apis_order.notes = "PayPal: #" + order_data.id[:4]
+    apis_order.save()
 
     logger.debug("---- End Transaction ----")
 
