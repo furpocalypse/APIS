@@ -110,7 +110,10 @@ def create_unpaid_paypal_order(
                 currency_code="USD",
                 value=str(total),
                 breakdown=AmountBreakdown(
-                    item_total=Money(currency_code="USD", value=str(total - discount)),
+                    item_total=Money(
+                        currency_code="USD",
+                        value=str(Decimal(str(total)) - Decimal(str(discount))),
+                    ),
                     discount=Money(currency_code="USD", value=str(discount)),
                 ),
             ),
@@ -166,7 +169,7 @@ def capture_paypal_payment(
     resp_body = json.loads(api_response.text)
 
     if "payment_source" in resp_body and "card" in resp_body["payment_source"]:
-        apis_order.lastFour = api_response.body["payment_source"]["card"]["last_digits"]
+        apis_order.lastFour = resp_body["payment_source"]["card"]["last_digits"]
 
     if api_response.is_success():
         apis_order.status = ApisOrder.COMPLETED
@@ -212,14 +215,21 @@ def refresh_payment(
         with PAYPAL_REQUESTS.labels(endpoint="refresh_order").time():
             refresh_response = orders_controller.get_order({"id": api_data.id})
     except ApiException as ex:
-        error = json.loads(ex.response.text)
-        return False, error.message
+        try:
+            error = json.loads(ex.response.text)
+        except (ValueError, AttributeError):
+            error = {}
+        return False, error.get("message", "Unknown PayPal API error")
     except (AttributeError, IndexError, KeyError, TypeError):
         logger.warning("Refresh payment: MISSING_PAYMENT_ID")
         return False, "MISSING_PAYMENT_ID"
 
     if refresh_response.is_error():
-        return False, refresh_response.body.message
+        try:
+            error = json.loads(refresh_response.text)
+        except (ValueError, AttributeError):
+            error = {}
+        return False, error.get("message", "Unknown PayPal API error")
 
     try:
         fresh_order: PayPalOrder = refresh_response.body
@@ -237,7 +247,8 @@ def refresh_payment(
     order_total = update_order_payment_data(order, order_total, payment)
 
     message = None
-    if hasattr(fresh_order.purchase_units[0].payments, "refunds"):
+    if getattr(fresh_order.purchase_units[0].payments, "refunds", None):
+        order.total = order_total
         message = update_order_refund_data(
             order, fresh_order.purchase_units[0].payments.refunds
         )
@@ -294,11 +305,11 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
     :return: A message if side-effects happened (e.g. charity reset), None
         otherwise.
     """
-    pending = filter(lambda r: r.status == RefundStatus.PENDING, refunds)
-    completed = filter(lambda r: r.status == RefundStatus.PENDING, refunds)
-    if len(pending):
+    pending = [r for r in refunds if r.status == RefundStatus.PENDING]
+    completed = [r for r in refunds if r.status == RefundStatus.COMPLETED]
+    if pending:
         order.status = ApisOrder.REFUND_PENDING
-    elif len(completed):
+    elif completed:
         order.status = ApisOrder.REFUNDED
 
     if order.orgDonation + order.charityDonation > order.total:

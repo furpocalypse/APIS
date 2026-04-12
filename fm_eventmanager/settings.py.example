@@ -192,6 +192,9 @@ PAYPAL_CLIENT_ID = ''
 PAYPAL_CLIENT_SECRET = ''
 PAYPAL_CURRENCY = ''
 PAYPAL_ENVIRONMENT = 'production'  # Or "sandbox"
+# Create a webhook in the PayPal developer dashboard (https://developer.paypal.com/dashboard/applications)
+# and paste its Webhook ID (e.g. "1AB23456CD789012E") here.
+PAYPAL_WEBHOOK_ID = ''
 
 
 EMAIL_HOST = 'smtp.mailgun.org'

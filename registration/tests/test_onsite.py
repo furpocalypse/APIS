@@ -106,6 +106,7 @@ class OnsiteBaseTestCase(TestCase):
             "charityDonation": charity_donation,
             "onsite": True,
             "orgDonation": org_donation,
+            "orderID": "TEST-PAYPAL-ORDER",
         }
 
         response = self.client.post(

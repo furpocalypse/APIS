@@ -25,3 +25,4 @@ node_modules/
 /registration/static/bundler/
 *.tsbuildinfo
 .direnv/
+docker-compose.override.yaml

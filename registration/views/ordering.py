@@ -404,7 +404,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
             }
         )
 
-    subtotal, total_discount = get_total(cart_items, order_items, discount)
+    subtotal, total_discount = get_total(cart_items, order_items, discount_code)
 
     porg = Decimal(post_data.get("orgDonation") or "0.00")
     pcharity = Decimal(post_data.get("charityDonation") or "0.00")
