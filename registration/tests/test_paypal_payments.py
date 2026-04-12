@@ -331,7 +331,7 @@ class TestCapturePaypalPayment(OrdersTestCase):
         self.assertEqual(Order.COMPLETED, self.apis_order.status)
         self.assertEqual("4242", self.apis_order.lastFour)
         # apiData is the raw text
-        self.assertIn("ABCDEF1234", self.apis_order.apiData)
+        self.assertEqual("ABCDEF1234", self.apis_order.apiData.get("id"))
 
     @patch(
         "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
