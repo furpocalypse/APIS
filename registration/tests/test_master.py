@@ -23,12 +23,14 @@ class TestAttendeeCheckout(OrdersTestCase):
     def test_get_prices(self):
         response = self.client.post(
             reverse("registration:pricelevels"),
-            json.dumps({
-                "year": "1990",
-                "month": "1",
-                "day": "1",
-                "form_type": "attendee",
-            }),
+            json.dumps(
+                {
+                    "year": "1990",
+                    "month": "1",
+                    "day": "1",
+                    "form_type": "attendee",
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
@@ -149,7 +151,12 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.assertEqual(PriceLevel.objects.filter(id=self.price_45.id).count(), 1)
 
     @tag("square")
-    def test_vip_checkout(self):
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_vip_checkout(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         self.add_to_cart(self.attendee_form_2, self.price_675, [])
 
         response = self.client.get(reverse("registration:cart"))
@@ -514,6 +521,38 @@ class TestAttendeeCheckout(OrdersTestCase):
         dealer.refresh_from_db()
         assistant.refresh_from_db()
         self.assertTrue(assistant.paid)
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_dealer_payment_via_paypal(self, mock_capture):
+        """
+        PayPal variant of the dealer payment flow.
+
+        TODO (plan step 7): The dealer checkout endpoint
+        (``registration.views.dealers.checkout_dealer``) currently only
+        routes through ``do_checkout`` (Square). Once the dealer flow is
+        wired to ``do_paypal_checkout`` (analogous to the main
+        ``checkout`` view), this test should:
+
+        - Run the dealer setup from ``test_dealer`` (register dealer,
+          flush session, find_dealer, add_dealer, invoice_dealer).
+        - POST to ``registration:checkout_dealer`` with an ``orderID``
+          in ``billingData`` (or a top-level ``orderID`` per the PayPal
+          contract, matching whatever the dealer flow settles on).
+        - Assert response status 200 and
+          ``response.content == b'{"success": true}'``.
+        - Assert ``mock_capture`` was called exactly once with the
+          PayPal order id.
+        - Assert the resulting ``Order`` has
+          ``billingType == Order.CREDIT``, ``status == Order.COMPLETED``,
+          and ``total`` equal to the expected dealer cost
+          (``table_130.basePrice + price_45.basePrice + porg + pcharity``,
+          minus any dealer discount).
+        """
+        self.skipTest(
+            "Dealer PayPal flow scaffolding TODO - see plan step 7. "
+            "checkout_dealer does not yet call do_paypal_checkout."
+        )
 
 
 class LookupTestCases(TestCase):
