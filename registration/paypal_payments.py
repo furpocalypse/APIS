@@ -2,7 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from json import JSONDecodeError
-from typing import Optional, TypedDict
+from typing import Optional
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -41,6 +41,7 @@ from prometheus_client import Histogram
 
 from .models import Order as ApisOrder
 from .payments import refund_cash_payment
+from .types import TranslatedCartItem
 
 PAYPAL_REQUESTS = Histogram(
     "paypal_requests", "HTTP requests to Paypal API", ["endpoint"]
@@ -66,12 +67,6 @@ client = PaypalServersdkClient(
 )
 
 logger = logging.getLogger("registration.paypal_payments")
-
-
-class TranslatedCartItem(TypedDict):
-    name: str
-    total: Decimal
-    donation: bool
 
 
 orders_controller: OrdersController = client.orders
