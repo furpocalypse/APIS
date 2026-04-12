@@ -227,8 +227,8 @@ def refund_card_payment(
 ) -> tuple[bool, str]:
     """Process a refund for a card-based payment.
 
-    :param order: _description_
-    :param amount: _description_
+    :param order: The APIS Order model being refunded.
+    :param amount: The amount of money being refunded.
     :param reason: Optional reason to log for the refund.
     :param request: Original HTTP request from Django. Unused.
     :return: A tuple of a boolean success status and an accompanying message.
@@ -330,9 +330,7 @@ def get_available_refund_amount(order: PayPalOrder) -> float:
     refunds.
 
     :param unit: A PurchaseUnit object attached to an order.
-    :type unit: PurchaseUnit
     :return: The total amount of money available
-    :rtype: float
     """
     unit: PurchaseUnit = None
     capture: OrdersCapture = None
