@@ -57,7 +57,15 @@ def do_paypal_checkout(
     request: Optional[HttpRequest] = None,
 ) -> tuple[bool, dict, Order]:
     event = Event.objects.get(default=True)
-    reference = common.get_unique_confirmation_token(Order)
+    # Reuse the reference token set on the PayPal order at create_paypal_order
+    # time so that invoice_id/custom_id on every downstream PayPal webhook
+    # resolves to this Order via Order.reference. Fall back to a fresh token
+    # when called outside the HTTP flow (e.g. direct unit tests).
+    reference = None
+    if request is not None:
+        reference = request.session.get("pending_paypal_reference")
+    if not reference:
+        reference = common.get_unique_confirmation_token(Order)
 
     order = Order(
         total=Decimal(total),
@@ -432,11 +440,22 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     # We only want to set up to capture payment if there is payment due
     if total > 0:
+        # Generate (or reuse) the reference token that will become
+        # Order.reference. Send it to PayPal as both invoice_id and custom_id
+        # so every downstream webhook event carries it back to us.
+        reference = request.session.get("pending_paypal_reference")
+        if not reference:
+            reference = common.get_unique_confirmation_token(Order)
+            request.session["pending_paypal_reference"] = reference
         try:
-            result = create_unpaid_paypal_order(total, total_discount, translated_cart)
+            result = create_unpaid_paypal_order(
+                total, total_discount, translated_cart, apis_reference=reference
+            )
             return common.success(reason=json.loads(result.text))
         except ApiException as ex:
             return common.abort(ex.response_code, json.loads(ex.response.text))
+
+    return common.abort(400, "Cart total is zero; use the zero-checkout flow")
 
 
 @idempotency_key(optional=False)
