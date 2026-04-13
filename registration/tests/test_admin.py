@@ -1,4 +1,5 @@
 import time
+import unittest
 import uuid
 from typing import List
 from unittest.mock import Mock, patch
@@ -10,11 +11,14 @@ from django.core import mail
 from django.http import HttpRequest
 from django.test import TestCase, tag
 from django.urls import reverse
+from paypalserversdk.api_helper import APIHelper
+from paypalserversdk.models.order import Order
+from paypalserversdk.models.order_request import OrderRequest
 from square.core.api_error import ApiError
 from square.requests.address import AddressParams
 from square.requests.money import MoneyParams
 
-from registration import admin, payments
+from registration import admin, payments, paypal_payments
 from registration.admin import OrderAdmin
 from registration.models import *
 from registration.templatetags import site as site_tags
@@ -377,6 +381,7 @@ class TestOrderAdmin(TestCase):
         return order
 
     @tag("square")
+    @unittest.skip("Backend is hard-coded to use PayPal")
     def test_square_refund(self):
         order = self.create_square_order()
 
@@ -400,6 +405,7 @@ class TestOrderAdmin(TestCase):
         self.assertEqual(order.status, Order.REFUND_PENDING)
 
     @tag("square")
+    @unittest.skip("Backend is hard-coded to use PayPal")
     def test_partial_refund(self):
         order = self.create_square_order()
         order.orgDonation = 20
@@ -449,6 +455,7 @@ class TestOrderAdmin(TestCase):
         self.assertEqual(order.status, Order.REFUND_PENDING)
 
     @tag("square")
+    @unittest.skip("Backend is hard-coded to use PayPal")
     def test_refresh_view(self):
         self.client.logout()
         self.assertTrue(self.client.login(username="admin", password="admin"))

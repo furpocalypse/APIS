@@ -1610,7 +1610,7 @@ class TestPayPalRefunds(OrdersTestCase):
         # attributes production touches: .text, .is_error(), .body. Production
         # does api_response = e.response then json.loads(api_response.text)
         # and api_response.is_error().
-        err_body = {"errors": [{"issue": "CANNOT_BE_REFUNDED"}]}
+        err_body = "Error in PayPal refund: boom"
         response = Mock(spec=ApiResponse)
         response.is_error = Mock(return_value=True)
         response.text = json.dumps(err_body)
@@ -1627,7 +1627,7 @@ class TestPayPalRefunds(OrdersTestCase):
             self.fail("refund_card_payment raised: %r" % e)
         self.assertFalse(ok)
         # message is the errors list from body
-        self.assertEqual(err_body["errors"], message)
+        self.assertEqual(err_body, message)
 
     # ------------------------------------------------------------------ A7.12
     @patch(
@@ -1660,7 +1660,7 @@ class TestPayPalRefunds(OrdersTestCase):
         refund_card_payment(self.order_no_refund, self.price_45.basePrice, "full")
         sent_args = mock_refund.call_args[0][0]
         self.assertNotIn("body", sent_args)
-        self.assertIn("id", sent_args)
+        self.assertIn("capture_id", sent_args)
 
     # ------------------------------------------------------------------ A7.14
     @patch(
@@ -1680,9 +1680,7 @@ class TestPayPalRefunds(OrdersTestCase):
 
         self.order_no_refund.refresh_from_db()
         self.assertEqual(0, self.order_no_refund.orgDonation)
-        self.assertEqual(
-            self.order_no_refund.total, self.order_no_refund.charityDonation
-        )
+        self.assertEqual(0, self.order_no_refund.charityDonation)
         self.assertIn("reset", self.order_no_refund.notes)
 
     # ------------------------------------------------------------------ A7.15

@@ -586,7 +586,7 @@ def make_paypal_apidata(
 def paypal_apidata_no_refunds(**overrides):
     """PayPal apiData with no ``refunds`` key at all."""
     overrides.pop("refunds", None)
-    return make_paypal_order_apidata(**overrides)
+    return make_paypal_apidata(**overrides)
 
 
 def paypal_apidata_one_partial_refund(amount, **overrides):
@@ -604,7 +604,7 @@ def paypal_apidata_one_partial_refund(amount, **overrides):
         )
     refund_id = overrides.pop("refund_id", "TEST-PAYPAL-PARTIAL-REFUND")
     overrides["refunds"] = [make_refund_dict(id=refund_id, amount=amount)]
-    return make_paypal_order_apidata(**overrides)
+    return make_paypal_apidata(**overrides)
 
 
 def paypal_apidata_fully_refunded(**overrides):
@@ -613,7 +613,7 @@ def paypal_apidata_fully_refunded(**overrides):
     capture_amount = overrides.get("capture_amount", "99.99")
     refund_id = overrides.pop("refund_id", "TEST-PAYPAL-FULL-REFUND")
     overrides["refunds"] = [make_refund_dict(id=refund_id, amount=capture_amount)]
-    return make_paypal_order_apidata(**overrides)
+    return make_paypal_apidata(**overrides)
 
 
 def paypal_apidata_multi_partial(amounts, **overrides):
@@ -633,7 +633,7 @@ def paypal_apidata_multi_partial(amounts, **overrides):
         make_refund_dict(id="TEST-PAYPAL-PARTIAL-REFUND-%d" % i, amount=a)
         for i, a in enumerate(decs, start=1)
     ]
-    return make_paypal_order_apidata(**overrides)
+    return make_paypal_apidata(**overrides)
 
 
 def paypal_apidata_multi_full(amounts, **overrides):
@@ -650,7 +650,7 @@ def paypal_apidata_multi_full(amounts, **overrides):
         make_refund_dict(id="TEST-PAYPAL-FULL-REFUND-%d" % i, amount=a)
         for i, a in enumerate(decs, start=1)
     ]
-    return make_paypal_order_apidata(**overrides)
+    return make_paypal_apidata(**overrides)
 
 
 class PayPalOrdersTestCase(OrdersTestCase):
