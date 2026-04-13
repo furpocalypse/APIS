@@ -20,7 +20,7 @@ from registration.types import TranslatedCartItem
 
 from . import common
 from .common import clear_session, getOptionsDict, handler, logger
-from .ordering import do_checkout, do_paypal_checkout, doZeroCheckout, get_total
+from .ordering import do_checkout, doZeroCheckout, get_total
 
 logger = logging.getLogger(__name__)
 
@@ -270,18 +270,12 @@ def checkout_upgrade(request):
 
     total = subtotal + porg + pcharity
 
-    if "orderID" not in post_data:
+    pproc = post_data.get("processor")
+    pbill = post_data.get("billingData", {})
+    if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
-    status, message, order = do_paypal_checkout(
-        post_data["orderID"],
-        total,
-        None,
-        [],
-        order_items,
-        porg,
-        pcharity,
-        request,
-        billingData=post_data.get("billingData") or {},
+    status, message, order = do_checkout(
+        pproc, pbill, total, None, [], order_items, porg, pcharity
     )
 
     if status:

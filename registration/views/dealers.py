@@ -5,6 +5,7 @@ from json import JSONDecodeError
 
 from django.forms import model_to_dict
 from django.http import (
+    HttpRequest,
     HttpResponse,
     HttpResponseNotFound,
     HttpResponseServerError,
@@ -23,12 +24,7 @@ from registration.types import TranslatedCartItem
 
 from . import common
 from .common import clear_session, handler, logger
-from .ordering import (
-    do_checkout,
-    do_paypal_checkout,
-    doZeroCheckout,
-    get_discount_total,
-)
+from .ordering import do_checkout, doZeroCheckout, get_discount_total
 
 logger = logging.getLogger(__name__)
 form_type = "marketplace"
@@ -277,11 +273,43 @@ def add_assistants(request):
 ASSISTANT_PARTNER_PRICE = Decimal("55")
 
 
-def _apply_assistants_form(dealer, event, assistants_form):
+def _set_up_assistant_checkout(
+    request: HttpRequest, form_data: dict, dealer: Dealer, event: Event
+) -> tuple[Decimal, list[OrderItem]]:
+    assistants_form = form_data.get("assistants") or []
+    badge = Badge.objects.filter(attendee=dealer.attendee, event=dealer.event).last()
+    price_level = badge and badge.effectiveLevel()
+    if price_level is None:
+        raise RuntimeError(
+            402,
+            "Dealer account has not been paid. Please pay for your table before adding assistants.",
+        )
+
+    error_response = _apply_assistants_form(dealer, event, assistants_form)
+    if error_response is not None:
+        raise RuntimeError(error_response)
+
+    unpaid_partner_count = dealer.getUnpaidPartnerCount()
+    total = ASSISTANT_PARTNER_PRICE * unpaid_partner_count
+    if total <= 0:
+        raise RuntimeError(400, "No unpaid assistants to charge for.")
+
+    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
+    order_item.save()
+    session_items = request.session.get("order_items", [])
+    session_items.append(order_item.id)
+    request.session["order_items"] = session_items
+
+    return total, [order_item]
+
+
+def _apply_assistants_form(
+    dealer: Dealer, event: Event, assistants_form: dict
+) -> tuple[int, str] | None:
     """Create/update DealerAsst rows from the assistants payload.
 
-    Returns either an ``HttpResponse``-style error from ``common.abort`` /
-    ``JsonResponse`` on validation failure, or ``None`` on success.
+    Returns either a tuple with an http error code and message, or None if
+    everything went well.
     """
     for assistant in assistants_form:
         if assistant.get("id"):
@@ -302,11 +330,9 @@ def _apply_assistants_form(dealer, event, assistants_form):
             dealer_asst_obj.license = assistant["license"]
             dealer_asst_obj.save()
         except KeyError:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "message": "Bad request: name, email, and license fields are required to update assistant",
-                }
+            return (
+                400,
+                "Bad request: name, email, and license fields are required to update assistant",
             )
     return None
 
@@ -321,34 +347,15 @@ def dealer_assistants_paypal_create(request):
         )
         return common.abort(400, str(e))
 
-    assistants_form = form_data.get("assistants") or []
     if "dealer_id" not in request.session:
         return common.abort(400, "Session expired")
     dealer = Dealer.objects.get(id=request.session["dealer_id"])
     event = Event.objects.get(default=True)
 
-    badge = Badge.objects.filter(attendee=dealer.attendee, event=dealer.event).last()
-    price_level = badge and badge.effectiveLevel()
-    if price_level is None:
-        return common.abort(
-            402,
-            "Dealer account has not been paid. Please pay for your table before adding assistants.",
-        )
-
-    error_response = _apply_assistants_form(dealer, event, assistants_form)
-    if error_response is not None:
-        return error_response
-
-    unpaid_partner_count = dealer.getUnpaidPartnerCount()
-    total = ASSISTANT_PARTNER_PRICE * unpaid_partner_count
-    if total <= 0:
-        return common.abort(400, "No unpaid assistants to charge for.")
-
-    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
-    order_item.save()
-    session_items = request.session.get("order_items", [])
-    session_items.append(order_item.id)
-    request.session["order_items"] = session_items
+    try:
+        total = _set_up_assistant_checkout(request, form_data, dealer, event)
+    except RuntimeError as ex:
+        common.abort(*ex.args)
 
     translated_cart: list[TranslatedCartItem] = [
         {
@@ -372,7 +379,7 @@ def dealer_assistants_paypal_create(request):
         return common.abort(ex.response_code, json.loads(ex.response.text))
 
 
-def add_assistants_checkout(request):
+def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
     try:
         form_data = json.loads(request.body)
     except ValueError as e:
@@ -381,36 +388,34 @@ def add_assistants_checkout(request):
 
     if "dealer_id" not in request.session:
         return common.abort(400, "Session expired")
+    billing_data = form_data.get("billingData", {})
     dealer = Dealer.objects.get(id=request.session["dealer_id"])
+    event = Event.objects.get(default=True)
+    processor = form_data.get("processor")
 
-    session_items = request.session.get("order_items", [])
-    order_items = list(OrderItem.objects.filter(id__in=session_items))
-    if not order_items:
-        return common.abort(
-            400, "No pending assistant order; call dealer_assistants_paypalcreate first"
+    # Skip setup if this is PayPal - we already did all that
+    if "pending_paypal_reference" in request.session:
+        if "source_id" not in billing_data:
+            return common.abort(400, "Missing PayPal order ID")
+
+        session_items = request.session.get("order_items", [])
+        order_items = list(OrderItem.objects.filter(id__in=session_items))
+        if not order_items:
+            return common.abort(
+                400,
+                "No pending assistant order; call dealer_assistants_paypalcreate first",
+            )
+        unpaid_partner_count = dealer.getUnpaidPartnerCount()
+        total = ASSISTANT_PARTNER_PRICE * unpaid_partner_count
+        if total <= 0:
+            raise RuntimeError(400, "No unpaid assistants to charge for.")
+    else:
+        total, order_items = _set_up_assistant_checkout(
+            request, form_data, dealer, event
         )
 
-    if "orderID" not in form_data:
-        return common.abort(400, "Missing PayPal order ID")
-
-    unpaid_partner_count = dealer.getUnpaidPartnerCount()
-    total = ASSISTANT_PARTNER_PRICE * unpaid_partner_count
-    if total <= 0:
-        logger.warning(
-            f"Error checking out dealer while adding assistants: total too low: {total} <= 0"
-        )
-        return common.abort(500, "An error occurred while adding your assistants.")
-
-    status, message, order = do_paypal_checkout(
-        form_data["orderID"],
-        total,
-        None,
-        [],
-        order_items,
-        Decimal("0.00"),
-        Decimal("0.00"),
-        request,
-        billingData=form_data.get("billingData") or {},
+    status, message, order = do_checkout(
+        processor, billing_data, total, None, [], order_items, 0, 0
     )
 
     if status:
@@ -635,19 +640,12 @@ def checkout_dealer(request):
 
     total = subtotal + porg + pcharity
 
-    pbill = post_data.get("billingData") or {}
-    if "orderID" not in post_data:
+    pproc = post_data.get("processor")
+    pbill = post_data.get("billingData", {})
+    if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
-    status, message, order = do_paypal_checkout(
-        post_data["orderID"],
-        total,
-        discount,
-        [],
-        order_items,
-        porg,
-        pcharity,
-        request,
-        billingData=pbill,
+    status, message, order = do_checkout(
+        pproc, pbill, total, discount, None, order_items, porg, pcharity, request
     )
 
     if status:

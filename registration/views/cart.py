@@ -28,8 +28,7 @@ def get_cart(request):
             discount = Discount.objects.filter(codeName=discount)
             if discount.count() > 0:
                 discount = discount.first()
-        gross_total, total_discount = ordering.get_total([], orderItems, discount)
-        total = gross_total - total_discount
+        total, total_discount = ordering.get_total([], orderItems, discount)
 
         hasMinors = False
         for item in orderItems:
@@ -57,8 +56,7 @@ def get_cart(request):
             discount = Discount.objects.filter(codeName=discount)
             if discount.count() > 0:
                 discount = discount.first()
-        gross_total, total_discount = ordering.get_total(cartItems, [], discount)
-        total = gross_total - total_discount
+        total, total_discount = ordering.get_total(cartItems, [], discount)
 
         hasMinors = False
         for idx, cart in enumerate(cartItems):

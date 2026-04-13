@@ -102,11 +102,13 @@ class OnsiteBaseTestCase(TestCase):
 
     def checkout(self, charity_donation="0.00", org_donation="0.00"):
         post_data = {
-            "billingData": {},
+            "processor": "paypal",
+            "billingData": {
+                "source_id": "TEST-PAYPAL-ORDER",
+            },
             "charityDonation": charity_donation,
             "onsite": True,
             "orgDonation": org_donation,
-            "orderID": "TEST-PAYPAL-ORDER",
         }
 
         response = self.client.post(

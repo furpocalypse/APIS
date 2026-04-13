@@ -3,12 +3,14 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.test import Client, TestCase
 from django.test.utils import override_settings, tag
 from django.urls import reverse
+from paypalserversdk.http.api_response import ApiResponse, HttpResponse
+from paypalserversdk.models.error_details import ErrorDetails
 
 from registration.models import *
 from registration.tests.common import *
@@ -124,39 +126,27 @@ class TestAttendeeCheckout(OrdersTestCase):
     # fail today because the underlying Square checkout code has been
     # removed.
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
     def test_bad_cvv(self):
         self.assert_square_error("cnon:card-nonce-rejected-cvv", "CVV_FAILURE")
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
     def test_bad_postalcode(self):
         self.assert_square_error(
             "cnon:card-nonce-rejected-postalcode", "ADDRESS_VERIFICATION_FAILURE"
         )
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
     def test_bad_expiration(self):
         self.assert_square_error(
             "cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION"
         )
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
     def test_card_declined(self):
         self.assert_square_error("cnon:card-nonce-declined", "GENERIC_DECLINE")
 
     def _assert_paypal_capture_error(self, mock_capture, issue):
-        def fake_failed_capture(paypal_order_id, apis_order):
+        def fake_failed_capture(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.FAILED
             apis_order.save()
             return False, {"errors": [issue]}
@@ -166,7 +156,7 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.add_to_cart(self.attendee_form_2, self.price_45, [])
         pre_cart_count = Cart.objects.count()
 
-        result = self.checkout("cnon:card-nonce-ok")
+        result = self.checkout("")
         self.assertEqual(result.status_code, 400, result.content)
 
         self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
@@ -180,23 +170,38 @@ class TestAttendeeCheckout(OrdersTestCase):
 
     @tag("paypal")
     @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_cvv_failure(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "CVV_FAILURE")
+    def test_paypal_capture_internal_server_error(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "INTERNAL_SERVER_ERROR")
 
     @tag("paypal")
     @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_postal_failure(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "ADDRESS_VERIFICATION_FAILURE")
+    def test_paypal_capture_resource_conflict(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "RESOURCE_CONFLICT")
 
     @tag("paypal")
     @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_expiration_failure(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "CARD_EXPIRED")
+    def test_paypal_capture_authentication_failure(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "AUTHENTICATION_FAILURE")
 
     @tag("paypal")
     @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_declined(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "INSTRUMENT_DECLINED")
+    def test_paypal_capture_invalid_request(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "INVALID_REQUEST")
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_not_authorized(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "NOT_AUTHORIZED")
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_resource_not_found(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "RESOURCE_NOT_FOUND")
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_unprocessable_entity(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "UNPROCESSABLE_ENTITY")
 
     def test_full_single_order(self):
         options = [
@@ -651,7 +656,7 @@ class TestAttendeeCheckout(OrdersTestCase):
     def test_dealer_payment_via_paypal(self, mock_capture):
         """End-to-end dealer checkout via the PayPal path (capture mocked)."""
 
-        def fake_capture(paypal_order_id, apis_order):
+        def fake_capture(paypal_order_id, apis_order, mock_response):
             apis_order.status = Order.COMPLETED
             apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
             return True, {"id": paypal_order_id, "status": "COMPLETED"}
@@ -672,7 +677,7 @@ class TestAttendeeCheckout(OrdersTestCase):
         expected_total = expected_subtotal + porg + pcharity
 
         checkout_post_data = {
-            "orderID": "TEST-PAYPAL-DEALER-ORDER",
+            "processor": "paypal",
             "orgDonation": str(porg),
             "charityDonation": str(pcharity),
             "billingData": {
@@ -684,6 +689,7 @@ class TestAttendeeCheckout(OrdersTestCase):
                 "email": "apis@mailinator.net",
                 "postal": "13271",
                 "state": "PA",
+                "source_id": "TEST-PAYPAL-DEALER-ORDER",
             },
         }
 
@@ -728,7 +734,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         return response
 
     def _fake_capture(self):
-        def _capture(paypal_order_id, apis_order):
+        def _capture(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.COMPLETED
             apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
             return True, {"id": paypal_order_id, "status": "COMPLETED"}
@@ -887,7 +893,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         self.assertEqual(expected_subtotal, Decimal("155.00"))
 
         checkout_post_data = {
-            "orderID": "TEST-PAYPAL-DEALER-DISC",
+            "processor": "paypal",
             "orgDonation": "0",
             "charityDonation": "0",
             "billingData": {
@@ -899,6 +905,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
                 "email": "a@b.com",
                 "postal": "12345",
                 "state": "PA",
+                "source_id": "TEST-PAYPAL-DEALER-DISC",
             },
         }
         response = self.client.post(
@@ -917,7 +924,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
     def test_discount_used_not_incremented_on_capture_failure(self, mock_capture):
         """A failed PayPal capture must not consume the discount counter."""
 
-        def fake_failed(paypal_order_id, apis_order):
+        def fake_failed(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.FAILED
             apis_order.save()
             return False, {"errors": ["INSTRUMENT_DECLINED"]}
@@ -926,7 +933,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         self.add_to_cart(self.attendee_form_2, self.price_45, [])
         self._apply_discount("FiveOff")
 
-        response = self.checkout("cnon:card-nonce-ok", "0", "0")
+        response = self.checkout("", "0", "0")
         self.assertEqual(response.status_code, 400)
 
         discount = Discount.objects.get(codeName="FiveOff")
