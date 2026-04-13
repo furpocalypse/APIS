@@ -480,7 +480,7 @@ def refund_card_payment(
             ),
         )
     args = {
-        "id": capture.id,
+        "capture_id": capture.id,
         "prefer": "representation",
     }
     if amount < available:  # Full refund needs no body
@@ -496,13 +496,19 @@ def refund_card_payment(
         with PAYPAL_REQUESTS.labels(endpoint="refund_payment").time():
             api_response = payments_controller.refund_captured_payment(args)
     except ApiException as e:
-        logger.error("Error in PayPal refund: {0}".format(e.reason))
-        api_response = e.response
+        message = "Error in PayPal refund: {0}".format(e.reason)
+        logger.error(message)
+        return False, message
 
     logger.debug("---- Refund Completed ----")
     logger.debug(api_response)
 
-    resp_raw_body = json.loads(api_response.text)
+    try:
+        resp_raw_body = json.loads(api_response.text)
+    except (ValueError, JSONDecodeError) as e:
+        message = "Error decoding PayPal refund response: {0}".format(e.msg)
+        logger.error(message)
+        return False, message
 
     if api_response.is_error():
         logger.debug(resp_raw_body["errors"])
@@ -529,7 +535,7 @@ def refund_card_payment(
         # Reset org & charity donations if the remaining total isn't enough to cover them:
         if order.orgDonation + order.charityDonation > order.total:
             order.orgDonation = 0
-            order.charityDonation = order.total
+            order.charityDonation = 0
             logger.warning(
                 "Refunded order has caused charity and organization donation amounts to reset."
             )
