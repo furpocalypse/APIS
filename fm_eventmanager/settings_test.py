@@ -223,6 +223,14 @@ CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(
 CELERY_TASK_SEND_SENT_EVENT = eval_bool(
     os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True")
 )
+# Match settings.py.ci behavior: execute Celery tasks synchronously inside
+# Django tests so ``.delay(...)`` dispatches hit ``mail.outbox`` and mocked
+# task functions assertions fire before the HTTP response returns. Without
+# this, tasks would enqueue to a real Redis broker that CI does not run.
+CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "True"))
+CELERY_TASK_EAGER_PROPAGATES = eval_bool(
+    os.getenv("CELERY_TASK_EAGER_PROPAGATES", "True")
+)
 
 
 # Prometheus metrics
@@ -338,7 +346,10 @@ IDEMPOTENCY_KEY = {
     },
 }
 
-MAINTENANCE_MODE_STATE_FILE_PATH = "/app/fm_eventmanager/maintenance_mode_state.txt"
+MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
+    "MAINTENANCE_MODE_STATE_FILE_PATH",
+    "/app/fm_eventmanager/maintenance_mode_state.txt",
+)
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
 
@@ -356,13 +367,18 @@ if DEBUG:
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "/static/"
-STATIC_ROOT = "/app/apis/static/"
-STATICFILES_DIRS = (("bundler", "/app/apis/static/bundler"),)
+STATIC_ROOT = os.getenv("STATIC_ROOT", "/app/apis/static/")
+# NOTE: no STATICFILES_DIRS("bundler", ...) — AppDirectoriesFinder picks up
+# ``registration/static/bundler/`` (Vite's output) automatically. See the
+# equivalent note in settings.py.docker.
 
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "fm_eventmanager.file_storage.SelectiveManifestStaticFilesStorage",
-    }
+    },
 }
 
 # Session Management
@@ -384,12 +400,12 @@ SQUARE_APPLICATION_SECRET = os.environ.get("SQUARE_APPLICATION_SECRET")
 SQUARE_ACCESS_TOKEN = os.environ.get("SQUARE_ACCESS_TOKEN")
 SQUARE_LOCATION_ID = os.environ.get("SQUARE_LOCATION_ID")
 SQUARE_CURRENCY = os.getenv("SQUARE_CURRENCY", "USD")
-SQUARE_ENVIRONMENT = os.getenv("SQUARE_ENVIRONMENT", "production")  # Or "sandbox"
+SQUARE_ENVIRONMENT = os.getenv("SQUARE_ENVIRONMENT", "sandbox")  # Or "production"
 SQUARE_WEBHOOK_SIGNATURE_KEY = os.getenv("SQUARE_WEBHOOK_SIGNATURE_KEY", "unset")
 PAYPAL_CLIENT_ID = os.environ["PAYPAL_CLIENT_ID"]
 PAYPAL_CLIENT_SECRET = os.environ["PAYPAL_CLIENT_SECRET"]
 PAYPAL_CURRENCY = os.getenv("PAYPAL_CURRENCY", "USD")
-PAYPAL_ENVIRONMENT = "production"  # Or "sandbox"
+PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "sandbox")  # Or "production"
 
 # Sandbox values - DO NOT check in production credentials
 EMAIL_BACKEND = os.getenv(

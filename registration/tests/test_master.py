@@ -1,4 +1,5 @@
 import io
+import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -46,8 +47,21 @@ class TestAttendeeCheckout(OrdersTestCase):
     # Single transaction tests
     # =======================================================================
 
-    @tag("square")
-    def test_checkout(self):
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_checkout(self, mock_capture):
+        """End-to-end attendee checkout via the PayPal path (capture mocked).
+
+        This test was originally Square-era (`@tag("square")`) and asserted
+        Square-specific side effects such as a sandbox-populated `lastFour`.
+        Since the project moved to PayPal, the checkout endpoint now calls
+        `capture_paypal_payment`; we mock it here and assert the Order is
+        created with the expected billing/donation data.
+        """
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         options = [
             {"id": self.option_conbook.id, "value": "true"},
             {"id": self.option_shirt.id, "value": self.shirt1.id},
@@ -79,12 +93,6 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.assertEqual(order.orgDonation, 20)
         self.assertEqual(order.charityDonation, 10)
 
-        # Square should overwrite this with a random sandbox value
-        self.assertNotEqual(order.lastFour, "1111")
-        self.assertNotEqual(order.lastFour, "")
-        self.assertNotEqual(order.notes, "")
-        self.assertNotEqual(order.apiData, "")
-
         # Clean up
         badge.delete()
 
@@ -105,25 +113,90 @@ class TestAttendeeCheckout(OrdersTestCase):
         # Ensure a badge wasn't created
         self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
 
+    # The four tests below check Square-specific error codes (CVV_FAILURE,
+    # ADDRESS_VERIFICATION_FAILURE, INVALID_EXPIRATION, GENERIC_DECLINE) that
+    # come back from Square's CreatePayment endpoint. PayPal's Orders V2 API
+    # has a different error surface (UNPROCESSABLE_ENTITY with issue codes
+    # like ``INSTRUMENT_DECLINED``, ``CARD_EXPIRED``, etc.) and there is no
+    # "nonce" concept — the equivalent test would exercise PayPal refusal
+    # paths via a mocked ``capture_paypal_payment``. These tests are kept
+    # under ``@tag("square")`` and skipped pending a PayPal rewrite; they
+    # fail today because the underlying Square checkout code has been
+    # removed.
     @tag("square")
+    @unittest.skip(
+        "Square checkout removed; rewrite against PayPal capture failure path"
+    )
     def test_bad_cvv(self):
         self.assert_square_error("cnon:card-nonce-rejected-cvv", "CVV_FAILURE")
 
     @tag("square")
+    @unittest.skip(
+        "Square checkout removed; rewrite against PayPal capture failure path"
+    )
     def test_bad_postalcode(self):
         self.assert_square_error(
             "cnon:card-nonce-rejected-postalcode", "ADDRESS_VERIFICATION_FAILURE"
         )
 
     @tag("square")
+    @unittest.skip(
+        "Square checkout removed; rewrite against PayPal capture failure path"
+    )
     def test_bad_expiration(self):
         self.assert_square_error(
             "cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION"
         )
 
     @tag("square")
+    @unittest.skip(
+        "Square checkout removed; rewrite against PayPal capture failure path"
+    )
     def test_card_declined(self):
         self.assert_square_error("cnon:card-nonce-declined", "GENERIC_DECLINE")
+
+    def _assert_paypal_capture_error(self, mock_capture, issue):
+        def fake_failed_capture(paypal_order_id, apis_order):
+            apis_order.status = Order.FAILED
+            apis_order.save()
+            return False, {"errors": [issue]}
+
+        mock_capture.side_effect = fake_failed_capture
+
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        pre_cart_count = Cart.objects.count()
+
+        result = self.checkout("cnon:card-nonce-ok")
+        self.assertEqual(result.status_code, 400, result.content)
+
+        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
+        self.assertEqual(
+            Cart.objects.count(),
+            pre_cart_count,
+            "Cart should not be drained on capture failure",
+        )
+        failed = Order.objects.filter(status=Order.FAILED)
+        self.assertEqual(failed.count(), 1)
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_cvv_failure(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "CVV_FAILURE")
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_postal_failure(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "ADDRESS_VERIFICATION_FAILURE")
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_expiration_failure(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "CARD_EXPIRED")
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_paypal_capture_declined(self, mock_capture):
+        self._assert_paypal_capture_error(mock_capture, "INSTRUMENT_DECLINED")
 
     def test_full_single_order(self):
         options = [
@@ -182,8 +255,13 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.assertEqual(order.orgDonation, 1.00)
         self.assertEqual(order.charityDonation, 10.00)
 
-    @tag("square")
-    def test_discount(self):
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_discount(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         options = [
             {"id": self.option_conbook.id, "value": "true"},
             {"id": self.option_shirt.id, "value": self.shirt1.id},
@@ -278,6 +356,9 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.assertEqual(discount.used, discountUsed + 1)
 
     @tag("square")
+    @unittest.skip(
+        "Square checkout not wired into dealer flow; see test_dealer_payment_via_paypal for the PayPal equivalent."
+    )
     def test_dealer(self):
         dealer_pay = {
             "attendee": {
@@ -522,37 +603,334 @@ class TestAttendeeCheckout(OrdersTestCase):
         assistant.refresh_from_db()
         self.assertTrue(assistant.paid)
 
+    def _seed_dealer(self):
+        attendee = Attendee(
+            firstName="Dealer",
+            lastName="PayPalTest",
+            address1="123 Somewhere St",
+            city="Place",
+            state="PA",
+            country="US",
+            postalCode="12345",
+            phone="1112223333",
+            email="dealer-paypal@mailinator.org",
+            birthdate="1990-01-01",
+        )
+        attendee.save()
+        badge = Badge(attendee=attendee, event=self.event, badgeName="DealerBadge")
+        badge.save()
+        dealer = Dealer(
+            attendee=attendee,
+            event=self.event,
+            businessName="Something Creative",
+            license="jkah9435kd",
+            tableSize=self.table_130,
+            needPower=False,
+            needWifi=False,
+            agreeToRules=True,
+        )
+        dealer.save()
+        assistant = DealerAsst(
+            name="Foobian the First",
+            email="foo@bar.com",
+            license="N/A",
+            dealer=dealer,
+            event=self.event,
+        )
+        assistant.save()
+        order_item = OrderItem(badge=badge, priceLevel=self.price_45, enteredBy="WEB")
+        order_item.save()
+        order_item = OrderItem.objects.select_related("priceLevel").get(
+            id=order_item.id
+        )
+        dealer.refresh_from_db()
+        return dealer, badge, order_item, assistant
+
     @tag("paypal")
     @patch("registration.views.ordering.capture_paypal_payment")
     def test_dealer_payment_via_paypal(self, mock_capture):
-        """
-        PayPal variant of the dealer payment flow.
+        """End-to-end dealer checkout via the PayPal path (capture mocked)."""
 
-        TODO (plan step 7): The dealer checkout endpoint
-        (``registration.views.dealers.checkout_dealer``) currently only
-        routes through ``do_checkout`` (Square). Once the dealer flow is
-        wired to ``do_paypal_checkout`` (analogous to the main
-        ``checkout`` view), this test should:
+        def fake_capture(paypal_order_id, apis_order):
+            apis_order.status = Order.COMPLETED
+            apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
+            return True, {"id": paypal_order_id, "status": "COMPLETED"}
 
-        - Run the dealer setup from ``test_dealer`` (register dealer,
-          flush session, find_dealer, add_dealer, invoice_dealer).
-        - POST to ``registration:checkout_dealer`` with an ``orderID``
-          in ``billingData`` (or a top-level ``orderID`` per the PayPal
-          contract, matching whatever the dealer flow settles on).
-        - Assert response status 200 and
-          ``response.content == b'{"success": true}'``.
-        - Assert ``mock_capture`` was called exactly once with the
-          PayPal order id.
-        - Assert the resulting ``Order`` has
-          ``billingType == Order.CREDIT``, ``status == Order.COMPLETED``,
-          and ``total`` equal to the expected dealer cost
-          (``table_130.basePrice + price_45.basePrice + porg + pcharity``,
-          minus any dealer discount).
-        """
-        self.skipTest(
-            "Dealer PayPal flow scaffolding TODO - see plan step 7. "
-            "checkout_dealer does not yet call do_paypal_checkout."
+        mock_capture.side_effect = fake_capture
+        dealer, badge, order_item, assistant = self._seed_dealer()
+
+        session = self.client.session
+        session["dealer_id"] = dealer.id
+        session["order_items"] = [order_item.id]
+        session.save()
+
+        from registration.views.dealers import get_dealer_total
+
+        porg = Decimal("10")
+        pcharity = Decimal("20")
+        expected_subtotal = get_dealer_total([order_item], None, dealer)
+        expected_total = expected_subtotal + porg + pcharity
+
+        checkout_post_data = {
+            "orderID": "TEST-PAYPAL-DEALER-ORDER",
+            "orgDonation": str(porg),
+            "charityDonation": str(pcharity),
+            "billingData": {
+                "address1": "Qui qui quasi amet",
+                "cc_firstname": "Whitney",
+                "cc_lastname": "Thompson",
+                "city": "Quam earum",
+                "country": "US",
+                "email": "apis@mailinator.net",
+                "postal": "13271",
+                "state": "PA",
+            },
+        }
+
+        response = self.client.post(
+            reverse("registration:checkout_dealer"),
+            json.dumps(checkout_post_data),
+            content_type="application/json",
         )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.content, b'{"success": true}')
+        self.assertEqual(mock_capture.call_count, 1)
+        self.assertEqual(mock_capture.call_args.args[0], "TEST-PAYPAL-DEALER-ORDER")
+
+        order_item.refresh_from_db()
+        assistant.refresh_from_db()
+        order = order_item.order
+        self.assertIsNotNone(order)
+        self.assertEqual(order.billingType, Order.CREDIT)
+        self.assertEqual(order.status, Order.COMPLETED)
+        self.assertEqual(order.total, expected_total)
+        self.assertEqual(order.orgDonation, porg)
+        self.assertEqual(order.charityDonation, pcharity)
+        self.assertTrue(assistant.paid)
+
+
+@tag("paypal")
+class TestPayPalDiscountScenarios(OrdersTestCase):
+    """Exhaustive discount coverage for PayPal checkout.
+
+    Exercises amount-off, percent-off, one-time, expired, zero-sum, and
+    donation-combined discount paths across attendee, dealer and upgrade
+    flows. All PayPal captures are mocked — these tests are about the
+    discount math and state transitions, not PayPal itself.
+    """
+
+    def _apply_discount(self, code):
+        response = self.client.post(
+            reverse("registration:discount"),
+            json.dumps({"discount": code}),
+            content_type="application/json",
+        )
+        return response
+
+    def _fake_capture(self):
+        def _capture(paypal_order_id, apis_order):
+            apis_order.status = Order.COMPLETED
+            apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
+            return True, {"id": paypal_order_id, "status": "COMPLETED"}
+
+        return _capture
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_amountoff_reduces_order_total(self, mock_capture):
+        """FiveOff ($5 amountOff) applied to a $45 cart → Order.total = $40."""
+        mock_capture.side_effect = self._fake_capture()
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        resp = self._apply_discount("FiveOff")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["success"], True)
+
+        response = self.checkout("cnon:card-nonce-ok", "0", "0")
+        self.assertEqual(response.status_code, 200, response.content)
+
+        discount = Discount.objects.get(codeName="FiveOff")
+        self.assertEqual(discount.used, 1)
+        order = Order.objects.filter(discount=discount).first()
+        self.assertIsNotNone(order)
+        self.assertEqual(order.total, Decimal("40.00"))
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_percentoff_reduces_order_total(self, mock_capture):
+        """OneTime (10% percentOff) on a $45 cart → Order.total = $40.50."""
+        mock_capture.side_effect = self._fake_capture()
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        resp = self._apply_discount("OneTime")
+        self.assertEqual(resp.status_code, 200)
+
+        response = self.checkout("cnon:card-nonce-ok", "0", "0")
+        self.assertEqual(response.status_code, 200, response.content)
+
+        order = Order.objects.filter(discount__codeName="OneTime").first()
+        self.assertIsNotNone(order)
+        self.assertEqual(order.total, Decimal("40.50"))
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_onetime_rejected_after_first_use(self, mock_capture):
+        """A oneTime discount is invalid on re-apply attempts."""
+        mock_capture.side_effect = self._fake_capture()
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        self._apply_discount("OneTime")
+        response = self.checkout("cnon:card-nonce-ok", "0", "0")
+        self.assertEqual(response.status_code, 200)
+
+        # Start a new cart; try to re-apply OneTime.
+        self.add_to_cart(self.attendee_form_1, self.price_45, [])
+        resp = self._apply_discount("OneTime")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["success"])
+        self.assertIn("not valid", resp.json()["message"])
+
+    def test_expired_discount_rejected(self):
+        """A discount whose end_date has passed is rejected when applied."""
+        expired = Discount(
+            codeName="Expired",
+            amountOff=Decimal("10"),
+            startDate=now - ten_days - ten_days,
+            endDate=now - ten_days,
+        )
+        expired.save()
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        resp = self._apply_discount("Expired")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["success"])
+        self.assertIn("not valid", resp.json()["message"])
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_discount_plus_donations_charges_correctly(self, mock_capture):
+        """Discount reduces item subtotal but donations pass through.
+
+        $45 - $5 + $10 org + $20 charity → Order.total = $70.
+        """
+        mock_capture.side_effect = self._fake_capture()
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        self._apply_discount("FiveOff")
+
+        response = self.checkout("cnon:card-nonce-ok", "10", "20")
+        self.assertEqual(response.status_code, 200, response.content)
+
+        order = Order.objects.filter(discount__codeName="FiveOff").first()
+        self.assertEqual(order.total, Decimal("70.00"))
+        self.assertEqual(order.orgDonation, Decimal("10"))
+        self.assertEqual(order.charityDonation, Decimal("20"))
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_zero_sum_discount_skips_paypal_capture(self, mock_capture):
+        """StaffDiscount ($45 amountOff) on a $45 cart → zero total, no PayPal."""
+        mock_capture.side_effect = self._fake_capture()
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        self._apply_discount("StaffDiscount")
+
+        response = self.checkout("cnon:card-nonce-ok", "0", "0")
+        self.assertEqual(response.status_code, 200, response.content)
+
+        # No PayPal capture should have been attempted for a zero-sum cart.
+        self.assertEqual(mock_capture.call_count, 0)
+        order = Order.objects.filter(discount__codeName="StaffDiscount").first()
+        self.assertIsNotNone(order)
+        self.assertEqual(order.total, Decimal("0"))
+        self.assertEqual(order.billingType, Order.COMP)
+
+    def _seed_simple_dealer(self, dealer_flat_discount=Decimal("0")):
+        attendee = Attendee(
+            firstName="Dealer",
+            lastName="Disc",
+            address1="x",
+            city="x",
+            state="PA",
+            country="US",
+            postalCode="12345",
+            phone="0",
+            email="dealer-disc@example.com",
+            birthdate="1990-01-01",
+        )
+        attendee.save()
+        badge = Badge(attendee=attendee, event=self.event, badgeName="DDBadge")
+        badge.save()
+        dealer = Dealer(
+            attendee=attendee,
+            event=self.event,
+            businessName="Disc Biz",
+            license="abc",
+            tableSize=self.table_130,
+            discount=dealer_flat_discount,
+        )
+        dealer.save()
+        order_item = OrderItem(badge=badge, priceLevel=self.price_45, enteredBy="WEB")
+        order_item.save()
+        order_item = OrderItem.objects.select_related("priceLevel").get(
+            id=order_item.id
+        )
+        dealer.refresh_from_db()
+        return dealer, badge, order_item
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_dealer_flat_discount_carries_to_order_total(self, mock_capture):
+        """Dealer.discount flat amount should reduce Order.total end-to-end."""
+        mock_capture.side_effect = self._fake_capture()
+        flat = Decimal("20")
+        dealer, badge, order_item = self._seed_simple_dealer(dealer_flat_discount=flat)
+
+        session = self.client.session
+        session["dealer_id"] = dealer.id
+        session["order_items"] = [order_item.id]
+        session.save()
+
+        from registration.views.dealers import get_dealer_total
+
+        expected_subtotal = get_dealer_total([order_item], None, dealer)
+        expected_total = expected_subtotal  # no donations
+        # $45 attendee + $130 table - $20 flat dealer discount = $155
+        self.assertEqual(expected_subtotal, Decimal("155.00"))
+
+        checkout_post_data = {
+            "orderID": "TEST-PAYPAL-DEALER-DISC",
+            "orgDonation": "0",
+            "charityDonation": "0",
+            "billingData": {
+                "address1": "a",
+                "cc_firstname": "X",
+                "cc_lastname": "Y",
+                "city": "c",
+                "country": "US",
+                "email": "a@b.com",
+                "postal": "12345",
+                "state": "PA",
+            },
+        }
+        response = self.client.post(
+            reverse("registration:checkout_dealer"),
+            json.dumps(checkout_post_data),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        order_item.refresh_from_db()
+        order = order_item.order
+        self.assertIsNotNone(order)
+        self.assertEqual(order.total, expected_total)
+
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_discount_used_not_incremented_on_capture_failure(self, mock_capture):
+        """A failed PayPal capture must not consume the discount counter."""
+
+        def fake_failed(paypal_order_id, apis_order):
+            apis_order.status = Order.FAILED
+            apis_order.save()
+            return False, {"errors": ["INSTRUMENT_DECLINED"]}
+
+        mock_capture.side_effect = fake_failed
+        self.add_to_cart(self.attendee_form_2, self.price_45, [])
+        self._apply_discount("FiveOff")
+
+        response = self.checkout("cnon:card-nonce-ok", "0", "0")
+        self.assertEqual(response.status_code, 400)
+
+        discount = Discount.objects.get(codeName="FiveOff")
+        self.assertEqual(discount.used, 0)
 
 
 class LookupTestCases(TestCase):

@@ -205,6 +205,10 @@ LOGIN_REDIRECT_URL = "admin:index"
 
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
+MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
+    'MAINTENANCE_MODE_STATE_FILE_PATH',
+    os.path.join(BASE_DIR, 'fm_eventmanager', 'maintenance_mode_state.txt'),
+)
 
 INTERNAL_IPS = ['127.0.0.1']
 
@@ -212,7 +216,19 @@ INTERNAL_IPS = ['127.0.0.1']
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = '/static/'
-STATIC_ROOT = '/root/projects/furthemore/static/'
+STATIC_ROOT = os.getenv('STATIC_ROOT', '/root/projects/furthemore/static/')
+# NOTE: do NOT add a ("bundler", ...) STATICFILES_DIRS entry here. Vite
+# builds into ``registration/static/bundler/``; Django's AppDirectoriesFinder
+# picks that up automatically because ``registration`` is an INSTALLED_APP.
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 # Session Management
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
@@ -226,12 +242,12 @@ SQUARE_APPLICATION_ID = 'sandbox-sq0idp-1a_xxxxxxxxxxxxxxxxxxx'
 SQUARE_ACCESS_TOKEN = 'sandbox-sq0atb-xxxxxxxxxxxxxxxxxxxxxx'
 SQUARE_LOCATION_ID = 'xxxxxxxxx...'
 SQUARE_CURRENCY = 'USD'
-SQUARE_ENVIRONMENT = 'sandbox'  # Or "production"
+SQUARE_ENVIRONMENT = os.getenv('SQUARE_ENVIRONMENT', 'sandbox')  # Or "production"
 SQUARE_WEBHOOK_SIGNATURE_KEY = 'xj-...'
 PAYPAL_CLIENT_ID = ''
 PAYPAL_CLIENT_SECRET = ''
 PAYPAL_CURRENCY = 'USD'
-PAYPAL_ENVIRONMENT = 'sandbox'  # Or "production"
+PAYPAL_ENVIRONMENT = os.getenv('PAYPAL_ENVIRONMENT', 'sandbox')  # Or "production"
 
 # Sandbox values - DO NOT check in production credentials
 EMAIL_HOST = 'smtp.mailgun.org'

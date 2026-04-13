@@ -199,32 +199,23 @@ class TestCreatePaypalOrder(OrdersTestCase):
 
     @patch("registration.views.ordering.create_unpaid_paypal_order")
     def test_zero_total_short_circuits(self, mock_create):
-        """Cart totalling 0 with no donations should skip the PayPal API call.
+        """Cart totalling 0 with no donations should skip the PayPal API
+        call and return 400 directing the caller to the zero-checkout flow.
 
-        The production code at ordering.py:434 only calls the API when total>0,
-        and the function implicitly returns None in that branch. Django then
-        raises a ValueError about no HttpResponse being returned. We mark the
-        test to assert the PayPal mock is NOT called regardless of what the
-        framework does with the None return.
+        Production behavior (ordering.py): when the computed total is zero,
+        ``create_paypal_order`` rejects the request with HTTP 400 rather than
+        invoking PayPal. Callers are expected to route zero-total carts to
+        ``checkout`` where ``doZeroCheckout`` handles the no-payment path.
         """
-        # Put a free-priced cart item (basePrice=0) with no donations.
         self.add_to_cart(self.attendee_form_1, self.price_free, [])
 
-        try:
-            response = self.client.post(
-                reverse("registration:paypalcreate"),
-                json.dumps({}),
-                content_type="application/json",
-            )
-            # TODO: The view returns None implicitly on zero-total; confirm
-            # whether Django surfaces this as a 500 or if a future fix will
-            # return 200 with an empty body. For now we just make sure the
-            # PayPal API was not called.
-            self.assertIn(response.status_code, (200, 500))
-        except ValueError:
-            # Django raises ValueError("The view ... didn't return an HttpResponse")
-            pass
-
+        response = self.client.post(
+            reverse("registration:paypalcreate"),
+            json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("zero", response.json()["reason"].lower())
         mock_create.assert_not_called()
 
 

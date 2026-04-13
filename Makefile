@@ -19,6 +19,9 @@ Commands:
 
 	make test                       : Run Django test suite against docker-compose services (uses uv)
 	make test-paypal                : Run only PayPal-tagged tests (uses uv)
+	make test-check-migrations      : Fail if branch has model changes without a migration
+	make test-build-frontend        : Build the Vite front-end bundle (npm install + npm run build)
+	make test-collectstatic         : Populate the staticfiles manifest tests depend on
 
 endef
 export HELP
@@ -95,14 +98,38 @@ TEST_DATABASE_PORT ?= 5432
 TEST_DATABASE_USER ?= apis
 TEST_DATABASE_PASS ?= secret
 TEST_DATABASE_NAME ?= apis
-TEST_REDIS_HOST    ?= $(shell docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' apis-redis-1 2>/dev/null || echo 127.0.0.1)
+TEST_REDIS_HOST    ?= 127.0.0.1
 TEST_REDIS_PORT    ?= 6379
+
+TEST_STATIC_ROOT ?= $(CURDIR)/build/test-static
+
+# Load the project's .env (sandbox credentials for PayPal, Square, etc.) into
+# the Makefile's environment when it exists. Tests in registration/tests/
+# (test_master, test_upgrades) hit the real sandbox APIs — they fail without
+# real creds. CI supplies these via secrets; local dev sourced them from
+# .env via direnv, but sub-make target invocations don't inherit that, so
+# re-load here. .env is gitignored; never print its contents.
+ifneq (,$(wildcard $(CURDIR)/.env))
+-include $(CURDIR)/.env
+export
+endif
+
+# Fallbacks when no creds are configured (e.g. a bare clone). Using ``?=``
+# so the .env values above win.
+PAYPAL_CLIENT_ID      ?= test
+PAYPAL_CLIENT_SECRET  ?= test
+SQUARE_APPLICATION_ID ?= test
+SQUARE_ACCESS_TOKEN   ?= test
+SQUARE_LOCATION_ID    ?= test
 
 TEST_ENV = \
 	DJANGO_SETTINGS_MODULE=fm_eventmanager.settings_test \
 	DJANGO_SECRET_KEY=test \
-	PAYPAL_CLIENT_ID=test \
-	PAYPAL_CLIENT_SECRET=test \
+	PAYPAL_CLIENT_ID=$(PAYPAL_CLIENT_ID) \
+	PAYPAL_CLIENT_SECRET=$(PAYPAL_CLIENT_SECRET) \
+	SQUARE_APPLICATION_ID=$(SQUARE_APPLICATION_ID) \
+	SQUARE_ACCESS_TOKEN=$(SQUARE_ACCESS_TOKEN) \
+	SQUARE_LOCATION_ID=$(SQUARE_LOCATION_ID) \
 	CSRF_TRUSTED_ORIGINS='http://*,https://*' \
 	DATABASE_HOST=$(TEST_DATABASE_HOST) DATABASE_PORT=$(TEST_DATABASE_PORT) \
 	DATABASE_USER=$(TEST_DATABASE_USER) DATABASE_PASS=$(TEST_DATABASE_PASS) \
@@ -110,10 +137,68 @@ TEST_ENV = \
 	DJANGO_REDIS_URL=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/1 \
 	CELERY_BROKER_URL=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/2 \
 	CELERY_RESULT_BACKEND=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/2 \
-	IDEMPOTENCY_KEY_LOCK_LOCATION=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)
+	IDEMPOTENCY_KEY_LOCK_LOCATION=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT) \
+	STATIC_ROOT=$(TEST_STATIC_ROOT) \
+	MAINTENANCE_MODE_STATE_FILE_PATH=$(CURDIR)/build/maintenance_mode_state.txt \
+	GOTENBERG_HOST=http://127.0.0.1:3000
 
-test:
-	$(TEST_ENV) uv run python manage.py test registration --verbosity 1 --keepdb
+# Fail loudly if a model change on the branch lacks a migration. Django's
+# test runner applies existing migrations to the throwaway test database, so
+# we don't need a separate `migrate` step — but we DO need to catch missing
+# migrations up-front. `makemigrations --check --dry-run` exits non-zero
+# when it would have created a migration, making this a pre-test gate.
+test-check-migrations:
+	$(TEST_ENV) uv run python manage.py makemigrations --check --dry-run
 
-test-paypal:
-	$(TEST_ENV) uv run python manage.py test --tag=paypal --tag=PayPal --verbosity 1 --keepdb
+# Build the Vite front-end bundle. The output
+# (``registration/static/bundler/``, including ``manifest.json``) is picked
+# up by Django's ``AppDirectoriesFinder`` and then by ``collectstatic``.
+# Mirrors the "Build frontend" step in .github/workflows/django.yml so local
+# test runs see the same static files as CI.
+#
+# Prerequisite target — depends on the manifest file so ``make`` rebuilds
+# only when it's missing or source files are newer. If ``npm`` is not on
+# PATH (sandboxes that haven't set up Node), the build step is skipped with
+# a warning — tests that don't render Vite-backed templates still pass; the
+# handful that do (``onsite_admin``'s SPA host view) will surface as real
+# failures and require a Node environment to fix. Use ``make
+# test-build-frontend-force`` to force a fresh install + build.
+VITE_MANIFEST := registration/static/bundler/manifest.json
+VITE_SOURCES  := $(shell find registration/frontend/src -type f 2>/dev/null) \
+                 registration/frontend/package.json \
+                 registration/frontend/vite.config.ts
+
+$(VITE_MANIFEST): $(VITE_SOURCES)
+	@if command -v npm >/dev/null 2>&1; then \
+		cd registration/frontend && npm install && npm run build; \
+	else \
+		echo ">>> npm not found on PATH — skipping Vite build."; \
+		echo ">>> Install Node.js (e.g. node_22 / nodejs_22) to enable this step."; \
+		echo ">>> Writing a placeholder manifest so Django/tests can load the SPA host template."; \
+		mkdir -p $(dir $@); \
+		printf '%s\n' \
+			'{' \
+			'  "src/index.tsx": {' \
+			'    "file": "assets/index.placeholder.js",' \
+			'    "src": "src/index.tsx",' \
+			'    "isEntry": true,' \
+			'    "css": [],' \
+			'    "imports": []' \
+			'  }' \
+			'}' > $@; \
+	fi
+
+test-build-frontend: $(VITE_MANIFEST)
+
+test-build-frontend-force:
+	cd registration/frontend && npm install && npm run build
+
+test-collectstatic: test-build-frontend
+	mkdir -p $(TEST_STATIC_ROOT)
+	$(TEST_ENV) uv run python manage.py collectstatic --noinput
+
+test: test-check-migrations test-collectstatic
+	$(TEST_ENV) uv run python manage.py test registration --verbosity 1
+
+test-paypal: test-check-migrations test-collectstatic
+	$(TEST_ENV) uv run python manage.py test --tag=paypal --tag=PayPal --verbosity 1
