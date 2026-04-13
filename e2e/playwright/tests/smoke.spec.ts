@@ -21,7 +21,7 @@ test("@smoke admin login redirects to admin index", async ({ page }) => {
   await page.goto("/admin/login/?next=/admin/");
   await page.fill("input[name=login]", "e2e-admin");
   await page.fill("input[name=password]", "e2e-admin-password");
-  await page.click("input[type=submit]");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/?$/);
 });
 

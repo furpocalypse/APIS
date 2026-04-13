@@ -18,6 +18,6 @@ export class LoginPage {
     await this.openAdmin();
     await this.page.fill("input[name=login]", username);
     await this.page.fill("input[name=password]", password);
-    await this.page.click("input[type=submit]");
+    await this.page.getByRole("button", { name: "Sign In", exact: true }).click();
   }
 }
