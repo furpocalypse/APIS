@@ -6,7 +6,6 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     replaces = [
         ("registration", "0086_rename_tables"),
         ("registration", "0087_onsite_reg_start"),

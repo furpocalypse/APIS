@@ -1,6 +1,4 @@
 import logging
-from pathlib import Path
-from typing import Union
 
 from django.conf import settings
 from django.contrib import messages
@@ -30,7 +28,7 @@ def printNametag(request):
     return render(request, "registration/printing.html", context)
 
 
-def servePDF(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
+def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
     data = request.GET.get("data", None)
     if not data:
         return JsonResponse({"success": False, "reason": "Missing data"}, status=400)
@@ -50,9 +48,7 @@ def servePDF(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
     for badge in queryset:
         level = badge.effectiveLevel()
         if not level or level == Badge.UNPAID:
-            messages.warning(
-                request, f"skipped printing {badge} because level is {level}"
-            )
+            messages.warning(request, f"skipped printing {badge} because level is {level}")
             continue
 
         badge_template = badge.event.defaultBadgeTemplate
@@ -64,9 +60,7 @@ def servePDF(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
             )
 
         level = str(level)
-        if staff := Staff.objects.filter(
-            attendee=badge.attendee, event=badge.event
-        ).first():
+        if staff := Staff.objects.filter(attendee=badge.attendee, event=badge.event).first():
             level = "Staff"
 
             if not staff.checkedIn and data_obj["source"] == PrintHistory.ONSITE:
@@ -125,9 +119,7 @@ def servePDF(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
         finalPdf = None
 
         if len(pdfs) == 0:
-            return JsonResponse(
-                {"success": False, "reason": "No PDFs were generated"}, status=404
-            )
+            return JsonResponse({"success": False, "reason": "No PDFs were generated"}, status=404)
         elif len(pdfs) == 1:
             finalPdf = pdfs[0]
         else:
@@ -149,9 +141,7 @@ def servePDF(request: HttpRequest) -> Union[HttpResponse, JsonResponse]:
     for badge in queryset:
         badge.printed = True
         badge.save()
-        PrintHistory.objects.create(
-            badge=badge, firebase=terminal, source=data_obj["source"]
-        )
+        PrintHistory.objects.create(badge=badge, firebase=terminal, source=data_obj["source"])
 
     if terminal:
         mqtt.send_mqtt_message(mqtt.get_topic("web/refresh", name=terminal.name))

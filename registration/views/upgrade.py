@@ -11,7 +11,6 @@ from django.http import (
 from django.shortcuts import get_object_or_404, render
 from paypalserversdk.exceptions.api_exception import ApiException
 
-import registration.emails
 from registration import tasks
 from registration.models import *
 from registration.paypal_payments import create_unpaid_paypal_order
@@ -19,8 +18,8 @@ from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import clear_session, getOptionsDict, handler, logger
-from .ordering import do_checkout, do_paypal_checkout, doZeroCheckout, get_total
+from .common import clear_session, getOptionsDict, handler
+from .ordering import do_paypal_checkout, doZeroCheckout, get_total
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ def upgrade(request, guid):
 def info_upgrade(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for info_upgrade()")
         return JsonResponse({"success": False}, status=400)
 
@@ -61,9 +60,7 @@ def find_upgrade(request):
         attendee_id = request.session["attendee_id"]
         badge_id = request.session["badge_id"]
     except KeyError:
-        return render(
-            request, "registration/attendee-upgrade.html", context, status=400
-        )
+        return render(request, "registration/attendee-upgrade.html", context, status=400)
 
     attendee = get_object_or_404(Attendee, id=attendee_id)
     badge = get_object_or_404(Badge, id=badge_id)
@@ -89,7 +86,7 @@ def find_upgrade(request):
 def add_upgrade(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for add_upgrade()")
         return JsonResponse({"success": False})
 
@@ -97,7 +94,7 @@ def add_upgrade(request):
     pdp = postData["priceLevel"]
     pdd = postData["badge"]
     evt = postData["event"]
-    event = Event.objects.get(name=evt)
+    Event.objects.get(name=evt)
 
     if "attendee_id" not in request.session:
         return HttpResponseServerError("Session expired")
@@ -212,9 +209,7 @@ def upgrade_paypal_create(request):
         }
     ]
     if porg > 0:
-        translated_cart.append(
-            {"name": f"Donation to {event}", "total": porg, "donation": True}
-        )
+        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
     if pcharity > 0:
         translated_cart.append(
             {
@@ -247,7 +242,7 @@ def checkout_upgrade(request):
     attendee = Attendee.objects.get(id=request.session.get("attendee_id"))
     try:
         post_data = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for checkout_upgrade()")
         return common.abort(400, "Unable to parse input options")
 

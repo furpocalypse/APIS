@@ -15,9 +15,7 @@ class OnsiteBaseTestCase(TestCase):
     def setUp(self):
         # Create some users
         self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
-        self.normal_user = User.objects.create_user(
-            "john", "lennon@thebeatles.com", "john"
-        )
+        self.normal_user = User.objects.create_user("john", "lennon@thebeatles.com", "john")
         self.normal_user.staff_member = False
         self.normal_user.save()
 
@@ -121,7 +119,7 @@ class OnsiteBaseTestCase(TestCase):
 
 class TestOnsiteCart(OnsiteBaseTestCase):
     def setUp(self):
-        super(TestOnsiteCart, self).setUp()
+        super().setUp()
 
     def test_onsite_open(self):
         self.event.onsiteRegStart = now - one_day
@@ -197,7 +195,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         response = self.client.get(reverse("registration:onsite_admin"), follow=True)
         self.assertRedirects(
             response,
-            "/accounts/login/?next={0}".format(reverse("registration:onsite_admin")),
+            "/accounts/login/?next={}".format(reverse("registration:onsite_admin")),
         )
 
     def test_onsite_admin_required(self):
@@ -366,9 +364,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     @patch("registration.mqtt.send_mqtt_message")
     def test_complete_cash_transaction(self, mock_send_mqtt_message):
         self.test_onsite_admin_cart_no_donations()
-        self.client.get(
-            reverse("registration:onsite_admin"), {"terminal": self.terminal.id}
-        )
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
         order = Order.objects.last()
         args = {
             "reference": order.reference,
@@ -389,9 +385,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     @patch("registration.payments.refresh_payment")
-    def test_complete_square_transaction(
-        self, mock_refresh_payment, mock_send_mqtt_message
-    ):
+    def test_complete_square_transaction(self, mock_refresh_payment, mock_send_mqtt_message):
         mock_refresh_payment.return_value = (True, None)
         self.test_onsite_admin_cart_no_donations()
         order = Order.objects.last()
@@ -423,9 +417,7 @@ class TestDrawers(OnsiteBaseTestCase):
     def setUp(self):
         super().setUp()
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        self.client.get(
-            reverse("registration:onsite_admin"), {"terminal": self.terminal.id}
-        )
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
 
     def test_drawerStatusClosed_no_transactions(self):
         response = self.client.get(reverse("registration:drawer_status"))
@@ -464,9 +456,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_open_drawer(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:open_drawer"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:open_drawer"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -477,9 +467,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_cash_deposit(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:cash_deposit"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:cash_deposit"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -490,9 +478,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_safe_drop(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:safe_drop"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:safe_drop"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -503,9 +489,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_cash_pickup(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:cash_pickup"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:cash_pickup"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -516,9 +500,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_close_drawer(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:close_drawer"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:close_drawer"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])

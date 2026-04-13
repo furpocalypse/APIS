@@ -1,5 +1,6 @@
+import { toaster } from "@kobalte/core/toast";
 import { Big } from "big.js";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KNOWN_SHORTCUTS, amountRequest, mutateThenToast } from "./utils";
 
@@ -9,8 +10,6 @@ import { KNOWN_SHORTCUTS, amountRequest, mutateThenToast } from "./utils";
 vi.mock("@kobalte/core/toast", () => ({
   toaster: { show: vi.fn() },
 }));
-
-import { toaster } from "@kobalte/core/toast";
 
 describe("KNOWN_SHORTCUTS", () => {
   it("has a non-empty, unique set of shortcut chords", () => {
@@ -52,9 +51,8 @@ describe("mutateThenToast", () => {
 });
 
 describe("amountRequest", () => {
-  const makeMutation = () => ({ mutate: vi.fn() }) as unknown as Parameters<
-    typeof amountRequest
-  >[0];
+  const makeMutation = () =>
+    ({ mutate: vi.fn() }) as unknown as Parameters<typeof amountRequest>[0];
 
   beforeEach(() => {
     vi.clearAllMocks();

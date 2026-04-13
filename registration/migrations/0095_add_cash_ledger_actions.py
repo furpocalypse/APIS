@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     replaces = [
         ("registration", "0095_drop_and_pickup"),
         ("registration", "0096_add_cash_adjustment"),

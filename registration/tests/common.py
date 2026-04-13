@@ -564,8 +564,7 @@ def paypal_apidata_one_partial_refund(amount, **overrides):
     capture_amount = overrides.get("capture_amount", "99.99")
     if Decimal(str(amount)) >= Decimal(str(capture_amount)):
         raise ValueError(
-            "partial refund amount %s must be < capture amount %s"
-            % (amount, capture_amount)
+            "partial refund amount %s must be < capture amount %s" % (amount, capture_amount)
         )
     refund_id = overrides.pop("refund_id", "TEST-PAYPAL-PARTIAL-REFUND")
     overrides["refunds"] = [make_refund_dict(id=refund_id, amount=amount)]
@@ -657,12 +656,8 @@ class PayPalOrdersTestCase(OrdersTestCase):
         self.order.save()
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="Test Badge"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="Test Badge")
         self.badge.save()
-        self.order_item = OrderItem(
-            order=self.order, badge=self.badge, enteredBy="Test"
-        )
+        self.order_item = OrderItem(order=self.order, badge=self.badge, enteredBy="Test")
         self.order_item.save()
         self.order.refresh_from_db()

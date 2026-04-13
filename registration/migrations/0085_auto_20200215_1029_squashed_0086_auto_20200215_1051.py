@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     replaces = [
         ("registration", "0085_auto_20200215_1029"),
         ("registration", "0086_auto_20200215_1051"),

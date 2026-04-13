@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { cleanMoneyAmount, createAutoPrintCheck } from "./utils";
 import type { BadgeCart } from "@admin/api";
+
+import { cleanMoneyAmount, createAutoPrintCheck } from "./utils";
 
 // ---------------------------------------------------------------------------
 // cleanMoneyAmount
@@ -62,27 +63,26 @@ describe("createAutoPrintCheck", () => {
   it("returns false when ids are not in the printable set", () => {
     const check = createAutoPrintCheck();
     check([], [makeBadge({ id: 1, abandoned: "Unpaid" })]);
-    expect(
-      check([], [makeBadge({ id: 1, abandoned: "Paid" })]),
-    ).toBe(false);
+    expect(check([], [makeBadge({ id: 1, abandoned: "Paid" })])).toBe(false);
   });
 
   it("returns true when a badge transitions to Paid and is printable", () => {
     const check = createAutoPrintCheck();
     check([1], [makeBadge({ id: 1, abandoned: "Unpaid" })]);
-    expect(
-      check([1], [makeBadge({ id: 1, abandoned: "Paid" })]),
-    ).toBe(true);
+    expect(check([1], [makeBadge({ id: 1, abandoned: "Paid" })])).toBe(true);
   });
 
   it("returns false when the badge list length changes", () => {
     const check = createAutoPrintCheck();
     check([1], [makeBadge({ id: 1, abandoned: "Unpaid" })]);
     expect(
-      check([1, 2], [
-        makeBadge({ id: 1, abandoned: "Paid" }),
-        makeBadge({ id: 2, abandoned: "Paid" }),
-      ]),
+      check(
+        [1, 2],
+        [
+          makeBadge({ id: 1, abandoned: "Paid" }),
+          makeBadge({ id: 2, abandoned: "Paid" }),
+        ],
+      ),
     ).toBe(false);
   });
 });

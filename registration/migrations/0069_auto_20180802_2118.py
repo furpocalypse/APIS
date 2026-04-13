@@ -8,7 +8,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0068_auto_20180802_2110"),
     ]
@@ -17,9 +16,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="cashdrawer",
             name="tendered",
-            field=models.DecimalField(
-                blank=True, decimal_places=2, default=0, max_digits=8
-            ),
+            field=models.DecimalField(blank=True, decimal_places=2, default=0, max_digits=8),
         ),
         migrations.AlterField(
             model_name="cashdrawer",

@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0106_add_badge_templates"),
     ]
@@ -13,6 +12,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="firebase",
             name="print_via_mqtt",
-            field=models.BooleanField(default=False, verbose_name='Print via MQTT'),
+            field=models.BooleanField(default=False, verbose_name="Print via MQTT"),
         ),
     ]

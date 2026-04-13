@@ -22,9 +22,8 @@ from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import clear_session, handler, logger
+from .common import clear_session, handler
 from .ordering import (
-    do_checkout,
     do_paypal_checkout,
     doZeroCheckout,
     get_discount_total,
@@ -97,9 +96,7 @@ def new_dealer(request):
     if event.dealerRegStart <= today <= event.dealerRegEnd:
         return render(request, "registration/dealer/dealer-form.html", context)
     elif event.dealerRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to our social media for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
         return render(request, "registration/dealer/dealer-closed.html", context)
     elif event.dealerRegEnd <= today:
         context["message"] = "has ended."
@@ -116,15 +113,10 @@ def info_dealer(request):
 
     dealer = Dealer.objects.get(id=dealerId)
     if dealer:
-        badge = Badge.objects.filter(
-            attendee=dealer.attendee, event=dealer.event
-        ).last()
+        badge = Badge.objects.filter(attendee=dealer.attendee, event=dealer.event).last()
         dealer_dict = model_to_dict(dealer)
         attendee_dict = model_to_dict(dealer.attendee)
-        if badge is not None:
-            badge_dict = model_to_dict(badge)
-        else:
-            badge_dict = {}
+        badge_dict = model_to_dict(badge) if badge is not None else {}
         table_dict = model_to_dict(dealer.tableSize)
 
         context = {
@@ -145,9 +137,7 @@ def find_dealer(request):
     token = post_data["token"]
 
     try:
-        dealer = Dealer.objects.get(
-            attendee__email__iexact=email, registrationToken=token
-        )
+        dealer = Dealer.objects.get(attendee__email__iexact=email, registrationToken=token)
     except Dealer.DoesNotExist:
         return common.abort(404, "No Dealer Found " + email)
 
@@ -164,9 +154,7 @@ def find_dealer_to_add_assistant_post(request):
         return common.abort(400, "Email or token missing from form data")
 
     try:
-        dealer = Dealer.objects.get(
-            attendee__email__iexact=email, registrationToken=token
-        )
+        dealer = Dealer.objects.get(attendee__email__iexact=email, registrationToken=token)
     except Dealer.DoesNotExist:
         return common.abort(404, "No dealer found")
 
@@ -186,9 +174,7 @@ def find_asst_dealer(request):
     token = postData["token"]
 
     try:
-        dealer_assistant = DealerAsst.objects.get(
-            email__iexact=email, registrationToken=token
-        )
+        dealer_assistant = DealerAsst.objects.get(email__iexact=email, registrationToken=token)
     except DealerAsst.DoesNotExist:
         return HttpResponseNotFound("No assistant dealer found")
 
@@ -285,9 +271,7 @@ def _apply_assistants_form(dealer, event, assistants_form):
     """
     for assistant in assistants_form:
         if assistant.get("id"):
-            dealer_asst_obj = DealerAsst.objects.get(
-                dealer=dealer, id=assistant.get("id")
-            )
+            dealer_asst_obj = DealerAsst.objects.get(dealer=dealer, id=assistant.get("id"))
         else:
             dealer_asst_obj = DealerAsst(
                 dealer=dealer,
@@ -316,9 +300,7 @@ def dealer_assistants_paypal_create(request):
     try:
         form_data = json.loads(request.body)
     except ValueError as e:
-        logger.warning(
-            f"Unable to decode JSON for dealer_assistants_paypal_create(): {e}"
-        )
+        logger.warning(f"Unable to decode JSON for dealer_assistants_paypal_create(): {e}")
         return common.abort(400, str(e))
 
     assistants_form = form_data.get("assistants") or []
@@ -521,10 +503,7 @@ def _build_dealer_translated_cart(
     event = dealer.event
     label = (
         dealer.businessName
-        or (
-            dealer.attendee
-            and f"{dealer.attendee.firstName} {dealer.attendee.lastName}"
-        )
+        or (dealer.attendee and f"{dealer.attendee.firstName} {dealer.attendee.lastName}")
         or "Dealer"
     )
     translated_cart: list[TranslatedCartItem] = [
@@ -535,9 +514,7 @@ def _build_dealer_translated_cart(
         },
     ]
     if porg > 0:
-        translated_cart.append(
-            {"name": f"Donation to {event}", "total": porg, "donation": True}
-        )
+        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
     if pcharity > 0:
         translated_cart.append(
             {
@@ -759,9 +736,7 @@ def addNewDealer(request):
         return JsonResponse(
             {
                 "success": False,
-                "message": "Your registration succeeded but we may have been unable to send you a confirmation email. If you have any questions, please contact {0}.".format(
-                    dealerEmail
-                ),
+                "message": f"Your registration succeeded but we may have been unable to send you a confirmation email. If you have any questions, please contact {dealerEmail}.",
             }
         )
     return JsonResponse({"success": True})
@@ -812,9 +787,7 @@ def get_dealer_total(orderItems, discount, dealer):
         for option in item.attendeeoptions_set.all():
             if option.option.optionExtraType == "int":
                 if option.optionValue:
-                    itemSubTotal += option.option.optionPrice * Decimal(
-                        option.optionValue
-                    )
+                    itemSubTotal += option.option.optionPrice * Decimal(option.optionValue)
             else:
                 itemSubTotal += option.option.optionPrice
     unpaidPartnerCount = dealer.getUnpaidPartnerCount()

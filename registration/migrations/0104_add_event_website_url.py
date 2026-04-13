@@ -5,15 +5,19 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('registration', '0103_auto_20241109_1543'),
+        ("registration", "0103_auto_20241109_1543"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='event',
-            name='websiteUrl',
-            field=models.CharField(blank=True, help_text="URL to the homepage for the convention's primary website.", max_length=500, verbose_name='Website URL'),
+            model_name="event",
+            name="websiteUrl",
+            field=models.CharField(
+                blank=True,
+                help_text="URL to the homepage for the convention's primary website.",
+                max_length=500,
+                verbose_name="Website URL",
+            ),
         ),
     ]

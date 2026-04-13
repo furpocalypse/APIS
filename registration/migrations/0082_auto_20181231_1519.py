@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0081_merge_20181231_1518"),
         ("registration", "0080_cart"),

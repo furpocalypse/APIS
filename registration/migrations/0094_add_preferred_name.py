@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0093_add_dealerasst_paid"),
     ]
@@ -13,9 +12,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="attendee",
             name="preferredName",
-            field=models.CharField(
-                blank=True, max_length=200, verbose_name="Preferred First Name"
-            ),
+            field=models.CharField(blank=True, max_length=200, verbose_name="Preferred First Name"),
         ),
         migrations.AlterField(
             model_name="attendee",

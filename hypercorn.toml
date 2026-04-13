@@ -1,0 +1,8 @@
+bind = ["unix:/tmp/apis.sock"]
+workers = 4
+worker_class = "asyncio"
+keep_alive_timeout = 65
+graceful_timeout = 30
+accesslog = "-"
+errorlog = "-"
+access_log_format = '%(h)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(L)ss'

@@ -16,9 +16,7 @@ class TestFirebaseAdmin(TestCase):
         # Create some users
         self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
         self.admin_user.save()
-        self.normal_user = User.objects.create_user(
-            "john", "john@thebeatles.com", "john"
-        )
+        self.normal_user = User.objects.create_user("john", "john@thebeatles.com", "john")
         self.normal_user.staff_member = False
         self.normal_user.save()
 
@@ -32,7 +30,7 @@ class TestFirebaseAdmin(TestCase):
         provision_dict = provision_json
 
         current_site = Site.objects.get_current()
-        endpoint = "https://{0}".format(current_site.domain)
+        endpoint = f"https://{current_site.domain}"
         token = mqtt.get_payment_token(firebase)
 
         expected_result = {
@@ -87,9 +85,7 @@ class TestFirebaseAdmin(TestCase):
         response = self.client.get(
             reverse("admin:firebase_provision", args=(self.terminal_blue.id,))
         )
-        self.assertNotIn(
-            b"You must be a superuser to access this URL", response.content
-        )
+        self.assertNotIn(b"You must be a superuser to access this URL", response.content)
         self.assertIn(
             b"<?xml version='1.0' encoding='UTF-8'?>\n<svg ",
             response.content,

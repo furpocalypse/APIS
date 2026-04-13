@@ -1,0 +1,126 @@
+name: Deploy to Azure Container Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment
+        required: true
+        type: choice
+        options: [stage, prod]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RG: apis-${{ github.event.inputs.environment }}
+  ACR_NAME: apis${{ github.event.inputs.environment }}acr
+  IMAGE_REPO: apis
+
+jobs:
+  deploy:
+    name: Build, push, migrate, roll
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    concurrency: deploy-${{ github.event.inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_REPO }}:${{ steps.tag.outputs.tag }}
+            ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_REPO }}:${{ github.event.inputs.environment }}
+          cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_REPO }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_REPO }}:buildcache,mode=max
+          build-args: |
+            SENTRY_RELEASE=${{ steps.tag.outputs.tag }}
+
+      - name: Deploy infrastructure (idempotent)
+        run: |
+          az deployment group create \
+            --resource-group "$AZURE_RG" \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters.${{ github.event.inputs.environment }}.json \
+            --parameters image="$ACR_NAME.azurecr.io/$IMAGE_REPO:${{ steps.tag.outputs.tag }}"
+
+      - name: Run database migrations (one-shot Job)
+        run: |
+          # Re-point the Job at the new image, then trigger and wait.
+          az containerapp job update \
+            -g "$AZURE_RG" \
+            -n "apis-${{ github.event.inputs.environment }}-migrate" \
+            --image "$ACR_NAME.azurecr.io/$IMAGE_REPO:${{ steps.tag.outputs.tag }}"
+          execution=$(az containerapp job start \
+            -g "$AZURE_RG" \
+            -n "apis-${{ github.event.inputs.environment }}-migrate" \
+            --query name -o tsv)
+          echo "Started migration execution: $execution"
+          # Poll until the execution finishes; fail the workflow if it doesn't succeed.
+          for i in $(seq 1 60); do
+            status=$(az containerapp job execution show \
+              -g "$AZURE_RG" \
+              --name "apis-${{ github.event.inputs.environment }}-migrate" \
+              --job-execution-name "$execution" \
+              --query properties.status -o tsv)
+            echo "[$i] migration status: $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Degraded|Cancelled) echo "Migration $status"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Migration timed out"
+          exit 1
+
+      - name: Roll web Container App
+        run: |
+          az containerapp update \
+            -g "$AZURE_RG" \
+            -n "apis-${{ github.event.inputs.environment }}-web" \
+            --image "$ACR_NAME.azurecr.io/$IMAGE_REPO:${{ steps.tag.outputs.tag }}"
+
+      - name: Roll worker Container App
+        run: |
+          az containerapp update \
+            -g "$AZURE_RG" \
+            -n "apis-${{ github.event.inputs.environment }}-worker" \
+            --image "$ACR_NAME.azurecr.io/$IMAGE_REPO:${{ steps.tag.outputs.tag }}"
+
+      - name: Smoke check
+        run: |
+          fqdn=$(az containerapp show \
+            -g "$AZURE_RG" \
+            -n "apis-${{ github.event.inputs.environment }}-web" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Hitting https://$fqdn/healthz"
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$fqdn/healthz" >/dev/null; then
+              echo "OK"; exit 0
+            fi
+            sleep 5
+          done
+          echo "/healthz never returned 200"
+          exit 1

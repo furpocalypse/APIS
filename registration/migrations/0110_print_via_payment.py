@@ -5,24 +5,33 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('registration', '0109_more_terminal_settings'),
+        ("registration", "0109_more_terminal_settings"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='firebase',
-            name='printer_url',
+            model_name="firebase",
+            name="printer_url",
         ),
         migrations.AddField(
-            model_name='firebase',
-            name='print_via_payment',
-            field=models.BooleanField(default=False, help_text='When MQTT printing is enabled, print via payment device instead of station.', verbose_name='Print via payment'),
+            model_name="firebase",
+            name="print_via_payment",
+            field=models.BooleanField(
+                default=False,
+                help_text="When MQTT printing is enabled, print via payment device instead of station.",
+                verbose_name="Print via payment",
+            ),
         ),
         migrations.AlterField(
-            model_name='firebase',
-            name='square_terminal_id',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='registration.squaredevice', verbose_name='Square Terminal'),
+            model_name="firebase",
+            name="square_terminal_id",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                to="registration.squaredevice",
+                verbose_name="Square Terminal",
+            ),
         ),
     ]

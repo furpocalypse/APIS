@@ -16,9 +16,7 @@ def _mark_order_email_sent(order_id):
 def _mark_order_email_failed(order_id, exc):
     from registration.models import Order
 
-    Order.objects.filter(id=order_id).update(
-        email_sent=False, email_error=str(exc)[:2000]
-    )
+    Order.objects.filter(id=order_id).update(email_sent=False, email_error=str(exc)[:2000])
 
 
 def _retries_exhausted(task):
@@ -82,9 +80,7 @@ def send_staff_registration_email_task(self, order_id):
     try:
         emails.send_staff_registration_email(order_id)
     except Exception as exc:
-        logger.exception(
-            "Failed to send staff registration email for order %s", order_id
-        )
+        logger.exception("Failed to send staff registration email for order %s", order_id)
         if _retries_exhausted(self):
             _mark_order_email_failed(order_id, exc)
             raise
@@ -122,9 +118,7 @@ def send_dealer_application_email_task(self, dealer_id):
     try:
         emails.send_dealer_application_email(dealer_id)
     except Exception as exc:
-        logger.exception(
-            "Failed to send dealer application email for dealer %s", dealer_id
-        )
+        logger.exception("Failed to send dealer application email for dealer %s", dealer_id)
         raise self.retry(exc=exc)
 
 
@@ -136,9 +130,7 @@ def send_dealer_assistant_form_email_task(self, dealer_id):
         dealer = Dealer.objects.get(id=dealer_id)
         emails.send_dealer_assistant_form_email(dealer)
     except Exception as exc:
-        logger.exception(
-            "Failed to send dealer assistant form email for dealer %s", dealer_id
-        )
+        logger.exception("Failed to send dealer assistant form email for dealer %s", dealer_id)
         raise self.retry(exc=exc)
 
 
@@ -147,9 +139,7 @@ def send_dealer_assistant_email_task(self, dealer_id, order_id=None):
     try:
         emails.send_dealer_assistant_email(dealer_id)
     except Exception as exc:
-        logger.exception(
-            "Failed to send dealer assistant email for dealer %s", dealer_id
-        )
+        logger.exception("Failed to send dealer assistant email for dealer %s", dealer_id)
         if _retries_exhausted(self):
             if order_id is not None:
                 _mark_order_email_failed(order_id, exc)
@@ -205,9 +195,7 @@ def send_dealer_approval_email_task(self, dealer_ids):
         dealers = Dealer.objects.filter(id__in=dealer_ids)
         emails.send_dealer_approval_email(dealers)
     except Exception as exc:
-        logger.exception(
-            "Failed to send dealer approval emails for dealers %s", dealer_ids
-        )
+        logger.exception("Failed to send dealer approval emails for dealers %s", dealer_ids)
         raise self.retry(exc=exc)
 
 
@@ -219,7 +207,5 @@ def send_chargeback_notice_email_task(self, order_id):
         order = Order.objects.get(id=order_id)
         emails.send_chargeback_notice_email(order)
     except Exception as exc:
-        logger.exception(
-            "Failed to send chargeback notice email for order %s", order_id
-        )
+        logger.exception("Failed to send chargeback notice email for order %s", order_id)
         raise self.retry(exc=exc)

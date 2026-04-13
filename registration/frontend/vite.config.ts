@@ -1,8 +1,7 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { devtools as tanstackDevtools } from "@tanstack/devtools-vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import devtools from "solid-devtools/vite";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";

@@ -1,0 +1,31 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	log {
+		output stdout
+		format console
+	}
+}
+
+:80 {
+	encode zstd gzip
+
+	@health path /healthz /readyz
+	reverse_proxy @health unix//tmp/apis.sock
+
+	handle_path /static/* {
+		root * /app/apis/static
+		file_server
+		header Cache-Control "public, max-age=31536000, immutable"
+	}
+
+	reverse_proxy unix//tmp/apis.sock {
+		header_up Host {host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		transport http {
+			read_timeout 65s
+		}
+	}
+}

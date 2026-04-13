@@ -1,6 +1,6 @@
-import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { defineConfig } from "vitest/config";
 
 // Solid needs its own plugin chain rather than `vite.config.ts`'s — the router
 // plugin runs a code-mod pass that fights jsdom, and the tanstack devtools

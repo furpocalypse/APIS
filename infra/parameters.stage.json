@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "stage" },
+    "image": { "value": "REPLACE_WITH_REGISTRY/apis:REPLACE_WITH_TAG" },
+    "customHostname": { "value": "" },
+    "webMinReplicas": { "value": 1 },
+    "webMaxReplicas": { "value": 10 },
+    "workerMinReplicas": { "value": 1 },
+    "workerMaxReplicas": { "value": 5 },
+    "postgresSku": { "value": "Standard_D2ds_v5" },
+    "postgresStorageGb": { "value": 64 },
+    "redisSku": { "value": "Standard" },
+    "redisCapacity": { "value": 1 },
+    "postgresAdminPassword": {
+      "reference": {
+        "keyVault": { "id": "/subscriptions/REPLACE_SUB/resourceGroups/REPLACE_RG/providers/Microsoft.KeyVault/vaults/apis-stage-kv" },
+        "secretName": "postgres-admin-password"
+      }
+    }
+  }
+}

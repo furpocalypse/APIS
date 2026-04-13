@@ -9,7 +9,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0113_remove_badge_printcount_printhistory"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

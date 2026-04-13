@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -134,9 +134,7 @@ class TestNewStaff(StaffTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"not yet open", response.content)
-        self.assertIn(
-            b'<a href="/registration/">Back to Main Page</a>', response.content
-        )
+        self.assertIn(b'<a href="/registration/">Back to Main Page</a>', response.content)
 
     @freeze_time(timezone.now() + timedelta(days=20))
     def test_new_staff_invite_good_closed_ended(self):
@@ -151,9 +149,7 @@ class TestNewStaff(StaffTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"has ended", response.content)
-        self.assertIn(
-            b'<a href="/registration/">Back to Main Page</a>', response.content
-        )
+        self.assertIn(b'<a href="/registration/">Back to Main Page</a>', response.content)
 
     @freeze_time("2000-01-01")
     def test_new_staff_invite_override(self):
@@ -280,7 +276,7 @@ class TestAddNewStaff(StaffTestCase):
             },
             "event": self.event.name,
         }
-        result = self.client.post(
+        self.client.post(
             reverse("registration:add_new_staff"),
             json.dumps(body),
             content_type="application/json",
@@ -289,25 +285,19 @@ class TestAddNewStaff(StaffTestCase):
 
 class TestReturningStaff(StaffTestCase):
     def test_returning_staff(self):
-        response = self.client.get(
-            reverse("registration:returning_staff", args=("foo",))
-        )
+        response = self.client.get(reverse("registration:returning_staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"not yet open", response.content)
 
     @freeze_time(timezone.now() - timedelta(days=20))
     def test_returning_staff_closed_upcoming(self):
-        response = self.client.get(
-            reverse("registration:returning_staff", args=("foo",))
-        )
+        response = self.client.get(reverse("registration:returning_staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"not yet open", response.content)
 
     @freeze_time(timezone.now() + timedelta(days=20))
     def test_returning_staff_closed_ended(self):
-        response = self.client.get(
-            reverse("registration:returning_staff", args=("foo",))
-        )
+        response = self.client.get(reverse("registration:returning_staff", args=("foo",)))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"has ended", response.content)
 

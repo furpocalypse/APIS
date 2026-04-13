@@ -17,6 +17,10 @@ Commands:
 	make dev-setup                  : Sets up a venv for local development
 	make pre-commit-setup           : Installs (or updates) pre-commit hooks
 
+	make lint                       : Check formatting + lint (ruff)
+	make lint-fix                   : Apply ruff auto-fixes + format in place
+	make typecheck                  : Type-check payment modules with ty
+
 	make test                       : Run Django + Playwright end-to-end suites (full regression gate)
 	make test-django                : Run only the Django test suite
 	make test-paypal                : Run only PayPal-tagged tests (uses uv)
@@ -35,6 +39,14 @@ Commands:
 
 	make services-up                : Start postgres + redis + gotenberg via docker compose and wait until ready
 	make services-down              : Stop those services (volumes preserved)
+
+	make loadtest                   : Run a 200-user / 2-min Locust load test against the local docker-compose stack
+	make loadtest-stampede          : Run the 10k-user stampede scenario; set TARGET_HOST=https://stage...
+
+	make infra-plan-stage           : az what-if for the stage Bicep deployment
+	make infra-apply-stage          : az deployment group create for stage
+	make infra-plan-prod            : az what-if for the production Bicep deployment
+	make infra-apply-prod           : az deployment group create for production
 
 endef
 export HELP
@@ -264,6 +276,17 @@ test-django: services-up test-check-migrations test-collectstatic
 # Playwright E2E GitHub Action) when you need end-to-end coverage.
 test: test-django test-frontend
 
+lint:
+	scripts/run-dev-tool.sh ruff check .
+	scripts/run-dev-tool.sh ruff format --check .
+
+lint-fix:
+	scripts/run-dev-tool.sh ruff check --fix .
+	scripts/run-dev-tool.sh ruff format .
+
+typecheck:
+	scripts/run-dev-tool.sh ty check
+
 test-paypal: test-check-migrations test-collectstatic
 	$(TEST_ENV) uv run python manage.py test --tag=paypal --tag=PayPal --verbosity 1
 
@@ -325,4 +348,72 @@ e2e-ui:
 	cd $(E2E_DIR) && npx playwright test --ui || true
 	bash $(E2E_DIR)/scripts/down.sh
 
-.PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django
+.PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django \
+        loadtest loadtest-stampede \
+        infra-plan-stage infra-apply-stage infra-plan-prod infra-apply-prod
+
+# --------------------------------------------------------------------------
+# Load testing (Locust)
+# --------------------------------------------------------------------------
+
+# 200 concurrent users for 2 min against the local docker-compose stack.
+# Spins up Locust + 4 workers, runs headless, tears them down on exit.
+loadtest:
+	docker compose --profile loadtest up -d --wait
+	docker compose --profile loadtest run --rm locust \
+		-f /loadtest/locustfile.py \
+		--host http://app:80 \
+		--users 200 --spawn-rate 20 --run-time 2m --headless \
+		--csv /loadtest/local || true
+	docker compose --profile loadtest stop locust locust-worker
+
+# 10,000 user stampede against a deployed environment. Set TARGET_HOST
+# externally, e.g.: make loadtest-stampede TARGET_HOST=https://stage.apis.example.com
+# Run this from an Azure VM in the same region — laptops bottleneck on NIC.
+TARGET_HOST ?= http://localhost:8080
+loadtest-stampede:
+	@command -v locust >/dev/null || { echo ">>> Install locust: pip install 'locust>=2.30'"; exit 1; }
+	locust -f loadtest/locustfile.py \
+		--host $(TARGET_HOST) \
+		--users 10000 --spawn-rate 200 --run-time 6m --headless \
+		--csv loadtest/stampede
+
+# --------------------------------------------------------------------------
+# Azure deployment
+# --------------------------------------------------------------------------
+#
+# Image tag (also used as SENTRY_RELEASE) comes from `git describe --tag --always`.
+# ACR_NAME and AZURE_RG follow the apis-{env} convention used by infra/main.bicep.
+
+AZURE_RG_STAGE ?= apis-stage
+AZURE_RG_PROD  ?= apis-prod
+ACR_NAME_STAGE ?= apisstageacr
+ACR_NAME_PROD  ?= apisprodacr
+
+infra-plan-stage:
+	az deployment group what-if \
+		--resource-group $(AZURE_RG_STAGE) \
+		--template-file infra/main.bicep \
+		--parameters infra/parameters.stage.json \
+		--parameters image=$(ACR_NAME_STAGE).azurecr.io/apis:$(TAG)
+
+infra-apply-stage:
+	az deployment group create \
+		--resource-group $(AZURE_RG_STAGE) \
+		--template-file infra/main.bicep \
+		--parameters infra/parameters.stage.json \
+		--parameters image=$(ACR_NAME_STAGE).azurecr.io/apis:$(TAG)
+
+infra-plan-prod:
+	az deployment group what-if \
+		--resource-group $(AZURE_RG_PROD) \
+		--template-file infra/main.bicep \
+		--parameters infra/parameters.prod.json \
+		--parameters image=$(ACR_NAME_PROD).azurecr.io/apis:$(TAG)
+
+infra-apply-prod:
+	az deployment group create \
+		--resource-group $(AZURE_RG_PROD) \
+		--template-file infra/main.bicep \
+		--parameters infra/parameters.prod.json \
+		--parameters image=$(ACR_NAME_PROD).azurecr.io/apis:$(TAG)

@@ -38,7 +38,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(
-            convert_u2f_totp_entries, reverse_code=lambda *_a, **_k: None
-        )
+        migrations.RunPython(convert_u2f_totp_entries, reverse_code=lambda *_a, **_k: None)
     ]

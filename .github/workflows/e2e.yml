@@ -63,11 +63,20 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
+      # Restore Playwright browsers. The matching save step is at the end
+      # of the job so the cache is written even when the Playwright suite
+      # fails — otherwise a red test run leaves no cache and the next run
+      # re-downloads ~450 MB of browsers. Keyed on package-lock.json so the
+      # cache invalidates only when the pinned @playwright/test version
+      # changes (package.json carries loose semver ranges).
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/playwright/package.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/playwright/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
 
       - name: Install Playwright + browsers
         working-directory: e2e/playwright
@@ -117,3 +126,12 @@ jobs:
           path: e2e/playwright/server.log
           if-no-files-found: ignore
           retention-days: 14
+
+      # Save the browser cache even when the suite fails. Skipped when the
+      # restore hit the exact key (steps.playwright-cache.outputs.cache-hit).
+      - name: Save Playwright browsers
+        if: always() && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/playwright/package-lock.json') }}

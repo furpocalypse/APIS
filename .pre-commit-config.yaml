@@ -4,11 +4,23 @@ default_language_version:
 exclude: venv/|static/
 
 repos:
-  - repo: https://github.com/pycqa/isort
-    rev: 8.0.0
+  # Ruff and ty are invoked through scripts/run-dev-tool.sh so the right
+  # runner is picked per-OS: nix-shell on NixOS (PyPI's dynamically-linked
+  # binaries don't run there without nix-ld), uv elsewhere.
+  - repo: local
     hooks:
-      - id: isort
-        name: isort (python)
+      - id: ruff
+        name: ruff
+        entry: scripts/run-dev-tool.sh ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: scripts/run-dev-tool.sh ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -20,7 +32,11 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
-  - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 26.1.0
+  - repo: local
     hooks:
-      - id: black
+      - id: ty
+        name: ty (type check payments modules)
+        entry: scripts/run-dev-tool.sh ty check
+        language: system
+        pass_filenames: false
+        files: ^registration/(payments|paypal_payments|paypal_webhook_handlers)\.py$

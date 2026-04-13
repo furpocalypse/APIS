@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0082_auto_20181231_1519"),
     ]
@@ -113,16 +112,12 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="order",
             name="billingAddress1",
-            field=models.CharField(
-                blank=True, max_length=200, verbose_name="Address 1"
-            ),
+            field=models.CharField(blank=True, max_length=200, verbose_name="Address 1"),
         ),
         migrations.AlterField(
             model_name="order",
             name="billingAddress2",
-            field=models.CharField(
-                blank=True, max_length=200, verbose_name="Address 2"
-            ),
+            field=models.CharField(blank=True, max_length=200, verbose_name="Address 2"),
         ),
         migrations.AlterField(
             model_name="order",
@@ -147,9 +142,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="order",
             name="billingPostal",
-            field=models.CharField(
-                blank=True, max_length=20, verbose_name="Postal Code"
-            ),
+            field=models.CharField(blank=True, max_length=20, verbose_name="Postal Code"),
         ),
         migrations.AlterField(
             model_name="order",
@@ -185,9 +178,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="order",
             name="createdDate",
-            field=models.DateTimeField(
-                auto_now_add=True, null=True, verbose_name="Created Date"
-            ),
+            field=models.DateTimeField(auto_now_add=True, null=True, verbose_name="Created Date"),
         ),
         migrations.AlterField(
             model_name="order",
@@ -208,9 +199,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="order",
             name="settledDate",
-            field=models.DateTimeField(
-                auto_now_add=True, null=True, verbose_name="Settled Date"
-            ),
+            field=models.DateTimeField(auto_now_add=True, null=True, verbose_name="Settled Date"),
         ),
         migrations.AlterField(
             model_name="order",

@@ -8,7 +8,6 @@ import registration.models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0059_attendee_aslrequest"),
     ]

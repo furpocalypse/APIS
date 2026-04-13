@@ -9,6 +9,8 @@ RUN npm install
 COPY ./registration/frontend/ /app/registration/frontend/
 RUN npm run build
 
+FROM caddy:2 AS caddy-bin
+
 FROM python:3.14-slim-trixie
 
 LABEL org.opencontainers.image.source="https://github.com/furthemore/APIS"
@@ -23,12 +25,11 @@ RUN useradd --shell /bin/bash --create-home --home /app --uid 1000 apis
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y git nginx supervisor && \
-    apt-get clean
+    apt-get install --no-install-recommends -y git supervisor ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /var/lib/nginx /app/log/nginx && \
-    chown -R apis /var/lib/nginx /app/log/nginx
-
+COPY --from=caddy-bin /usr/bin/caddy /usr/bin/caddy
 COPY --from=ghcr.io/astral-sh/uv:0.9.29 /uv /uvx /bin/
 
 USER apis

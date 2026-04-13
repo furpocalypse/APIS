@@ -6,5 +6,5 @@ from registration.models import Order
 
 @receiver(pre_save, sender=Order)
 def order_pre_save(sender, instance):
-    if instance.billingState == None:
+    if instance.billingState is None:
         instance.billingState = ""

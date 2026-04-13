@@ -1,6 +1,5 @@
 import time
 import uuid
-from typing import List
 from unittest.mock import Mock, patch
 
 from bs4 import BeautifulSoup
@@ -23,12 +22,12 @@ from registration.tests.common import *
 
 class TestOrderAdmin(TestCase):
     def setUp(self):
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
         self.normal_user = User.objects.create_user(
-            "john", "lennon@thebeatles.com", "john"  # NOSONAR
+            "john",
+            "lennon@thebeatles.com",
+            "john",  # NOSONAR
         )
         self.normal_user.staff_member = True
         self.normal_user.save()
@@ -286,7 +285,7 @@ class TestOrderAdmin(TestCase):
         form = OrderAdmin.RefundForm(data=form_data)
 
         self.assertTrue(form.is_valid())
-        response = self.client.post(
+        self.client.post(
             reverse("admin:order_refund", args=(self.cash_order.id,)),
             form_data,
             follow=True,
@@ -306,7 +305,7 @@ class TestOrderAdmin(TestCase):
         form = OrderAdmin.RefundForm(data=form_data)
 
         self.assertTrue(form.is_valid())
-        response = self.client.post(
+        self.client.post(
             reverse("admin:order_refund", args=(self.cash_order.id,)),
             form_data,
             follow=True,
@@ -359,9 +358,7 @@ class TestOrderAdmin(TestCase):
                 idempotency_key=str(uuid.uuid4()),
                 source_id=nonce,
                 autocomplete=autocomplete,
-                amount_money=MoneyParams(
-                    amount=10000, currency=settings.SQUARE_CURRENCY
-                ),
+                amount_money=MoneyParams(amount=10000, currency=settings.SQUARE_CURRENCY),
                 reference_id=order.reference,
                 billing_address=AddressParams(postal_code="94042"),
                 location_id=settings.SQUARE_LOCATION_ID,
@@ -388,7 +385,7 @@ class TestOrderAdmin(TestCase):
         form = OrderAdmin.RefundForm(data=form_data)
 
         self.assertTrue(form.is_valid())
-        response = self.client.post(
+        self.client.post(
             reverse("admin:order_refund", args=(order.id,)),
             form_data,
             follow=True,
@@ -471,9 +468,7 @@ class TestOrderAdmin(TestCase):
         )
         self.assertRedirects(
             response,
-            reverse(
-                "admin:registration_order_change", args=(self.square_order_bad_id.id,)
-            ),
+            reverse("admin:registration_order_change", args=(self.square_order_bad_id.id,)),
         )
         self.assertContains(
             response,
@@ -483,9 +478,7 @@ class TestOrderAdmin(TestCase):
 
         # Test against captured & failed transactions:
         order = self.create_square_order(nonce="cnon:card-nonce-declined")
-        response = self.client.get(
-            reverse("admin:order_refresh", args=(order.id,)), follow=True
-        )
+        response = self.client.get(reverse("admin:order_refresh", args=(order.id,)), follow=True)
         self.assertRedirects(
             response,
             reverse("admin:registration_order_change", args=(order.id,)),
@@ -494,9 +487,7 @@ class TestOrderAdmin(TestCase):
         self.assertEqual(order.status, order.FAILED)
 
         order = self.create_square_order(autocomplete=False)
-        response = self.client.get(
-            reverse("admin:order_refresh", args=(order.id,)), follow=True
-        )
+        response = self.client.get(reverse("admin:order_refresh", args=(order.id,)), follow=True)
         self.assertRedirects(
             response,
             reverse("admin:registration_order_change", args=(order.id,)),
@@ -520,16 +511,12 @@ class TestOrderAdmin(TestCase):
         )
 
         order = Order.objects.get(id=order.id)
-        response = self.client.get(
-            reverse("admin:order_refresh", args=(order.id,)), follow=True
-        )
+        response = self.client.get(reverse("admin:order_refresh", args=(order.id,)), follow=True)
         self.assertRedirects(
             response,
             reverse("admin:registration_order_change", args=(order.id,)),
         )
-        self.assertContains(
-            response, "Refreshed order information from Square successfully"
-        )
+        self.assertContains(response, "Refreshed order information from Square successfully")
         self.assertContains(response, "Square Data")
         self.assertContains(response, "$100")
         self.assertContains(response, "-$100")
@@ -538,9 +525,7 @@ class TestOrderAdmin(TestCase):
 
 class TestCashDrawerAdmin(TestCase):
     def setUp(self):
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
 
     def test_save_model(self):
@@ -551,9 +536,7 @@ class TestCashDrawerAdmin(TestCase):
             "action": Cashdrawer.TRANSACTION,
         }
 
-        response = self.client.post(
-            reverse("admin:registration_cashdrawer_add"), form_data, follow=True
-        )
+        self.client.post(reverse("admin:registration_cashdrawer_add"), form_data, follow=True)
         cash_drawer = Cashdrawer.objects.get(id=1)
         self.assertEqual(cash_drawer.tendered, 0)
         self.assertEqual(cash_drawer.user, self.admin_user)
@@ -563,17 +546,13 @@ class TestCashDrawerAdmin(TestCase):
 class TestOrderItemAdmin(OrdersTestCase):
     def setUp(self):
         super().setUp()
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
         self.order = Order(total="90.00", reference="FOOBAR")
         self.order.save()
         self.badge = Badge(event=self.event)
         self.badge.save()
-        self.order_item = OrderItem(
-            order=self.order, badge=self.badge, priceLevel=self.price_90
-        )
+        self.order_item = OrderItem(order=self.order, badge=self.badge, priceLevel=self.price_90)
         self.order_item.save()
 
     def test_save_model(self):
@@ -609,9 +588,7 @@ class TestDealerAdmin(AdminTestCase):
         self.dealer_admin = admin.DealerAdmin(model=Dealer, admin_site=self.admin_site)
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.dealer = Dealer(
-            attendee=self.attendee, businessName="Test business", approved=True
-        )
+        self.dealer = Dealer(attendee=self.attendee, businessName="Test business", approved=True)
         self.dealer.save()
 
     def test_get_email(self):
@@ -625,9 +602,7 @@ class TestDealerAdmin(AdminTestCase):
 class TestDealerAsstAdmin(TestDealerAdmin):
     def setUp(self):
         super().setUp()
-        self.asst_admin = admin.DealerAsstAdmin(
-            model=DealerAsst, admin_site=AdminSite()
-        )
+        self.asst_admin = admin.DealerAsstAdmin(model=DealerAsst, admin_site=AdminSite())
         self.assistant = DealerAsst(
             dealer=self.dealer,
             name="Lovely Assistant",
@@ -642,9 +617,7 @@ class TestDealerAsstAdmin(TestDealerAdmin):
         )
 
     def test_dealer_approved(self):
-        self.assertEqual(
-            self.asst_admin.dealer_approved(self.assistant), self.dealer.approved
-        )
+        self.assertEqual(self.asst_admin.dealer_approved(self.assistant), self.dealer.approved)
 
     def test_send_assistant_registration_email(self):
         pass
@@ -672,15 +645,11 @@ class TestStaffAdmin(AdminTestCase):
         self.staff_admin = admin.StaffAdmin(model=Staff, admin_site=self.admin_site)
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="DisStaff"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="DisStaff")
         self.badge.save()
         self.staff = Staff(attendee=self.attendee, event=self.event)
         self.staff.save()
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
 
     def test_checkin_staff(self):
@@ -722,7 +691,7 @@ class TestStaffAdmin(AdminTestCase):
         request = HttpRequest()
         request.POST.update(form_data)
 
-        response = self.staff_admin.copy_to_event(request, [self.staff])
+        self.staff_admin.copy_to_event(request, [self.staff])
         mock_message_user.assert_called_once()
         self.assertEqual(
             mock_message_user.call_args[0][1],
@@ -741,7 +710,7 @@ class TestStaffAdmin(AdminTestCase):
         request = HttpRequest()
         request.POST.update(form_data)
 
-        response = self.staff_admin.copy_to_event(request, [self.staff])
+        self.staff_admin.copy_to_event(request, [self.staff])
         mock_message_user.assert_called_once()
         self.assertEqual(
             mock_message_user.call_args[0][1],
@@ -755,9 +724,7 @@ class TestStaffInvite(TestCase):
         self.event = Event(**DEFAULT_EVENT_ARGS)
         self.event.save()
 
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
 
     @patch("registration.emails.send_email")
@@ -874,7 +841,7 @@ class TestAssignBadgeNumbers(OrdersTestCase):
 
     @patch("django.contrib.messages.warning")
     def test_assignment_works(self, mock_messages_warning: Mock):
-        badges: List[Badge] = []
+        badges: list[Badge] = []
 
         args = DEFAULT_EVENT_ARGS.copy()
         args["default"] = False

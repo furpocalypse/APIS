@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0062_auto_20180416_0020"),
     ]
@@ -50,8 +49,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="pricelevel",
             name="priceLevelOptions",
-            field=models.ManyToManyField(
-                blank=True, to="registration.PriceLevelOption"
-            ),
+            field=models.ManyToManyField(blank=True, to="registration.PriceLevelOption"),
         ),
     ]

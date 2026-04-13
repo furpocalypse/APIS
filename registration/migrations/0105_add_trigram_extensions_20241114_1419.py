@@ -5,11 +5,8 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('registration', '0104_add_event_website_url'),
+        ("registration", "0104_add_event_website_url"),
     ]
 
-    operations = [
-        TrigramExtension()
-    ]
+    operations = [TrigramExtension()]

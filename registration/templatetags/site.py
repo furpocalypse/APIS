@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import datetime
 import uuid
 
@@ -39,7 +38,7 @@ def bootstrap_message(msg):
 
 @register.simple_tag
 def js_date(date):
-    return "Date({0}, {1}, {2})".format(date.year, date.month - 1, date.day)
+    return f"Date({date.year}, {date.month - 1}, {date.day})"
 
 
 @register.simple_tag

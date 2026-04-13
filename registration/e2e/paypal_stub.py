@@ -11,7 +11,7 @@ from __future__ import annotations
 import itertools
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from paypalserversdk.http.api_response import ApiResponse
 from paypalserversdk.http.http_response import HttpResponse
@@ -26,7 +26,7 @@ _captures: dict[str, dict] = {}
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _next_order_id() -> str:
@@ -157,9 +157,7 @@ class _PaymentsStub:
             if capture is None:
                 amount_value = str(amount_obj.get("value") or "0.00")
             else:
-                amount_value = str(
-                    amount_obj.get("value") or capture.get("amount") or "0.00"
-                )
+                amount_value = str(amount_obj.get("value") or capture.get("amount") or "0.00")
 
         refund_id = _next_refund_id()
         refund = {

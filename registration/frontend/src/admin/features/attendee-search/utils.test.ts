@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BadgeResult } from "@admin/api";
+
 import { hasAnyExactMatch } from "./utils";
 
 type AttendeeShape = BadgeResult["attendee"];

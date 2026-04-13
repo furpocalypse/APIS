@@ -1,8 +1,4 @@
-import io
 import unittest
-import urllib.error
-import urllib.parse
-import urllib.request
 from unittest.mock import patch
 
 from django.conf import settings
@@ -124,34 +120,24 @@ class TestAttendeeCheckout(OrdersTestCase):
     # fail today because the underlying Square checkout code has been
     # removed.
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
+    @unittest.skip("Square checkout removed; rewrite against PayPal capture failure path")
     def test_bad_cvv(self):
         self.assert_square_error("cnon:card-nonce-rejected-cvv", "CVV_FAILURE")
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
+    @unittest.skip("Square checkout removed; rewrite against PayPal capture failure path")
     def test_bad_postalcode(self):
         self.assert_square_error(
             "cnon:card-nonce-rejected-postalcode", "ADDRESS_VERIFICATION_FAILURE"
         )
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
+    @unittest.skip("Square checkout removed; rewrite against PayPal capture failure path")
     def test_bad_expiration(self):
-        self.assert_square_error(
-            "cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION"
-        )
+        self.assert_square_error("cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION")
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
+    @unittest.skip("Square checkout removed; rewrite against PayPal capture failure path")
     def test_card_declined(self):
         self.assert_square_error("cnon:card-nonce-declined", "GENERIC_DECLINE")
 
@@ -570,7 +556,7 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.assertEqual(response.status_code, 200)
         cart = response.context["orderItems"]
         self.assertEqual(len(cart), 1)
-        total = response.context["total"]
+        response.context["total"]
 
         checkout_post_data = {
             "orgDonation": "10",
@@ -640,9 +626,7 @@ class TestAttendeeCheckout(OrdersTestCase):
         assistant.save()
         order_item = OrderItem(badge=badge, priceLevel=self.price_45, enteredBy="WEB")
         order_item.save()
-        order_item = OrderItem.objects.select_related("priceLevel").get(
-            id=order_item.id
-        )
+        order_item = OrderItem.objects.select_related("priceLevel").get(id=order_item.id)
         dealer.refresh_from_db()
         return dealer, badge, order_item, assistant
 
@@ -861,9 +845,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         dealer.save()
         order_item = OrderItem(badge=badge, priceLevel=self.price_45, enteredBy="WEB")
         order_item.save()
-        order_item = OrderItem.objects.select_related("priceLevel").get(
-            id=order_item.id
-        )
+        order_item = OrderItem.objects.select_related("priceLevel").get(id=order_item.id)
         dealer.refresh_from_db()
         return dealer, badge, order_item
 

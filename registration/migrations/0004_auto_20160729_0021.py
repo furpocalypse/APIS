@@ -11,7 +11,6 @@ PT = pytz.timezone("US/Pacific")
 
 
 class Migration(migrations.Migration):
-
     DEFAULT_ORDER_MODIFIED_DATE = datetime.now(tz=PT)
 
     dependencies = [
@@ -158,9 +157,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="order",
             name="modified",
-            field=models.DateTimeField(
-                auto_now=True, default=DEFAULT_ORDER_MODIFIED_DATE
-            ),
+            field=models.DateTimeField(auto_now=True, default=DEFAULT_ORDER_MODIFIED_DATE),
             preserve_default=False,
         ),
         migrations.AddField(

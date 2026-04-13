@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
+from collections.abc import Iterable, Iterator
 
 from registration.models import AttendeeOptions, OrderItem, PriceLevelOption
 
@@ -9,11 +9,11 @@ class CreateAttendeeOptions:
         if not self.order_item.priceLevel:
             raise ValueError("OrderItem must have PriceLevel")
 
-        self.price_level_options: Dict[int, PriceLevelOption] = {
+        self.price_level_options: dict[int, PriceLevelOption] = {
             plo.id: plo for plo in self.order_item.priceLevel.priceLevelOptions.all()
         }
 
-    def save_options(self, options: Iterable[dict]) -> List[AttendeeOptions]:
+    def save_options(self, options: Iterable[dict]) -> list[AttendeeOptions]:
         entries = []
 
         for option in options:
@@ -37,8 +37,8 @@ class CreateAttendeeOptions:
         return self._create_entries(entries)
 
     def add_missing_private_options(
-        self, current_options: List[AttendeeOptions]
-    ) -> List[AttendeeOptions]:
+        self, current_options: list[AttendeeOptions]
+    ) -> list[AttendeeOptions]:
         current_option_ids = {option.option_id for option in current_options}
 
         entries = []
@@ -51,9 +51,7 @@ class CreateAttendeeOptions:
 
         return self._create_entries(entries)
 
-    def get_option(
-        self, option_id: Union[str, int], only_public: bool = True
-    ) -> Optional[PriceLevelOption]:
+    def get_option(self, option_id: str | int, only_public: bool = True) -> PriceLevelOption | None:
         option = self.price_level_options.get(int(option_id))
         if option and (option.public or not only_public):
             return option
@@ -64,8 +62,8 @@ class CreateAttendeeOptions:
                 yield price_level_option
 
     def _create_entries(
-        self, entries: Iterable[Tuple[AttendeeOptions, str]]
-    ) -> List[AttendeeOptions]:
+        self, entries: Iterable[tuple[AttendeeOptions, str]]
+    ) -> list[AttendeeOptions]:
         attendee_options = (
             AttendeeOptions(orderItem=self.order_item, option=option, optionValue=value)
             for option, value in entries
@@ -81,6 +79,4 @@ class CreateAttendeeOptions:
             case "bool":
                 return "True"
             case extraType:
-                raise ValueError(
-                    f"Cannot get default value for {extraType} option type"
-                )
+                raise ValueError(f"Cannot get default value for {extraType} option type")

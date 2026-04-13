@@ -1,4 +1,18 @@
 services:
+  migrate:
+    image: ghcr.io/furthemore/apis:latest
+    build: .
+    command: migrate
+    volumes:
+      - ./registration:/app/registration
+      - ./fm_eventmanager/settings.py.docker:/app/fm_eventmanager/settings.py
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   app:
     image: ghcr.io/furthemore/apis:latest
     build: .
@@ -16,6 +30,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     image: ghcr.io/furthemore/apis:latest
@@ -32,6 +48,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   postgres:
     image: postgres:16
@@ -108,6 +126,28 @@ services:
       - /dev/disk/:/dev/disk:ro
     ports:
       - 8079:8080
+
+  locust:
+    profiles: [loadtest]
+    image: locustio/locust:2.32.4
+    ports:
+      - 8089:8089
+    volumes:
+      - ./loadtest:/loadtest:ro
+    command: -f /loadtest/locustfile.py --host http://app:80
+    depends_on:
+      - app
+
+  locust-worker:
+    profiles: [loadtest]
+    image: locustio/locust:2.32.4
+    volumes:
+      - ./loadtest:/loadtest:ro
+    command: -f /loadtest/locustfile.py --worker --master-host locust
+    depends_on:
+      - locust
+    deploy:
+      replicas: 4
 
 volumes:
   database-data:

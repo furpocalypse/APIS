@@ -24,7 +24,7 @@ dependencies = [
     "django-widget-tweaks~=1.5.1",
     "freezegun>=1.4.0",
     "gotenberg-client~=0.13.1",
-    "gunicorn>=25.0.1",
+    "hypercorn>=0.17.3",
     "influxdb~=5.3.1",
     "influxdb-client~=1.50.0",
     "markuppy>=1.14",
@@ -41,8 +41,6 @@ dependencies = [
     "sentry-sdk>=2.54.0",
     "soupsieve>=2.8.3",
     "squareup==44.0.1.20260122",
-    "uvicorn>=0.40.0",
-    "uvicorn-worker>=0.4.0",
 ]
 
 [tool.uv.sources]
@@ -56,6 +54,57 @@ dev = [
     "django-types>=0.22.0",
     "ruff>=0.15.4",
     "werkzeug>=3.1.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [
+    "registration/migrations",
+    "registration/frontend",
+    "static",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E203",
+    "E266",
+    "E501",
+    "F403",
+    "F405",
+    "UP031",
+    "B904",
+    "E722",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"registration/migrations/*" = ["E", "F", "I", "UP", "B", "SIM"]
+"**/tests/**" = ["B"]
+"**/test_*.py" = ["B"]
+
+[tool.ty.src]
+include = [
+    "registration/payments.py",
+    "registration/paypal_payments.py",
+    "registration/paypal_webhook_handlers.py",
+]
+
+[tool.ruff.lint.isort]
+known-third-party = [
+    "configobj",
+    "django",
+    "freezegun",
+    "idempotency_key",
+    "import_export",
+    "influxdb",
+    "jwt",
+    "nested_inline",
+    "paho",
+    "pygments",
+    "pytz",
+    "qrcode",
+    "square",
 ]
 
 [tool.coverage.run]

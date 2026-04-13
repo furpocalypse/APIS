@@ -2,7 +2,6 @@ import json
 import logging
 from decimal import Decimal
 from json import JSONDecodeError
-from typing import Optional
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -43,9 +42,7 @@ from .models import Order as ApisOrder
 from .payments import refund_cash_payment
 from .types import TranslatedCartItem
 
-PAYPAL_REQUESTS = Histogram(
-    "paypal_requests", "HTTP requests to Paypal API", ["endpoint"]
-)
+PAYPAL_REQUESTS = Histogram("paypal_requests", "HTTP requests to Paypal API", ["endpoint"])
 
 client = PaypalServersdkClient(
     client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
@@ -60,9 +57,7 @@ client = PaypalServersdkClient(
     logging_configuration=LoggingConfiguration(
         log_level=logging.INFO,
         request_logging_config=RequestLoggingConfiguration(log_body=settings.DEBUG),
-        response_logging_config=ResponseLoggingConfiguration(
-            log_headers=settings.DEBUG
-        ),
+        response_logging_config=ResponseLoggingConfiguration(log_headers=settings.DEBUG),
     ),
 )
 
@@ -75,8 +70,8 @@ payments_controller: PaymentsController = client.payments
 if getattr(settings, "E2E_MODE", False):
     from registration.e2e import paypal_stub as _paypal_stub
 
-    orders_controller = _paypal_stub.orders_controller
-    payments_controller = _paypal_stub.payments_controller
+    orders_controller = _paypal_stub.orders_controller  # ty:ignore[invalid-assignment]
+    payments_controller = _paypal_stub.payments_controller  # ty:ignore[invalid-assignment]
     logger.warning("E2E_MODE active: PayPal controllers replaced with in-process stub")
 
 
@@ -94,7 +89,7 @@ def format_errors(api_response: ApiResponse) -> str:
     ]
     logger.debug(errors)
     for error in errors:
-        error_string += error.issue
+        error_string += error.issue  # ty:ignore[unsupported-operator]
         if hasattr(error, "description"):
             error_string += f" - {error.description}"
         error_string += "\n"
@@ -126,9 +121,7 @@ def create_unpaid_paypal_order(
             name=item["name"],
             unit_amount=Money(currency_code="USD", value=str(item["total"])),
             quantity=1,
-            category=(
-                ItemCategory.DONATION if is_donation else ItemCategory.DIGITAL_GOODS
-            ),
+            category=(ItemCategory.DONATION if is_donation else ItemCategory.DIGITAL_GOODS),
         )
         if is_donation:
             donations.append(pp_item)
@@ -195,25 +188,19 @@ def create_unpaid_paypal_order(
     logger.debug("---- Begin PayPal Order Creation ----")
 
     api_response = orders_controller.create_order(
-        {
-            "body": OrderRequest(
-                intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units
-            )
-        }
+        {"body": OrderRequest(intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units)}
     )
     logger.debug("---- PayPal Order Creation complete ----")
     logger.debug(api_response)
     return api_response
 
 
-def capture_paypal_payment(
-    paypal_order_id: int | str, apis_order: ApisOrder
-) -> tuple[bool, dict]:
+def capture_paypal_payment(paypal_order_id: int | str, apis_order: ApisOrder) -> tuple[bool, dict]:
     body = {"id": paypal_order_id, "prefer": "return=representation"}
     logger.debug("---- Begin Capture ----")
     logger.debug(body)
 
-    api_response: ApiResponse = None
+    api_response: ApiResponse = None  # ty:ignore[invalid-assignment]
     try:
         with PAYPAL_REQUESTS.labels(endpoint="capture_order").time():
             api_response = orders_controller.capture_order(body)
@@ -245,9 +232,7 @@ def capture_paypal_payment(
 
     order_data: PayPalOrder = PayPalOrder.from_dictionary(apis_order.apiData)
 
-    if hasattr(order_data, "payment_source") and hasattr(
-        order_data.payment_source, "card"
-    ):
+    if hasattr(order_data, "payment_source") and hasattr(order_data.payment_source, "card"):
         apis_order.lastFour = order_data.payment_source.card.last_digits
 
     apis_order.status = ApisOrder.COMPLETED
@@ -259,9 +244,7 @@ def capture_paypal_payment(
     return True, api_response.body
 
 
-def refresh_payment(
-    order: ApisOrder, store_api_data: dict = None
-) -> tuple[bool, str | None]:
+def refresh_payment(order: ApisOrder, store_api_data: dict = None) -> tuple[bool, str | None]:  # ty:ignore[invalid-parameter-default]
     """
     Queries the payment gateway to update payment information on an order.
 
@@ -276,8 +259,8 @@ def refresh_payment(
     else:
         api_data = order.apiData
         if not api_data:
-            logger.warning("No order data yet for {0}".format(order.reference))
-            return False, "No order data yet for {0}".format(order.reference)
+            logger.warning(f"No order data yet for {order.reference}")
+            return False, f"No order data yet for {order.reference}"
     order_total = 0
 
     try:
@@ -307,9 +290,7 @@ def refresh_payment(
     except (AttributeError, IndexError, TypeError):
         return False, "Malformed payment data!"
 
-    if hasattr(fresh_order, "payment_source") and hasattr(
-        fresh_order.payment_source, "card"
-    ):
+    if hasattr(fresh_order, "payment_source") and hasattr(fresh_order.payment_source, "card"):
         order.lastFour = fresh_order.payment_source.card.last_digits
     else:
         order.lastFour = ""
@@ -318,16 +299,14 @@ def refresh_payment(
 
     message = None
     if getattr(fresh_order.purchase_units[0].payments, "refunds", None):
-        order.total = order_total
-        message = update_order_refund_data(
-            order, fresh_order.purchase_units[0].payments.refunds
-        )
+        order.total = order_total  # ty:ignore[invalid-assignment]
+        message = update_order_refund_data(order, fresh_order.purchase_units[0].payments.refunds)
 
     order.apiData = APIHelper.to_dictionary(fresh_order)
-    order.total = order_total
+    order.total = order_total  # ty:ignore[invalid-assignment]
     order.save()
 
-    return message == None, message
+    return message is None, message
 
 
 def update_order_payment_data(
@@ -351,14 +330,14 @@ def update_order_payment_data(
     status = payment.status
     if status == CaptureStatus.COMPLETED:
         order.status = ApisOrder.COMPLETED
-        order_total = float(payment.amount.value)
+        order_total = float(payment.amount.value)  # ty:ignore[invalid-assignment, unresolved-attribute]
     if status == CaptureStatus.DECLINED:
         order.status = ApisOrder.FAILED
     if status == CaptureStatus.PARTIALLY_REFUNDED:
         order.status = ApisOrder.REFUNDED
     if status == CaptureStatus.PENDING:
         order.status = ApisOrder.PENDING
-        order_total = float(payment.amount.value)
+        order_total = float(payment.amount.value)  # ty:ignore[invalid-assignment, unresolved-attribute]
     if status == CaptureStatus.REFUNDED:
         order.status = ApisOrder.REFUNDED
     if status == CaptureStatus.FAILED:
@@ -382,12 +361,12 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
     elif completed:
         order.status = ApisOrder.REFUNDED
 
-    if order.orgDonation + order.charityDonation > order.total:
-        order.orgDonation = 0
+    if order.orgDonation + order.charityDonation > order.total:  # ty:ignore[unsupported-operator]
+        order.orgDonation = 0  # ty:ignore[invalid-assignment]
         order.charityDonation = order.total
         message = "Refunded order has caused charity and organization donation amounts to reset."
         logger.warning(message)
-        order.notes += "\n{0}: {1}".format(timezone.now(), message)
+        order.notes += f"\n{timezone.now()}: {message}"
         return message
 
     return None
@@ -396,8 +375,8 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
 def refund_payment(
     order: ApisOrder,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str | None]:
     """
     Determines whether an order can be refunded, and processes the refund id so.
@@ -425,14 +404,14 @@ def refund_payment(
         return False, "Comped orders cannot be refunded."
     if order.billingType == ApisOrder.UNPAID:
         return False, "Unpaid orders cannot be refunded."
-    return False, "Not sure how to refund order type {0}!".format(order.billingType)
+    return False, f"Not sure how to refund order type {order.billingType}!"
 
 
 def refund_card_payment(
     order: ApisOrder,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str]:
     """Process a refund for a card-based payment.
 
@@ -444,16 +423,16 @@ def refund_card_payment(
     """
 
     api_data = PayPalOrder.from_dictionary(order.apiData)
-    if api_data == None:
-        return (False, "APIS Order %s has malformed or missing order data!" % order.id)
+    if api_data is None:
+        return (False, "APIS Order %s has malformed or missing order data!" % order.id)  # ty:ignore[unresolved-attribute]
     # All APIS-generated PayPal Orders will have one purchase unit and one
     # capture per purchase unit. Multiple captures only happen when sending
     # intent=AUTHORIZE to the Orders API and we don't do that.
-    capture: OrdersCapture = None
+    capture: OrdersCapture = None  # ty:ignore[invalid-assignment]
     try:
         capture = api_data.purchase_units[0].payments.captures[0]
     except (AttributeError, IndexError, TypeError):
-        return (False, "Can't find payment capture data for APIS Order %s!" % order.id)
+        return (False, "Can't find payment capture data for APIS Order %s!" % order.id)  # ty:ignore[unresolved-attribute]
     available = get_available_refund_amount(api_data)
     if available <= 0:
         return (
@@ -485,7 +464,7 @@ def refund_card_payment(
         with PAYPAL_REQUESTS.labels(endpoint="refund_payment").time():
             api_response = payments_controller.refund_captured_payment(args)
     except ApiException as e:
-        logger.error("Error in PayPal refund: {0}".format(e.reason))
+        logger.error(f"Error in PayPal refund: {e.reason}")
         api_response = e.response
 
     logger.debug("---- Refund Completed ----")
@@ -501,11 +480,9 @@ def refund_card_payment(
 
     refund: Refund = api_response.body
     status: RefundStatus = refund.status
-    stored_refunds: list[Refund] = getattr(
-        api_data.purchase_units[0].payments, "refunds", []
-    )
+    stored_refunds: list[Refund] = getattr(api_data.purchase_units[0].payments, "refunds", [])
     stored_refunds.append(refund)
-    setattr(api_data.purchase_units[0].payments, "refunds", stored_refunds)
+    api_data.purchase_units[0].payments.refunds = stored_refunds
     order.apiData = APIHelper.to_dictionary(api_data)
 
     if status == RefundStatus.COMPLETED:
@@ -514,10 +491,10 @@ def refund_card_payment(
         order.status = ApisOrder.REFUND_PENDING
 
     if status in (RefundStatus.COMPLETED, RefundStatus.PENDING):
-        order.total -= amount
+        order.total -= amount  # ty:ignore[unsupported-operator]
         # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
-            order.orgDonation = 0
+        if order.orgDonation + order.charityDonation > order.total:  # ty:ignore[unsupported-operator]
+            order.orgDonation = 0  # ty:ignore[invalid-assignment]
             order.charityDonation = order.total
             logger.warning(
                 "Refunded order has caused charity and organization donation amounts to reset."
@@ -541,13 +518,13 @@ def get_available_refund_amount(order: PayPalOrder) -> float:
     :param order: A PayPal Order model.
     :return: The total amount of money available
     """
-    unit: PurchaseUnit = None
-    capture: OrdersCapture = None
-    refund: Refund = None
+    unit: PurchaseUnit = None  # ty:ignore[invalid-assignment]
+    capture: OrdersCapture = None  # ty:ignore[invalid-assignment]
+    refund: Refund = None  # ty:ignore[invalid-assignment]
     total_captured: float = 0
     total_refunded: float = 0
-    for unit in order.purchase_units:
-        for capture in unit.payments.captures:
+    for unit in order.purchase_units:  # ty:ignore[invalid-assignment]
+        for capture in unit.payments.captures:  # ty:ignore[unresolved-attribute]
             if capture.status in [
                 CaptureStatus.COMPLETED,
                 CaptureStatus.PARTIALLY_REFUNDED,

@@ -76,16 +76,12 @@ class FirebaseAdmin(admin.ModelAdmin):
     form = FirebaseForm
 
     def render_change_form(self, request, context, *args, **kwargs):
-        return super(FirebaseAdmin, self).render_change_form(
-            request, context, *args, **kwargs
-        )
+        return super().render_change_form(request, context, *args, **kwargs)
 
     def get_urls(self):
-        urls = super(FirebaseAdmin, self).get_urls()
+        urls = super().get_urls()
         my_urls = [
-            re_path(
-                r"^(.+)/provision/$", self.provision_view, name="firebase_provision"
-            ),
+            re_path(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
         ]
         return my_urls + urls
 
@@ -99,7 +95,7 @@ class FirebaseAdmin(admin.ModelAdmin):
     @staticmethod
     def get_provisioning(firebase):
         current_site = Site.objects.get_current()
-        endpoint = "https://{0}".format(current_site.domain)
+        endpoint = f"https://{current_site.domain}"
         token = mqtt.get_payment_token(firebase)
 
         return {
@@ -158,9 +154,7 @@ def send_staff_token_email(modeladmin, request, queryset):
         token.sent = True
         token.save()
     if queryset.count() > 1:
-        messages.success(
-            request, "Successfully sent emails to %d staff members" % queryset.count()
-        )
+        messages.success(request, "Successfully sent emails to %d staff members" % queryset.count())
     else:
         messages.success(request, "Successfully sent email to %s" % queryset[0].email)
 
@@ -183,9 +177,7 @@ class StaffInviteAdmin(admin.ModelAdmin):
 
 @admin.action(description="Send approval email and payment instructions")
 def send_approval_email(modeladmin, request, queryset):
-    tasks.send_dealer_approval_email_task.delay(
-        list(queryset.values_list("id", flat=True))
-    )
+    tasks.send_dealer_approval_email_task.delay(list(queryset.values_list("id", flat=True)))
     queryset.update(emailed=True)
     if queryset.count() > 1:
         messages.success(request, "Successfully emailed %d dealers" % queryset.count())
@@ -279,9 +271,7 @@ def send_assistant_registration_email(modeladmin, request, queryset):
             "Successfully sent emails to %d dealer assistants" % queryset.count(),
         )
     else:
-        messages.success(
-            request, "Successfully sent email to %s" % queryset[0].attendee
-        )
+        messages.success(request, "Successfully sent email to %s" % queryset[0].attendee)
 
 
 @admin.register(DealerAsst)
@@ -320,10 +310,7 @@ class DealerAsstAdmin(ImportExportModelAdmin):
         boolean=True,
     )
     def asst_registered(self, obj):
-        if obj.attendee is not None:
-            return True
-        else:
-            return False
+        return obj.attendee is not None
 
 
 class DealerResource(resources.ModelResource):
@@ -768,9 +755,7 @@ class StaffAdmin(ImportExportModelAdmin):
                     staff_copy.save()
                     count += 1
 
-                self.message_user(
-                    request, "Successfully copied %d staff to %s." % (count, event)
-                )
+                self.message_user(request, "Successfully copied %d staff to %s." % (count, event))
                 return HttpResponseRedirect(request.get_full_path())
 
         if not form:
@@ -778,9 +763,7 @@ class StaffAdmin(ImportExportModelAdmin):
                 initial={"_selected_action": queryset.values_list("pk", flat=True)}
             )
 
-        return render(
-            request, "admin/copy_event.html", {"staff": queryset, "form": form}
-        )
+        return render(request, "admin/copy_event.html", {"staff": queryset, "form": form})
 
 
 ########################################################
@@ -804,13 +787,9 @@ def make_staff(modeladmin, request, queryset):
                 f"{queryset.count() - skipped} attendees added to staff ({skipped} ommited that were already on staff for {event})",
             )
         else:
-            messages.success(
-                request, f"{queryset.count()} attendees added to staff for {event}"
-            )
+            messages.success(request, f"{queryset.count()} attendees added to staff for {event}")
     else:
-        messages.success(
-            request, f"Successfully added {queryset[0]} to staff for {event}"
-        )
+        messages.success(request, f"Successfully added {queryset[0]} to staff for {event}")
 
 
 @admin.action(description="Send upgrade info email")
@@ -818,9 +797,7 @@ def send_upgrade_form_email(modeladmin, request, queryset):
     for badge in queryset:
         tasks.send_upgrade_instructions_task.delay(badge.id)
     if queryset.count() > 1:
-        messages.success(
-            request, "Successfully sent emails to %d attendees" % queryset.count()
-        )
+        messages.success(request, "Successfully sent emails to %d attendees" % queryset.count())
     else:
         messages.success(request, "Successfully sent email to %s" % queryset[0])
 
@@ -831,9 +808,7 @@ def resend_confirmation_email(modeladmin, request, queryset):
         order = badge.getOrder()
         tasks.send_registration_email_task.delay(order.id, badge.attendee.email, False)
     if queryset.count() > 1:
-        messages.success(
-            request, "Successfully sent emails to %d attendees" % queryset.count()
-        )
+        messages.success(request, "Successfully sent emails to %d attendees" % queryset.count())
     else:
         messages.success(request, "Successfully sent email to %s" % queryset[0])
 
@@ -851,9 +826,9 @@ def assign_badge_numbers(modeladmin, request, queryset: "QuerySet[Badge]"):
     if highest is None:
         highest = 0
 
-    reserved_numbers = ReservedBadgeNumbers.objects.filter(
-        badgeNumber__gt=highest
-    ).values("badgeNumber")
+    reserved_numbers = ReservedBadgeNumbers.objects.filter(badgeNumber__gt=highest).values(
+        "badgeNumber"
+    )
     reserved_numbers = {num["badgeNumber"] for num in reserved_numbers}
 
     for badge in queryset.order_by("registeredDate"):
@@ -915,7 +890,7 @@ def print_badges(modeladmin, request, queryset):
 
     response = HttpResponseRedirect(reverse("registration:print"))
     url_params = {"file": pdf_path, "next": request.get_full_path()}
-    response["Location"] += "?{}".format(urlencode(url_params))
+    response["Location"] += f"?{urlencode(url_params)}"
     return response
 
 
@@ -1113,9 +1088,7 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
         abandoned = [x for x in Badge.objects.filter() if x.abandoned == "Abandoned"]
         for obj in abandoned:
             obj.delete()
-        self.message_user(
-            request, "Removed {0} abandoned orders.".format(len(abandoned))
-        )
+        self.message_user(request, f"Removed {len(abandoned)} abandoned orders.")
 
 
 @admin.register(Attendee)
@@ -1161,9 +1134,7 @@ admin.site.register(AttendeeOptions)
 
 @admin.action(description="Attach missing private price level options")
 def attach_private_level_options(modeladmin, request, queryset: QuerySet[OrderItem]):
-    queryset = queryset.prefetch_related(
-        "priceLevel__priceLevelOptions", "attendeeoptions_set"
-    )
+    queryset = queryset.prefetch_related("priceLevel__priceLevelOptions", "attendeeoptions_set")
 
     total = 0
 
@@ -1248,7 +1219,6 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
     def render_change_form(self, request, context, *args, **kwargs):
         obj = kwargs.get("obj")
         if obj and obj.billingType == Order.CREDIT:
-
             context["api_data"] = obj.apiData
             if not obj.apiData:
                 messages.warning(
@@ -1264,9 +1234,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                         request, "This transaction has been disputed by the cardholder"
                     )
 
-        return super(OrderAdmin, self).render_change_form(
-            request, context, *args, **kwargs
-        )
+        return super().render_change_form(request, context, *args, **kwargs)
 
     class RefundForm(forms.Form):
         amount = forms.DecimalField(
@@ -1282,17 +1250,19 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        if not request.user.has_perm("registration.issue_refund"):
-            if form.data["status"] in (Order.REFUNDED, Order.REFUND_PENDING):
-                status = Order.PENDING
-                if obj.id:
-                    status = Order.objects.get(id=obj.id).status
-                messages.error(
-                    request,
-                    "You do not have permission to issue refunds. "
-                    "The order status has been reverted to {0}".format(status),
-                )
-                obj.status = status
+        if not request.user.has_perm("registration.issue_refund") and form.data["status"] in (
+            Order.REFUNDED,
+            Order.REFUND_PENDING,
+        ):
+            status = Order.PENDING
+            if obj.id:
+                status = Order.objects.get(id=obj.id).status
+            messages.error(
+                request,
+                "You do not have permission to issue refunds. "
+                f"The order status has been reverted to {status}",
+            )
+            obj.status = status
         obj.save()
 
     def refresh_view(self, request, order_id, extra_context=None):
@@ -1304,31 +1274,23 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         except ValueError as e:
             messages.error(
                 request,
-                "There was a problem while parsing the API data for this order: {0}".format(
-                    e
-                ),
+                f"There was a problem while parsing the API data for this order: {e}",
             )
             return HttpResponseRedirect(
                 reverse("admin:registration_order_change", args=(order_id,))
             )
 
         if success:
-            messages.success(
-                request, "Refreshed order information from Square successfully"
-            )
+            messages.success(request, "Refreshed order information from Square successfully")
         else:
             messages.error(
                 request,
-                "There was a problem while refreshing information about this order: {0}".format(
-                    message
-                ),
+                f"There was a problem while refreshing information about this order: {message}",
             )
-        return HttpResponseRedirect(
-            reverse("admin:registration_order_change", args=(order_id,))
-        )
+        return HttpResponseRedirect(reverse("admin:registration_order_change", args=(order_id,)))
 
     def get_urls(self):
-        urls = super(OrderAdmin, self).get_urls()
+        urls = super().get_urls()
         my_urls = [
             re_path(r"^(.+)/refund/$", self.refund_view, name="order_refund"),
             re_path(r"^(.+)/refresh/$", self.refresh_view, name="order_refresh"),
@@ -1361,22 +1323,18 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                 if amount > order.total:
                     messages.error(
                         request,
-                        "Refund amount (${0}) cannot exceed order total (${1})".format(
-                            amount, order.total
-                        ),
+                        f"Refund amount (${amount}) cannot exceed order total (${order.total})",
                     )
                 else:
                     if reason is None:
-                        reason = "[{0}]".format(request.user)
+                        reason = f"[{request.user}]"
                     else:
-                        reason += " [{0}]".format(request.user)
+                        reason += f" [{request.user}]"
                     result, msg = payments.refund_payment(order, amount, reason)
                     if result:
                         messages.success(
                             request,
-                            "{0} - refund amount: {1} (reason: {2})".format(
-                                msg, amount, reason
-                            ),
+                            f"{msg} - refund amount: {amount} (reason: {reason})",
                         )
                     else:
                         messages.error(request, msg)
@@ -1484,8 +1442,8 @@ class PrettyJSONWidget(widgets.Textarea):
             self.attrs["cols"] = min(max(max(row_lengths) + 2, 40), 120)
             return value
         except Exception as e:
-            logger.warning("Error while formatting JSON: {}".format(e))
-            return super(PrettyJSONWidget, self).format_value(value)
+            logger.warning(f"Error while formatting JSON: {e}")
+            return super().format_value(value)
 
 
 def json_highlight_format_value(value):
@@ -1591,7 +1549,7 @@ class SquareDeviceAdmin(admin.ModelAdmin):
         return False
 
     def get_urls(self):
-        urls = super(SquareDeviceAdmin, self).get_urls()
+        urls = super().get_urls()
         my_urls = [
             path(r"sync/", self.sync_view),
         ]

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "prod" },
+    "image": { "value": "REPLACE_WITH_REGISTRY/apis:REPLACE_WITH_TAG" },
+    "customHostname": { "value": "registration.example.com" },
+    "webMinReplicas": { "value": 2 },
+    "webMaxReplicas": { "value": 30 },
+    "workerMinReplicas": { "value": 1 },
+    "workerMaxReplicas": { "value": 20 },
+    "postgresSku": { "value": "Standard_D4ds_v5" },
+    "postgresStorageGb": { "value": 128 },
+    "redisSku": { "value": "Standard" },
+    "redisCapacity": { "value": 2 },
+    "postgresAdminPassword": {
+      "reference": {
+        "keyVault": { "id": "/subscriptions/REPLACE_SUB/resourceGroups/REPLACE_RG/providers/Microsoft.KeyVault/vaults/apis-prod-kv" },
+        "secretName": "postgres-admin-password"
+      }
+    }
+  }
+}

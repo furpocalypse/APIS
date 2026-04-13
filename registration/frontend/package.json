@@ -7,7 +7,11 @@
     "build": "tsc -b && vite build",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
     "@fortawesome/free-solid-svg-icons": "^7.2.0",

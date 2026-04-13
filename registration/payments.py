@@ -1,7 +1,6 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional
 
 from django.conf import settings
 from django.db.utils import NotSupportedError
@@ -34,9 +33,7 @@ from . import tasks
 from .models import *
 from .types import BillingData
 
-SQUARE_REQUESTS = Histogram(
-    "square_requests", "HTTP requests to Square API", ["endpoint"]
-)
+SQUARE_REQUESTS = Histogram("square_requests", "HTTP requests to Square API", ["endpoint"])
 
 logger = logging.getLogger("registration.payments")
 
@@ -47,7 +44,7 @@ if settings.SQUARE_ENVIRONMENT == "sandbox":
 client = Square(token=settings.SQUARE_ACCESS_TOKEN, environment=environment)
 
 
-def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
+def get_idempotency_key(request: HttpRequest | None = None) -> str:
     """
     Gets the idempotency key from a request, generating one if none exists.
 
@@ -63,7 +60,7 @@ def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
 
 
 def charge_payment(
-    order: Order, cc_data: BillingData, request: Optional[HttpRequest] = None
+    order: Order, cc_data: BillingData, request: HttpRequest | None = None
 ) -> tuple[bool, dict]:
     """
     Submits payment data on an order to the payment processor.
@@ -132,11 +129,7 @@ def charge_payment(
     # Square still returns data for failed payments
     order.apiData = api_response.model_dump()
 
-    if (
-        api_response.payment
-        and api_response.payment.id
-        and api_response.payment.status != "FAILED"
-    ):
+    if api_response.payment and api_response.payment.id and api_response.payment.status != "FAILED":
         if api_response.payment.card_details and api_response.payment.card_details.card:
             order.lastFour = str(api_response.payment.card_details.card.last4)
 
@@ -144,7 +137,7 @@ def charge_payment(
         order.status = Order.COMPLETED
         order.notes = "Square: #" + api_response.payment.id[:4]
         order.save()
-        return True, None
+        return True, None  # ty:ignore[invalid-return-type]
     else:
         logger.debug(api_response.errors)
         logger.debug("---- Transaction Failed ----")
@@ -153,7 +146,7 @@ def charge_payment(
         return False, {"errors": [e.model_dump() for e in api_response.errors or []]}
 
 
-def format_errors(errors: List[Error]) -> str:
+def format_errors(errors: list[Error]) -> str:
     """
     Formats a list of Square API errors to lines of text.
 
@@ -187,8 +180,8 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
     else:
         api_data = order.apiData
         if not api_data:
-            logger.warning("No order data yet for {0}".format(order.reference))
-            return False, "No order data yet for {0}".format(order.reference)
+            logger.warning(f"No order data yet for {order.reference}")
+            return False, f"No order data yet for {order.reference}"
     order_total = 0
 
     try:
@@ -205,9 +198,7 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
 
     if payments_response.payment:
         api_data["payment"] = payments_response.payment.model_dump()
-        order_total = update_order_payment_data(
-            order, order_total, payments_response.payment
-        )
+        order_total = update_order_payment_data(order, order_total, payments_response.payment)
     else:
         return False, format_errors(payments_response.errors or [])
 
@@ -254,12 +245,12 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
     order.apiData = api_data
     order.total = Decimal(order_total) / 100
 
-    if order.orgDonation + order.charityDonation > order.total:
-        order.orgDonation = 0
+    if order.orgDonation + order.charityDonation > order.total:  # ty:ignore[unsupported-operator]
+        order.orgDonation = 0  # ty:ignore[invalid-assignment]
         order.charityDonation = order.total
         message = "Refunded order has caused charity and organization donation amounts to reset."
         logger.warning(message)
-        order.notes += "\n{0}: {1}".format(timezone.now(), message)
+        order.notes += f"\n{timezone.now()}: {message}"
         order.save()
         return False, message
 
@@ -285,20 +276,20 @@ def update_order_payment_data(order: Order, order_total: int, payment: Payment) 
              will be the amount inside of the ``payment`` data.
     """
     try:
-        order.lastFour = payment.card_details.card.last4
+        order.lastFour = payment.card_details.card.last4  # ty:ignore[invalid-assignment, unresolved-attribute]
     except KeyError:
         logger.warning("Unable to update last_4 details for order")
     status = payment.status
     if status == "COMPLETED":
         order.status = Order.COMPLETED
-        order_total = payment.total_money.amount
+        order_total = payment.total_money.amount  # ty:ignore[invalid-assignment, unresolved-attribute]
     elif status == "FAILED":
         order.status = Order.FAILED
     elif status == "APPROVED":
         # Payment was only captured, approved, and never settled (not usually what we do)
         # https://developer.squareup.com/docs/payments-api/overview#payments-api-workflow
         order.status = Order.CAPTURED
-        order_total = payment.total_money.amount
+        order_total = payment.total_money.amount  # ty:ignore[invalid-assignment, unresolved-attribute]
     elif status == "CANCELED":
         order.status = Order.FAILED
     return order_total
@@ -307,8 +298,8 @@ def update_order_payment_data(order: Order, order_total: int, payment: Payment) 
 def refund_payment(
     order: Order,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str | None]:
     """
     Determines whether an order can be refunded, and processes the refund id so.
@@ -332,11 +323,11 @@ def refund_payment(
         return False, "Comped orders cannot be refunded."
     if order.billingType == Order.UNPAID:
         return False, "Unpaid orders cannot be refunded."
-    return False, "Not sure how to refund order type {0}!".format(order.billingType)
+    return False, f"Not sure how to refund order type {order.billingType}!"
 
 
 def refund_cash_payment(
-    order: Order, amount: float, reason: Optional[str] = None
+    order: Order, amount: float, reason: str | None = None
 ) -> tuple[bool, None]:
     """
     Deducts the ``amount`` from the ``order``'s total and logs a `Cashdrawer`
@@ -349,10 +340,10 @@ def refund_cash_payment(
     """
     # Change order status
     order.status = Order.REFUNDED
-    order.notes += "\nRefund issued {0}: {1}".format(timezone.now(), reason)
+    order.notes += f"\nRefund issued {timezone.now()}: {reason}"
 
     # Reset order total
-    order.total -= amount
+    order.total -= amount  # ty:ignore[unsupported-operator]
     order.save()
 
     # Record cashdrawer withdraw
@@ -364,8 +355,8 @@ def refund_cash_payment(
 def refund_card_payment(
     order: Order,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str]:
     """Process a refund for a card-based payment.
 
@@ -380,7 +371,7 @@ def refund_card_payment(
     :return: A tuple of a boolean success status and an accompanying message.
     """
     api_data = order.apiData
-    payment_id = api_data["payment"]["id"]
+    payment_id = api_data["payment"]["id"]  # ty:ignore[not-subscriptable]
     converted_amount = int(amount * 100)
 
     try:
@@ -395,19 +386,19 @@ def refund_card_payment(
             )
     except ApiError as e:
         errors = format_errors(e.errors)
-        logger.error("Error in square refund: {0}".format(errors))
+        logger.error(f"Error in square refund: {errors}")
         return False, errors
 
     if api_response.errors:
         errors = format_errors(api_response.errors)
-        logger.error("Error in square refund: {0}".format(errors))
+        logger.error(f"Error in square refund: {errors}")
         return False, errors
 
-    stored_refunds = api_data.get("refunds", [])
+    stored_refunds = api_data.get("refunds", [])  # ty:ignore[unresolved-attribute]
 
     status = api_response.refund.status
     stored_refunds.append(api_response.refund.model_dump())
-    api_data["refunds"] = stored_refunds
+    api_data["refunds"] = stored_refunds  # ty:ignore[invalid-assignment]
     order.apiData = api_data
 
     if status == "COMPLETED":
@@ -416,10 +407,10 @@ def refund_card_payment(
         order.status = Order.REFUND_PENDING
 
     if status in ("COMPLETED", "PENDING"):
-        order.total -= amount
+        order.total -= amount  # ty:ignore[unsupported-operator]
         # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
-            order.orgDonation = 0
+        if order.orgDonation + order.charityDonation > order.total:  # ty:ignore[unsupported-operator]
+            order.orgDonation = 0  # ty:ignore[invalid-assignment]
             order.charityDonation = order.total
             logger.warning(
                 "Refunded order has caused charity and organization donation amounts to reset."
@@ -430,7 +421,7 @@ def refund_card_payment(
         order.status = Order.COMPLETED
 
     order.save()
-    message = "Square refund has been submitted and is {0}".format(status)
+    message = f"Square refund has been submitted and is {status}"
     logger.debug(message)
     return True, message
 
@@ -442,9 +433,7 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
         order = Order.objects.get(apiData__refunds__contains=[{"id": refund_id}])
         # The above is not supported on all DB backends.
     except Order.DoesNotExist:
-        logger.warning(
-            f"Got refund.updated webhook update for a refund id not found: {refund_id}"
-        )
+        logger.warning(f"Got refund.updated webhook update for a refund id not found: {refund_id}")
         return False
     except NotSupportedError:
         orders = [
@@ -598,7 +587,7 @@ def process_webhook_dispute_created_or_updated(
     return True
 
 
-def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
+def create_square_order(terminal_name: str, data: dict) -> str | None:
     """Creates an order in Square.
 
     :param terminal_name: The name of the terminal device from which the order
@@ -641,9 +630,7 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
                     )
                 )
 
-            badge_applied_discounts.append(
-                OrderLineItemAppliedDiscountParams(discount_uid=uid)
-            )
+            badge_applied_discounts.append(OrderLineItemAppliedDiscountParams(discount_uid=uid))
 
         line_items.append(
             OrderLineItemParams(
@@ -714,9 +701,7 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
         return None
 
 
-def print_payment_receipt(
-    request, square_device: SquareDevice, payment_id: str
-) -> bool:
+def print_payment_receipt(request, square_device: SquareDevice, payment_id: str) -> bool:
     """Tells a terminal to print a reciept for a given payment.
 
     :param request: Original HTTP request from Django
@@ -748,7 +733,7 @@ def print_payment_receipt(
         return True
 
 
-def get_terminals() -> List[Device]:
+def get_terminals() -> list[Device]:
     """
     Gets the list of terminals defined in the payment processor.
 
@@ -773,7 +758,7 @@ def prompt_terminal_payment(
     total: int,
     reference: str,
     note: str,
-    order_id: Optional[str],
+    order_id: str | None,
 ) -> CreateTerminalCheckoutResponse:
     """Sends a checkout request to a payment terminal.
 

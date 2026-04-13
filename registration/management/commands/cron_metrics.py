@@ -1,15 +1,14 @@
-from datetime import datetime
 from abc import ABCMeta, abstractmethod
+from datetime import datetime
 
 from django.conf import settings
 from django.contrib.sites.models import Site
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db.models import Q, Sum
 from django.utils import timezone
 from influxdb import InfluxDBClient
 
 from registration.models import *
-
 
 """
 There's a few options for where these metrics could end up.  These should eventually be configurable:
@@ -91,16 +90,12 @@ class Command(BaseCommand):
 
             # Organization donations
             org_donations = event.donations
-            org_sum = order_items.aggregate(Sum("order__orgDonation"))[
-                "order__orgDonation__sum"
-            ]
+            org_sum = order_items.aggregate(Sum("order__orgDonation"))["order__orgDonation__sum"]
             if org_sum:
                 org_donations += org_sum
             backend_writer(event, "org_donations", int(org_donations * 100))
 
-            print(
-                "Event: {0} - (total completed orders: {1})".format(event, total_count)
-            )
+            print(f"Event: {event} - (total completed orders: {total_count})")
             for level in price_levels:
                 print(level, "-", level_bins[level.id])
 
@@ -112,9 +107,7 @@ class Command(BaseCommand):
                     days_to_event=days_to_event,
                 )
 
-            print(
-                "Staff: {0} ({1} active)".format(total_staff_count, active_staff_count)
-            )
+            print(f"Staff: {total_staff_count} ({active_staff_count} active)")
             backend_writer(event, "staff_total", total_staff_count)
             backend_writer(event, "staff_active", active_staff_count)
             backend_writer(event, "orders", total_count)

@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0086_rename_tables_squashed_0087_onsite_reg_start"),
     ]

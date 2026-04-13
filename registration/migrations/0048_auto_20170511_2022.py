@@ -9,7 +9,6 @@ import registration.models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0047_auto_20170428_2054"),
     ]

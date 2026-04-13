@@ -24,4 +24,13 @@ export default [
       "no-unused-vars": "off",
     },
   },
+  {
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "no-undef": "off",
+    },
+  },
+  {
+    ignores: ["src/routeTree.gen.ts", "dist/**", "coverage/**"],
+  },
 ];

@@ -6,7 +6,6 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0065_auto_20180425_2022"),
         ("registration", "0060_priceleveloption_optionimage"),

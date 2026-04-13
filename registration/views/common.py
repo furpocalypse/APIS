@@ -56,10 +56,7 @@ def clear_session(request):
 
 def get_client_ip(request):
     x_forwarded_for = request.headers.get("x-forwarded-for")
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(",")[0]
-    else:
-        ip = request.META.get("REMOTE_ADDR")
+    ip = x_forwarded_for.split(",")[0] if x_forwarded_for else request.META.get("REMOTE_ADDR")
     return ip
 
 
@@ -105,9 +102,7 @@ def get_events(request):
         }
         for ev in events
     ]
-    return HttpResponse(
-        json.dumps(data, cls=DjangoJSONEncoder), content_type="application/json"
-    )
+    return HttpResponse(json.dumps(data, cls=DjangoJSONEncoder), content_type="application/json")
 
 
 def abort(status=400, reason="Bad request"):
@@ -117,7 +112,7 @@ def abort(status=400, reason="Bad request"):
     status: A valid HTTP status code
     reason: Human-readable explanation
     """
-    logger.info("JSON {0}: {1}".format(status, reason))
+    logger.info(f"JSON {status}: {reason}")
     return JsonResponse({"success": False, "reason": reason}, status=status)
 
 
@@ -129,10 +124,10 @@ def success(status=200, reason=None):
     reason: (Optional) human-readable explanation
     """
     if reason is None:
-        logger.debug("JSON {0}".format(status))
+        logger.debug(f"JSON {status}")
         return JsonResponse({"success": True}, status=status)
     else:
-        logger.debug("JSON {0}: {1}".format(status, reason))
+        logger.debug(f"JSON {status}: {reason}")
         return JsonResponse(
             {
                 "success": True,
@@ -198,9 +193,7 @@ def index(request):
     if event.attendeeRegStart <= today <= event.attendeeRegEnd:
         return render(request, "registration/registration-form.html", context)
     elif event.attendeeRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to our social media for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
         return render(request, "registration/closed.html", context)
     elif event.attendeeRegEnd <= today:
         context["message"] = "has ended."
@@ -279,9 +272,7 @@ def vipBadges(request):
     price_levels = PriceLevel.objects.filter(Q(emailVIP=True) | Q(group__iexact="vip"))
     shirt_sizes = {str(shirt.pk): shirt.name for shirt in ShirtSizes.objects.all()}
 
-    vip_order_items = OrderItem.objects.filter(
-        priceLevel__in=price_levels, badge__event=event
-    )
+    vip_order_items = OrderItem.objects.filter(priceLevel__in=price_levels, badge__event=event)
 
     badges = [
         {

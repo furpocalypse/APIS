@@ -1,20 +1,24 @@
 from django.conf import settings
-from django.urls import include, path, re_path
 from django.contrib import admin
-from django.views.generic import RedirectView
 from django.http import HttpResponse
+from django.urls import include, path, re_path
+from django.views.generic import RedirectView
+
+from fm_eventmanager.health import healthz, readyz
 
 admin.autodiscover()
 
 urlpatterns = [
+    path("healthz", healthz, name="healthz"),
+    path("readyz", readyz, name="readyz"),
     re_path(
         r"robots.txt",
         lambda x: HttpResponse("User-Agent: *\n\nDisallow: /", content_type="text/plain"),
-        name="robots_file"
+        name="robots_file",
     ),
     path("registration/", include("registration.urls", namespace="registration")),
     re_path(r"^admin/", admin.site.urls),
-    path('accounts/', include('allauth.urls')),
+    path("accounts/", include("allauth.urls")),
     path("", RedirectView.as_view(url="registration"), name="root"),
 ]
 

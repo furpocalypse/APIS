@@ -11,7 +11,6 @@ PT = pytz.timezone("US/Pacific")
 
 
 class Migration(migrations.Migration):
-
     DEFAULT_DATETIME = datetime.datetime.now(tz=PT)
 
     dependencies = [

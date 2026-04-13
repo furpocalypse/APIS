@@ -11,7 +11,6 @@ def blank_to_null(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("registration", "0095_add_cash_ledger_actions"),
     ]

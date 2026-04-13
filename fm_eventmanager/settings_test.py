@@ -14,7 +14,10 @@ import os
 
 from idempotency_key import status
 
-eval_bool = lambda x: x.lower() in ("true", "1", "t", "y", "yes")
+
+def eval_bool(x):
+    return x.lower() in ("true", "1", "t", "y", "yes")
+
 
 SENTRY_ENABLED = eval_bool(os.environ.get("SENTRY_ENABLED", ""))
 if SENTRY_ENABLED:
@@ -217,20 +220,14 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_RESULT_SERIALIZER = "json"
-CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(
-    os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True")
-)
-CELERY_TASK_SEND_SENT_EVENT = eval_bool(
-    os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True")
-)
+CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True"))
+CELERY_TASK_SEND_SENT_EVENT = eval_bool(os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True"))
 # Match settings.py.ci behavior: execute Celery tasks synchronously inside
 # Django tests so ``.delay(...)`` dispatches hit ``mail.outbox`` and mocked
 # task functions assertions fire before the HTTP response returns. Without
 # this, tasks would enqueue to a real Redis broker that CI does not run.
 CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "True"))
-CELERY_TASK_EAGER_PROPAGATES = eval_bool(
-    os.getenv("CELERY_TASK_EAGER_PROPAGATES", "True")
-)
+CELERY_TASK_EAGER_PROPAGATES = eval_bool(os.getenv("CELERY_TASK_EAGER_PROPAGATES", "True"))
 
 
 # Prometheus metrics
@@ -410,9 +407,7 @@ PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
 E2E_MODE = eval_bool(os.getenv("E2E_MODE", "False"))
 
 # Sandbox values - DO NOT check in production credentials
-EMAIL_BACKEND = os.getenv(
-    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
-)
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")

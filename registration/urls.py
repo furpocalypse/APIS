@@ -28,9 +28,7 @@ urlpatterns = [
     path("sentry-debug/", trigger_error),
     path("", registration.views.common.index, name="index"),
     path("logout/", LogoutView.as_view(), name="logout"),
-    path(
-        "upgrade/lookup/", registration.views.upgrade.find_upgrade, name="find_upgrade"
-    ),
+    path("upgrade/lookup/", registration.views.upgrade.find_upgrade, name="find_upgrade"),
     path("upgrade/info/", registration.views.upgrade.info_upgrade, name="info_upgrade"),
     path("upgrade/add/", registration.views.upgrade.add_upgrade, name="add_upgrade"),
     path(
@@ -86,20 +84,12 @@ urlpatterns = [
         registration.views.staff.info_new_staff,
         name="info_new_staff",
     ),
-    path(
-        "new-staff/add/", registration.views.staff.add_new_staff, name="add_new_staff"
-    ),
-    path(
-        "new-staff/<slug:guid>/", registration.views.staff.new_staff, name="new_staff"
-    ),
+    path("new-staff/add/", registration.views.staff.add_new_staff, name="add_new_staff"),
+    path("new-staff/<slug:guid>/", registration.views.staff.new_staff, name="new_staff"),
     path("dealer/", registration.views.dealers.new_dealer, name="new_dealer"),
-    path(
-        "dealer/addNew/", registration.views.dealers.addNewDealer, name="addNewDealer"
-    ),
+    path("dealer/addNew/", registration.views.dealers.addNewDealer, name="addNewDealer"),
     path("dealer/done/", registration.views.dealers.done_dealer, name="done_dealer"),
-    path(
-        "dealer/thanks/", registration.views.dealers.thanks_dealer, name="thanks_dealer"
-    ),
+    path("dealer/thanks/", registration.views.dealers.thanks_dealer, name="thanks_dealer"),
     path("dealer/lookup/", registration.views.dealers.find_dealer, name="find_dealer"),
     path("dealer/add/", registration.views.dealers.add_dealer, name="add_dealer"),
     path("dealer/info/", registration.views.dealers.info_dealer, name="info_dealer"),
@@ -160,12 +150,8 @@ urlpatterns = [
         name="done_asst_dealer",
     ),
     re_path(r"^onsite/?$", registration.views.onsite.onsite, name="onsite"),
-    re_path(
-        r"^onsite/cart/?$", registration.views.onsite.onsite_cart, name="onsite_cart"
-    ),
-    re_path(
-        r"^onsite/done/?$", registration.views.onsite.onsite_done, name="onsite_done"
-    ),
+    re_path(r"^onsite/cart/?$", registration.views.onsite.onsite_cart, name="onsite_cart"),
+    re_path(r"^onsite/done/?$", registration.views.onsite.onsite_done, name="onsite_done"),
     path(
         "onsite/admin",
         registration.views.onsite_admin.onsite_admin,
@@ -328,9 +314,7 @@ urlpatterns = [
         registration.views.ordering.create_paypal_order,
         name="paypalcreate",
     ),
-    re_path(
-        r"^cart/checkout/?$", registration.views.ordering.checkout, name="checkout"
-    ),
+    re_path(r"^cart/checkout/?$", registration.views.ordering.checkout, name="checkout"),
     re_path(r"^cart/done/?$", registration.views.cart.cart_done, name="done"),
     path("events/", registration.views.common.get_events, name="events"),
     path("departments/", registration.views.common.get_departments, name="departments"),
@@ -346,9 +330,7 @@ urlpatterns = [
     ),
     path("shirts/", registration.views.common.get_shirt_sizes, name="shirtsizes"),
     path("tables/", registration.views.dealers.getTableSizes, name="tablesizes"),
-    path(
-        "addresses/", registration.views.common.get_session_addresses, name="addresses"
-    ),
+    path("addresses/", registration.views.common.get_session_addresses, name="addresses"),
     path("utility/badges/", registration.views.common.basicBadges, name="basicBadges"),
     path("utility/vips", registration.views.common.vipBadges, name="vipBadges"),
     re_path(r"^flush/?$", registration.views.common.flush, name="flush"),
