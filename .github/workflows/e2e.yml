@@ -9,9 +9,6 @@ on:
 jobs:
   playwright:
     runs-on: ubuntu-24.04
-    # Non-blocking: failures surface in the check list but do not gate merge
-    # while the suite is stabilizing. Flip to ``false`` once it is reliable.
-    continue-on-error: true
     timeout-minutes: 30
 
     services:

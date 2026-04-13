@@ -257,12 +257,12 @@ endif
 test-django: services-up test-check-migrations test-collectstatic
 	$(TEST_ENV) uv run python manage.py test registration --verbosity 1
 
-# Top-level regression gate: the Django suite, the Vitest SPA suite, AND
-# the Playwright e2e suite. All three must pass for ``make test`` to exit 0.
-# ``test-frontend`` is listed before ``e2e`` because it's fast and catches
-# SPA regressions before we pay the cost of spinning up the e2e server.
-# ``e2e`` brings its own server up/down so it runs last.
-test: test-django test-frontend e2e
+# Top-level regression gate: the Django suite and the Vitest SPA suite.
+# The Playwright e2e suite is excluded here because ``playwright install
+# --with-deps`` assumes apt-based distros and can't be run reliably on
+# every contributor's host. Run ``make e2e`` explicitly (or rely on the
+# Playwright E2E GitHub Action) when you need end-to-end coverage.
+test: test-django test-frontend
 
 test-paypal: test-check-migrations test-collectstatic
 	$(TEST_ENV) uv run python manage.py test --tag=paypal --tag=PayPal --verbosity 1

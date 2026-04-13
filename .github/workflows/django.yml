@@ -64,6 +64,9 @@ jobs:
           cd registration/frontend
           npm install
           npm run build
+      - name: Run frontend tests
+        working-directory: registration/frontend
+        run: npm run test:run
       - name: Run Tests
         run: |
           cp fm_eventmanager/settings.py.ci fm_eventmanager/settings.py

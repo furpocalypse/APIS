@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from typing import Optional, Type
 from unittest.mock import Mock, patch
 
@@ -212,9 +213,9 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
     @patch(
         "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
     )
-    def test_A1_4_donation_items_included_in_total(self, mock_create):
-        """Donations today are NOT separated from the registration unit; they
-        ride in the single purchase_unit. See paypal_payments.py:95-104."""
+    def test_A1_4_donation_items_split_into_own_purchase_unit(self, mock_create):
+        """Donations go into a separate purchase_unit with ItemCategory.DONATION
+        so PayPal receipts and merchant reporting attribute them correctly."""
         mock_create.return_value = self._mock_created_response()
         items = [
             self._single_item("Attendee", "45.00"),
@@ -226,10 +227,19 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
 
         call_args = mock_create.call_args[0][0]
         request = call_args["body"]
-        self.assertEqual(1, len(request.purchase_units))
-        pu = request.purchase_units[0]
-        self.assertEqual(3, len(pu.items))
-        self.assertEqual("53.00", pu.amount.value)
+        self.assertEqual(2, len(request.purchase_units))
+
+        reg_pu = request.purchase_units[0]
+        don_pu = request.purchase_units[1]
+        self.assertEqual("registration", reg_pu.reference_id)
+        self.assertEqual("donation", don_pu.reference_id)
+        self.assertEqual(1, len(reg_pu.items))
+        self.assertEqual(2, len(don_pu.items))
+        self.assertEqual("45.00", reg_pu.amount.value)
+        self.assertEqual("8.00", don_pu.amount.value)
+        self.assertEqual("DIGITAL_GOODS", reg_pu.items[0].category)
+        for item in don_pu.items:
+            self.assertEqual("DONATION", item.category)
 
     @patch(
         "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
@@ -268,6 +278,131 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         call_args = mock_create.call_args[0][0]
         item = call_args["body"].purchase_units[0].items[0]
         self.assertEqual("DIGITAL_GOODS", item.category)
+
+
+# ---------------------------------------------------------------------------
+# A.1b - donation/registration split in create_unpaid_paypal_order
+# ---------------------------------------------------------------------------
+
+
+@tag("paypal")
+class TestCreateUnpaidPaypalOrderDonationSplit(OrdersTestCase):
+    """Exercises the donation/registration purchase_unit split introduced to
+    replace the DIGITAL_GOODS-everything workaround."""
+
+    @staticmethod
+    def _reg(name="Reg", total="45.00"):
+        return {"name": name, "total": total, "donation": False}
+
+    @staticmethod
+    def _don(name="Donation", total="5.00"):
+        return {"name": name, "total": total, "donation": True}
+
+    def _mock_created_response(self):
+        body = {
+            "id": "ORD-NEW",
+            "status": "CREATED",
+            "purchase_units": [
+                {
+                    "reference_id": "registration",
+                    "amount": {"currency_code": "USD", "value": "0.00"},
+                }
+            ],
+        }
+        return create_api_response(body, PayPalOrder, 201)
+
+    @patch(
+        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
+    )
+    def test_donations_only_cart_emits_single_donation_unit(self, mock_create):
+        mock_create.return_value = self._mock_created_response()
+
+        create_unpaid_paypal_order(
+            total="12.00",
+            discount="0",
+            cart_items=[self._don("A", "7.00"), self._don("B", "5.00")],
+            apis_reference="REF-DON-ONLY",
+        )
+
+        request = mock_create.call_args[0][0]["body"]
+        self.assertEqual(1, len(request.purchase_units))
+        pu = request.purchase_units[0]
+        self.assertEqual("donation", pu.reference_id)
+        self.assertEqual("12.00", pu.amount.value)
+        self.assertEqual("12.00", pu.amount.breakdown.item_total.value)
+        self.assertFalse(hasattr(pu.amount.breakdown, "discount"))
+        self.assertEqual("REF-DON-ONLY-don", pu.invoice_id)
+        self.assertEqual("REF-DON-ONLY", pu.custom_id)
+        self.assertEqual(2, len(pu.items))
+        for item in pu.items:
+            self.assertEqual("DONATION", item.category)
+
+    @patch(
+        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
+    )
+    def test_registrations_only_cart_emits_single_registration_unit(self, mock_create):
+        mock_create.return_value = self._mock_created_response()
+
+        create_unpaid_paypal_order(
+            total="90.00",
+            discount="0",
+            cart_items=[self._reg("A", "45.00"), self._reg("B", "45.00")],
+            apis_reference="REF-REG-ONLY",
+        )
+
+        request = mock_create.call_args[0][0]["body"]
+        self.assertEqual(1, len(request.purchase_units))
+        pu = request.purchase_units[0]
+        self.assertEqual("registration", pu.reference_id)
+        self.assertEqual("REF-REG-ONLY", pu.invoice_id)
+        self.assertEqual("REF-REG-ONLY", pu.custom_id)
+        self.assertEqual(2, len(pu.items))
+        for item in pu.items:
+            self.assertEqual("DIGITAL_GOODS", item.category)
+
+    @patch(
+        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
+    )
+    def test_mixed_cart_with_discount_applies_only_to_registration_unit(
+        self, mock_create
+    ):
+        mock_create.return_value = self._mock_created_response()
+        items = [
+            self._reg("Attendee", "50.00"),
+            self._don("Org Donation", "10.00"),
+        ]
+
+        create_unpaid_paypal_order(
+            total="60.00",
+            discount="5",
+            cart_items=items,
+            apis_reference="REF-MIXED",
+        )
+
+        request = mock_create.call_args[0][0]["body"]
+        self.assertEqual(2, len(request.purchase_units))
+
+        reg_pu, don_pu = request.purchase_units
+        self.assertEqual("registration", reg_pu.reference_id)
+        self.assertEqual("donation", don_pu.reference_id)
+
+        # Registration unit bears the discount: 50.00 - 5 = 45.00.
+        self.assertEqual("45.00", reg_pu.amount.value)
+        self.assertEqual("45.00", reg_pu.amount.breakdown.item_total.value)
+        self.assertEqual("5", reg_pu.amount.breakdown.discount.value)
+        self.assertEqual("REF-MIXED", reg_pu.invoice_id)
+        self.assertEqual("REF-MIXED", reg_pu.custom_id)
+
+        # Donation unit carries its full value and suffixed invoice_id.
+        self.assertEqual("10.00", don_pu.amount.value)
+        self.assertEqual("10.00", don_pu.amount.breakdown.item_total.value)
+        self.assertFalse(hasattr(don_pu.amount.breakdown, "discount"))
+        self.assertEqual("REF-MIXED-don", don_pu.invoice_id)
+        self.assertEqual("REF-MIXED", don_pu.custom_id)
+
+        # Both units together reconcile to the post-discount charge.
+        total_charged = Decimal(reg_pu.amount.value) + Decimal(don_pu.amount.value)
+        self.assertEqual(Decimal("55.00"), total_charged)
 
 
 # ---------------------------------------------------------------------------

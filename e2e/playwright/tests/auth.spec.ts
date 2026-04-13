@@ -7,7 +7,7 @@ test.beforeEach(async () => {
 
 test("admin login succeeds with seeded superuser", async ({ page }) => {
   await page.goto("/admin/login/?next=/admin/");
-  await page.fill("input[name=username]", "e2e-admin");
+  await page.fill("input[name=login]", "e2e-admin");
   await page.fill("input[name=password]", "e2e-admin-password");
   await page.click("input[type=submit]");
   await expect(page).toHaveURL(/\/admin\/?$/);
@@ -15,7 +15,7 @@ test("admin login succeeds with seeded superuser", async ({ page }) => {
 
 test("admin login fails with wrong password", async ({ page }) => {
   await page.goto("/admin/login/?next=/admin/");
-  await page.fill("input[name=username]", "e2e-admin");
+  await page.fill("input[name=login]", "e2e-admin");
   await page.fill("input[name=password]", "not-the-password");
   await page.click("input[type=submit]");
   // Django re-renders the login page with an error and stays on /admin/login/
@@ -24,7 +24,7 @@ test("admin login fails with wrong password", async ({ page }) => {
 
 test("logout clears the session", async ({ page }) => {
   await page.goto("/admin/login/?next=/admin/");
-  await page.fill("input[name=username]", "e2e-admin");
+  await page.fill("input[name=login]", "e2e-admin");
   await page.fill("input[name=password]", "e2e-admin-password");
   await page.click("input[type=submit]");
   await expect(page).toHaveURL(/\/admin\/?$/);
