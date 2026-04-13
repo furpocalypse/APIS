@@ -35,6 +35,18 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "../static/bundler/"),
     rollupOptions: {
       input: "src/index.tsx",
+      // `@tanstack/hotkeys-devtools` ships a top-level "use client" directive
+      // (React RSC convention) that has no meaning in our Solid bundle; Rollup
+      // otherwise logs it once per build.
+      onwarn(warning, defaultHandler) {
+        if (
+          warning.code === "MODULE_LEVEL_DIRECTIVE" &&
+          warning.message.includes("@tanstack/hotkeys-devtools")
+        ) {
+          return;
+        }
+        defaultHandler(warning);
+      },
     },
   },
   css: {
