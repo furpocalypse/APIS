@@ -23,12 +23,14 @@ class TestAttendeeCheckout(OrdersTestCase):
     def test_get_prices(self):
         response = self.client.post(
             reverse("registration:pricelevels"),
-            json.dumps({
-                "year": "1990",
-                "month": "1",
-                "day": "1",
-                "form_type": "attendee",
-            }),
+            json.dumps(
+                {
+                    "year": "1990",
+                    "month": "1",
+                    "day": "1",
+                    "form_type": "attendee",
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
@@ -100,8 +102,24 @@ class TestAttendeeCheckout(OrdersTestCase):
         logger.error(error_codes)
         self.assertIn(error, error_codes)
 
-        # Ensure a badge wasn't created
-        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
+        # With the new pending order approach, Attendee and Badge ARE created
+        # before payment, but the Order should be marked as FAILED
+        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 1)
+        attendee = Attendee.objects.filter(firstName="Bea").first()
+        # Verify the order exists and is marked as FAILED
+        self.assertEqual(Badge.objects.filter(attendee=attendee).count(), 1)
+        badge = Badge.objects.filter(attendee=attendee).first()
+        self.assertEqual(OrderItem.objects.filter(badge=badge).count(), 1)
+        order_item = OrderItem.objects.filter(badge=badge).first()
+        self.assertEqual(order_item.order.status, Order.FAILED)
+
+        # Verify capacity counters weren't corrupted by the failed payment
+        price_level = order_item.priceLevel
+        price_level.refresh_from_db()
+        self.assertTrue(
+            price_level.verify_and_repair_counters(),
+            "Counter drift after failed payment",
+        )
 
     @tag("square")
     def test_bad_cvv(self):

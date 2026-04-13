@@ -141,20 +141,21 @@ document.addEventListener('DOMContentLoaded', async function () {
                 window.location = URL_REGISTRATION_DONE;
             } else {
                 let message;
-                if (typeof paymentResults.reason === "string") {
-                    message = paymentResults.reason;
+                const reason = paymentResults.reason;
+                if (reason && reason.errors) {
+                    // Square payment error format
+                    const errorCodes = formatSquareErrors(reason.errors);
+                    message = `<p>Payment error: payment failed for the following reasons:` +
+                        `<br><span class="error-code">${errorCodes}</span>.<br>  Please check your payment details `+
+                        `carefully and try again.</p>`;
+                } else if (typeof reason === 'string') {
+                    // Application error (e.g. capacity/sold-out)
+                    message = `<p><b>Sorry, your registration could not be completed:</b>` +
+                        `<br><br>${reason}<br><br>If the problem persists, please ` +
+                        `contact <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a> for assistance.</p>`;
                 } else {
-                    try {
-                        const errorCodes = formatSquareErrors(paymentResults.reason.errors);
-                        message = `<p>Payment error: payment failed for the following reasons:` +
-                            `<br><span class="error-code">${errorCodes}</span>.<br>  Please check your payment details `+
-                            `carefully and try again.</p>`;
-
-                    } catch (e) {
-                        message = `<p>Sorry, your payment failed for a mysterious reason. If the problem persists, please ` +
-                            `contact <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a> for assistance.</p>`;
-                        message += e;
-                    }
+                    message = `<p>Sorry, your payment failed for an unknown reason. If the problem persists, please ` +
+                        `contact <a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a> for assistance.</p>`;
                 }
 
                 displayPaymentResults('FAILURE', message);

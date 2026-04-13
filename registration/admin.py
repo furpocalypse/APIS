@@ -1405,6 +1405,9 @@ class PriceLevelAdmin(admin.ModelAdmin):
         "name",
         "basePrice",
         "get_level_active_status",
+        "maxCapacity",
+        "remainingSlots",
+        "reservedSlots",
         "min_age",
         "max_age",
         "public",
@@ -1413,6 +1416,7 @@ class PriceLevelAdmin(admin.ModelAdmin):
         "available_to_staff",
         "group",
     )
+    readonly_fields = ("remainingSlots", "reservedSlots")
 
     def has_delete_permission(self, request, obj=None):
         return False

@@ -210,3 +210,69 @@ body > footer {
     display: flex;
     justify-content: space-between;
 }
+
+/* Capacity Badge Styles */
+.capacity-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    margin: 4px 0;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.capacity-badge.limited-availability {
+    background-color: #f0ad4e;
+    color: #fff;
+}
+
+.capacity-badge.sold-out {
+    background-color: #d9534f;
+    color: #fff;
+}
+
+/* Tier Card States */
+.panel.price.limited-availability {
+    border: 2px solid #f0ad4e;
+}
+
+.panel.price.limited-availability > .panel-heading {
+    background-color: #f0ad4e !important;
+    border-color: #f0ad4e;
+}
+
+.panel.price.sold-out {
+    opacity: 0.6;
+    border: 2px solid #d9534f;
+}
+
+.panel.price.sold-out > .panel-heading {
+    background-color: #d9534f !important;
+    border-color: #d9534f;
+}
+
+.panel.price.sold-out .btn {
+    background-color: #999 !important;
+    border-color: #999 !important;
+    cursor: not-allowed;
+}
+
+/* Checkout Capacity Warning */
+.capacity-warning {
+    margin: 15px 0;
+    padding: 12px;
+    background-color: #fcf8e3;
+    border: 1px solid #faebcc;
+    border-radius: 4px;
+    color: #8a6d3b;
+}
+
+.capacity-warning .fa-exclamation-triangle {
+    margin-right: 8px;
+    color: #f0ad4e;
+}
+
+.capacity-warning strong {
+    font-weight: bold;
+}
