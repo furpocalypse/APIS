@@ -15,6 +15,7 @@ from django.urls import reverse
 from paypalserversdk.exceptions.api_exception import ApiException
 
 import registration.emails
+from registration import tasks
 from registration.models import *
 from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
@@ -47,7 +48,11 @@ def thanks_dealer(request):
 
 def done_dealer(request):
     event = Event.objects.get(default=True)
-    context = {"event": event, "form_type": form_type}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "form_type": form_type, "order": order}
     return render(request, "registration/dealer/dealer-done.html", context)
 
 
@@ -75,7 +80,11 @@ def dealer_asst(request, guid):
 
 def done_asst_dealer(request):
     event = Event.objects.get(default=True)
-    context = {"event": event, "form_type": form_type}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "form_type": form_type, "order": order}
     return render(request, "registration/dealer/dealerasst-done.html", context)
 
 
@@ -411,21 +420,11 @@ def add_assistants_checkout(request):
             assistant.save()
 
         clear_session(request)
-        try:
-            registration.emails.send_dealer_assistant_email(dealer.id)
-            # Send registration instruction emails to assistants that haven't registered yet:
-            for assistant in dealer.dealerasst_set.all().filter(attendee__isnull=True):
-                registration.emails.send_dealer_assistant_registration_invite(assistant)
-        except Exception as e:
-            logger.error("Error emailing DealerAsstEmail")
-            logger.exception(e)
-            dealer_email = get_dealer_email()
-            return common.abort(
-                500,
-                f"Your payment succeeded but we may have been unable to send you a confirmation email. "
-                f"If you do not receive one within the next hour, please contact {dealer_email} to get your "
-                f"confirmation number.",
-            )
+        request.session["last_order_id"] = order.id
+        tasks.send_dealer_assistant_email_task.delay(dealer.id, order.id)
+        # Send registration instruction emails to assistants that haven't registered yet:
+        for assistant in dealer.dealerasst_set.all().filter(attendee__isnull=True):
+            tasks.send_dealer_assistant_registration_invite_task.delay(assistant.id)
         return common.success()
     else:
         # Payment failed
@@ -623,18 +622,8 @@ def checkout_dealer(request):
             return common.abort(400, message)
 
         clear_session(request)
-
-        try:
-            registration.emails.send_dealer_payment_email(dealer, order)
-        except Exception as e:
-            logger.error("Error sending DealerPaymentEmail - zero sum.")
-            logger.exception(e)
-            dealer_email = get_dealer_email()
-            return common.abort(
-                500,
-                "Your registration succeeded but we may have been unable to send you a confirmation "
-                f"email. If you have any questions, please contact {dealer_email}",
-            )
+        request.session["last_order_id"] = order.id
+        tasks.send_dealer_payment_email_task.delay(dealer.id, order.id)
         return JsonResponse({"success": True})
 
     porg = Decimal(post_data["orgDonation"].strip() or "0.00")
@@ -666,19 +655,10 @@ def checkout_dealer(request):
             assistant.paid = True
             assistant.save()
 
+        dealer.resetToken()
         clear_session(request)
-        try:
-            dealer.resetToken()
-            registration.emails.send_dealer_payment_email(dealer, order)
-        except Exception as e:
-            logger.error("Error sending DealerPaymentEmail. " + request.body)
-            logger.exception(e)
-            dealer_email = get_dealer_email()
-            return common.abort(
-                500,
-                "Your registration succeeded but we may have been unable to send you a confirmation "
-                f"email. If you have any questions, please contact {dealer_email}",
-            )
+        request.session["last_order_id"] = order.id
+        tasks.send_dealer_payment_email_task.delay(dealer.id, order.id)
         return common.success()
     else:
         order.delete()

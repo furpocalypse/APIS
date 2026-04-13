@@ -9,8 +9,20 @@
       <p>Salutations Vendors,</p>
       <p>Thank you for participating in {{ event }}'s Dealers Den! We look forward to seeing you. If you have any
         questions or concerns, please email <a href="mailto:{{ event.dealerEmail }}">{{ event.dealerEmail }}.</a></p>
+      {% if order.email_sent is False %}
+        <div class="alert alert-warning" role="alert">
+          <strong>Important:</strong> Your dealer registration is confirmed
+          {% if order.reference %}(Order #{{ order.reference }}){% endif %},
+          but we were unable to send your confirmation email. Please contact
+          <a href="mailto:{{ event.dealerEmail }}">{{ event.dealerEmail }}</a>
+          to receive your details.
+        </div>
+      {% elif order.email_sent %}
+        <p>Your confirmation email has been sent.</p>
+      {% else %}
+        <p>You should receive email confirmation and receipt shortly.</p>
+      {% endif %}
       <p style='float:right;'><a href='/'>Back to Main Page</a></p>
-      <p>You should receive email confirmation and receipt shortly.</p>
     </div>
   </div>
 {% endblock %}

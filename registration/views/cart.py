@@ -256,5 +256,9 @@ def remove_from_cart(request):
 
 def cart_done(request):
     event = Event.objects.get(default=True)
-    context = {"event": event}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "order": order}
     return render(request, "registration/done.html", context)

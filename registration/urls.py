@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.views import LogoutView
 from django.urls import path, re_path
 
@@ -379,3 +380,21 @@ urlpatterns = [
         name="oauth_square",
     ),
 ]
+
+if getattr(settings, "E2E_MODE", False):
+    import registration.views.e2e as _e2e_views
+
+    urlpatterns += [
+        path("e2e/reset/", _e2e_views.reset, name="e2e_reset"),
+        path(
+            "e2e/order/<str:reference>/",
+            _e2e_views.order_state,
+            name="e2e_order_state",
+        ),
+        path(
+            "e2e/paypal/<str:paypal_order_id>/",
+            _e2e_views.paypal_snapshot,
+            name="e2e_paypal_snapshot",
+        ),
+        path("e2e/advance-clock/", _e2e_views.advance_clock, name="e2e_advance_clock"),
+    ]

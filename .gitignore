@@ -1,29 +1,64 @@
 *.pyc
+*.pyo
+*.pyd
 __pycache__/
+*.egg-info/
 fm_eventmanager/dev.py
 fm_eventmanager/settings.py
 fm_eventmanager/settings.py.bak
-^static/
 venv/
+venv3/
 db.sqlite3
 test-db.sqlite3
 test-db.sqlite3-journal
 registration/resources/nametag/apis/tmp*.html
+
+# IDE
 .idea/
+.vscode/
+
+# Test + coverage caches and artifacts
 .coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+registration/frontend/coverage/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+e2e/playwright/test-results/
+e2e/playwright/playwright-report/
+
 .envrc.secrets
 fm_eventmanager/maintenance_mode_state.txt
 localhost.crt
 localhost.key
-venv3/
 .env
-htmlcov/
 build/
 .DS_Store
 pgdb/
 node_modules/
 .python-version
-/registration/static/bundler/
 *.tsbuildinfo
 .direnv/
 docker-compose.override.yaml
+
+# Vite bundler output (inside registration/static/ for AppDirectoriesFinder)
+/registration/static/bundler/
+
+# ``collectstatic`` outputs from third-party Django apps land here because
+# this directory is also the registration app's own static source tree.
+# The source files (css/, fonts/, img/, js/, webfonts/, top-level icons)
+# stay tracked; everything else is vendored by running collectstatic and
+# should NOT be committed. Add new entries here if you install a Django
+# app that ships its own static files.
+/registration/static/account/
+/registration/static/admin/
+/registration/static/debug_toolbar/
+/registration/static/django_extensions/
+/registration/static/import_export/
+/registration/static/mfa/

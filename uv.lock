@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -132,6 +132,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "coverage" },
     { name = "coveralls" },
     { name = "django-debug-toolbar" },
     { name = "django-types" },
@@ -183,6 +184,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "coverage", extras = ["toml"], specifier = ">=7.6.0" },
     { name = "coveralls", specifier = ">=4.1.0" },
     { name = "django-debug-toolbar", specifier = "~=6.2.0" },
     { name = "django-types", specifier = ">=0.22.0" },

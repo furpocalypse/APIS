@@ -198,7 +198,9 @@ def index(request):
     if event.attendeeRegStart <= today <= event.attendeeRegEnd:
         return render(request, "registration/registration-form.html", context)
     elif event.attendeeRegStart >= today:
-        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
+        context["message"] = (
+            "is not yet open. Please stay tuned to our social media for updates!"
+        )
         return render(request, "registration/closed.html", context)
     elif event.attendeeRegEnd <= today:
         context["message"] = "has ended."
@@ -212,7 +214,6 @@ def manualDiscount(request):
     raise NotImplementedError
 
 
-@cache_page(60 * 5)
 @staff_member_required
 def basicBadges(request):
     event = Event.objects.get(default=True)
@@ -268,7 +269,6 @@ def basicBadges(request):
     )
 
 
-@cache_page(60 * 5)
 @staff_member_required
 def vipBadges(request):
     default_event = Event.objects.get(default=True)

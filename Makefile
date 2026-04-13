@@ -17,11 +17,24 @@ Commands:
 	make dev-setup                  : Sets up a venv for local development
 	make pre-commit-setup           : Installs (or updates) pre-commit hooks
 
-	make test                       : Run Django test suite against docker-compose services (uses uv)
+	make test                       : Run Django + Playwright end-to-end suites (full regression gate)
+	make test-django                : Run only the Django test suite
 	make test-paypal                : Run only PayPal-tagged tests (uses uv)
+	make test-coverage              : Run Django test suite under coverage; emit htmlcov/
+	make test-frontend              : Run Vitest suite in registration/frontend
+	make test-frontend-coverage     : Run Vitest with v8 coverage in registration/frontend
+	make test-all                   : Run Django tests (with coverage) + frontend tests
 	make test-check-migrations      : Fail if branch has model changes without a migration
 	make test-build-frontend        : Build the Vite front-end bundle (npm install + npm run build)
 	make test-collectstatic         : Populate the staticfiles manifest tests depend on
+
+	make e2e-setup                  : Install Playwright + browsers under e2e/playwright
+	make e2e                        : Run Playwright suite (spins up + tears down a local server)
+	make e2e-smoke                  : Run @smoke-tagged Playwright tests only
+	make e2e-ui                     : Open Playwright interactive UI
+
+	make services-up                : Start postgres + redis + gotenberg via docker compose and wait until ready
+	make services-down              : Stop those services (volumes preserved)
 
 endef
 export HELP
@@ -197,8 +210,119 @@ test-collectstatic: test-build-frontend
 	mkdir -p $(TEST_STATIC_ROOT)
 	$(TEST_ENV) uv run python manage.py collectstatic --noinput
 
-test: test-check-migrations test-collectstatic
+# --------------------------------------------------------------------------
+# Backing services for tests (postgres, redis, gotenberg)
+# --------------------------------------------------------------------------
+#
+# ``services-up`` is idempotent: if the services are already running (either
+# from a prior ``make services-up`` or from the user's own ``docker compose
+# up``), it just polls their TCP ports and exits. When the user is on a host
+# without docker, it fails loudly with a pointer; CI and any environment that
+# sets ``SKIP_DOCKER_SERVICES=1`` short-circuits (GitHub Actions provides its
+# own service containers).
+#
+# ``gotenberg`` lives behind a compose profile in docker-compose.yaml so
+# dev workflows that don't need the PDF renderer aren't forced to run it;
+# tests DO need it, so we opt in with ``--profile gotenberg`` here.
+# Auto-skip in CI — GitHub Actions declares postgres/redis/gotenberg as
+# service containers. Callers can still force it off with
+# ``SKIP_DOCKER_SERVICES=0``.
+SKIP_DOCKER_SERVICES ?= $(if $(CI),1,)
+
+services-up:
+ifeq ($(SKIP_DOCKER_SERVICES),1)
+	@echo ">>> SKIP_DOCKER_SERVICES=1 set — leaving backing services alone"
+else
+	@command -v docker >/dev/null 2>&1 || { \
+		echo ">>> docker is not on PATH. Install Docker, or run with"; \
+		echo ">>> SKIP_DOCKER_SERVICES=1 and start postgres/redis/gotenberg yourself"; \
+		echo ">>> at 127.0.0.1:5432 / 6379 / 3000."; \
+		exit 1; \
+	}
+	@docker compose version >/dev/null 2>&1 || { \
+		echo ">>> 'docker compose' plugin is required (Compose V2)."; \
+		exit 1; \
+	}
+	@echo ">>> docker compose up -d --wait postgres redis gotenberg"
+	@docker compose --profile gotenberg up -d --wait postgres redis gotenberg
+endif
+
+services-down:
+ifeq ($(SKIP_DOCKER_SERVICES),1)
+	@echo ">>> SKIP_DOCKER_SERVICES=1 set — leaving services running"
+else
+	docker compose --profile gotenberg stop postgres redis gotenberg
+endif
+
+test-django: services-up test-check-migrations test-collectstatic
 	$(TEST_ENV) uv run python manage.py test registration --verbosity 1
+
+# Top-level regression gate: the Django suite, the Vitest SPA suite, AND
+# the Playwright e2e suite. All three must pass for ``make test`` to exit 0.
+# ``test-frontend`` is listed before ``e2e`` because it's fast and catches
+# SPA regressions before we pay the cost of spinning up the e2e server.
+# ``e2e`` brings its own server up/down so it runs last.
+test: test-django test-frontend e2e
 
 test-paypal: test-check-migrations test-collectstatic
 	$(TEST_ENV) uv run python manage.py test --tag=paypal --tag=PayPal --verbosity 1
+
+# Run the Django test suite under coverage measurement. Emits terminal
+# summary + an HTML report under ``htmlcov/``. Configuration (source paths,
+# omit list) lives in ``pyproject.toml`` under ``[tool.coverage.*]``.
+test-coverage: test-check-migrations test-collectstatic
+	$(TEST_ENV) uv run coverage erase
+	$(TEST_ENV) uv run coverage run manage.py test registration --verbosity 1
+	$(TEST_ENV) uv run coverage report
+	$(TEST_ENV) uv run coverage html
+
+# Run the Solid.js SPA test suite (Vitest). ``npm install`` is idempotent so
+# this works both in CI and on a fresh clone.
+test-frontend:
+	cd registration/frontend && npm install && npm run test:run
+
+# Same as ``test-frontend`` but with v8 coverage enabled; report lands under
+# ``registration/frontend/coverage/``.
+test-frontend-coverage:
+	cd registration/frontend && npm install && npm run test:coverage
+
+# Aggregate target: run the Django suite under coverage, then the SPA tests.
+test-all: test-coverage test-frontend
+
+# --------------------------------------------------------------------------
+# Playwright end-to-end suite (e2e/playwright/)
+# --------------------------------------------------------------------------
+#
+# ``e2e-setup`` installs Playwright + browsers; safe to re-run. ``e2e``
+# orchestrates a local server (scripts/up.sh brings services up, migrates,
+# seeds, and runs ``manage.py runserver`` in the background with
+# ``E2E_MODE=1``) then runs Playwright, and ``scripts/down.sh`` tears the
+# server down whether tests passed or failed.
+E2E_DIR := $(CURDIR)/e2e/playwright
+
+e2e-setup:
+	cd $(E2E_DIR) && npm install --no-audit --no-fund
+	cd $(E2E_DIR) && npx playwright install --with-deps chromium firefox
+
+e2e: e2e-setup
+	@set -e; \
+	bash $(E2E_DIR)/scripts/up.sh; \
+	status=0; \
+	( cd $(E2E_DIR) && npx playwright test ) || status=$$?; \
+	bash $(E2E_DIR)/scripts/down.sh; \
+	exit $$status
+
+e2e-smoke: e2e-setup
+	@set -e; \
+	bash $(E2E_DIR)/scripts/up.sh; \
+	status=0; \
+	( cd $(E2E_DIR) && npx playwright test --grep @smoke ) || status=$$?; \
+	bash $(E2E_DIR)/scripts/down.sh; \
+	exit $$status
+
+e2e-ui:
+	bash $(E2E_DIR)/scripts/up.sh
+	cd $(E2E_DIR) && npx playwright test --ui || true
+	bash $(E2E_DIR)/scripts/down.sh
+
+.PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django

@@ -406,6 +406,8 @@ PAYPAL_CLIENT_ID = os.environ["PAYPAL_CLIENT_ID"]
 PAYPAL_CLIENT_SECRET = os.environ["PAYPAL_CLIENT_SECRET"]
 PAYPAL_CURRENCY = os.getenv("PAYPAL_CURRENCY", "USD")
 PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "sandbox")  # Or "production"
+PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
+E2E_MODE = eval_bool(os.getenv("E2E_MODE", "False"))
 
 # Sandbox values - DO NOT check in production credentials
 EMAIL_BACKEND = os.getenv(

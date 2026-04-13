@@ -296,10 +296,6 @@
     {% endif %}
   {% endif %}
   <script type="text/javascript">
-      /* Square & Payments constants */
-      const APPLICATION_ID = "{% settings_value 'SQUARE_APPLICATION_ID' %}";
-      const LOCATION_ID = "{% settings_value 'SQUARE_LOCATION_ID' %}";
-
       /* APIS URLs */
       const URL_REGISTRATION_CREATEORDER = "{% url 'registration:paypalcreate' %}";
       const URL_REGISTRATION_CHECKOUT = "{% url 'registration:checkout' %}";

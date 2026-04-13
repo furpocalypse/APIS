@@ -175,7 +175,11 @@ def returning_staff(request, guid):
 
 def staff_done(request):
     event = Event.objects.get(default=True)
-    context = {"event": event, "form_type": form_type}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "form_type": form_type, "order": order}
     return render(request, "registration/staff/staff-done.html", context)
 
 
@@ -206,7 +210,9 @@ def info_returning_staff(request):
 
     staff_id = request.session.get("staff_id")
     if staff_id is None:
-        return render(request, "registration/staff/returning-staff-payment.html", context)
+        return render(
+            request, "registration/staff/returning-staff-payment.html", context
+        )
 
     staff = Staff.objects.get(id=staff_id)
     if staff:

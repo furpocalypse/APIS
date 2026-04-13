@@ -13,7 +13,22 @@ from registration import paypal_webhook_handlers as pph
 from registration.models import PaymentWebhookNotification
 from registration.views import common
 
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
+
 logger = logging.getLogger(__name__)
+
+
+def _sentry_capture(message: str, level: str = "warning", **tags) -> None:
+    if sentry_sdk is None:
+        return
+    with sentry_sdk.push_scope() as scope:
+        scope.set_tag("integration", "paypal_webhook")
+        for key, value in tags.items():
+            scope.set_tag(key, value)
+        sentry_sdk.capture_message(message, level=level)
 
 
 PAYPAL_LIVE_API_BASE = "https://api-m.paypal.com"
@@ -72,6 +87,12 @@ def verify_signature(request) -> bool:
     Any missing config, parse error, or transport failure returns False
     (fail-closed).
     """
+    if (
+        getattr(settings, "E2E_MODE", False)
+        and request.headers.get("X-E2E-Mock-Signature") == "1"
+    ):
+        return True
+
     required_headers = (
         "paypal-auth-algo",
         "paypal-cert-url",
@@ -87,7 +108,12 @@ def verify_signature(request) -> bool:
 
     webhook_id = getattr(settings, "PAYPAL_WEBHOOK_ID", "") or ""
     if not webhook_id:
-        logger.warning("PAYPAL_WEBHOOK_ID is not configured")
+        logger.error("PAYPAL_WEBHOOK_ID is not configured")
+        _sentry_capture(
+            "PAYPAL_WEBHOOK_ID is not configured",
+            level="error",
+            reason="missing_webhook_id",
+        )
         return False
 
     try:
@@ -140,6 +166,11 @@ def verify_signature(request) -> bool:
 def paypal_webhook(request):
     if not verify_signature(request):
         logger.warning("Invalid signature in PayPal webhook request")
+        _sentry_capture(
+            "PayPal webhook rejected with invalid signature",
+            level="warning",
+            reason="invalid_signature",
+        )
         return common.abort(403, "Forbidden: invalid signature")
 
     try:
@@ -179,6 +210,8 @@ def paypal_webhook(request):
 
 
 _HANDLERS = {
+    "PAYMENT.CAPTURE.COMPLETED": pph.handle_capture_completed,
+    "PAYMENT.CAPTURE.DENIED": pph.handle_capture_denied,
     "PAYMENT.CAPTURE.REFUNDED": pph.handle_capture_refunded,
     "PAYMENT.CAPTURE.REVERSED": pph.handle_capture_reversed,
     "PAYMENT.SALE.REFUNDED": pph.handle_sale_refunded_v1,

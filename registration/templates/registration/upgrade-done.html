@@ -7,7 +7,19 @@
       <h3>Thank you for your upgrade!</h3>
       <hr>
       <p>Thank you for upgrading your registration!</p>
-      <p>You should receive an email confirmation shortly. See you at the con!</p>
+      {% if order.email_sent is False %}
+        <div class="alert alert-warning" role="alert">
+          <strong>Important:</strong> Your upgrade is confirmed
+          {% if order.reference %}(Order #{{ order.reference }}){% endif %},
+          but we were unable to send your confirmation email. Please contact
+          <a href="mailto:{{ event.registrationEmail }}">{{ event.registrationEmail }}</a>
+          to receive your updated badge details.
+        </div>
+      {% elif order.email_sent %}
+        <p>Your confirmation email has been sent. See you at the con!</p>
+      {% else %}
+        <p>You should receive an email confirmation shortly. See you at the con!</p>
+      {% endif %}
       <p style='float:right;'><a href='/'>Back to Main Page</a></p>
     </div>
   </div>

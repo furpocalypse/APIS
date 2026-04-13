@@ -541,6 +541,7 @@ def checkout(request):
         if existing_order_item:
             add_attendee_to_assistant(request, existing_order_item.badge.attendee)
         common.clear_session(request)
+        request.session["last_order_id"] = order.id
         tasks.send_registration_email_task.delay(order.id, order.billingEmail)
         return common.success()
 
@@ -595,6 +596,7 @@ def checkout(request):
         cart_items = Cart.objects.filter(id__in=session_items)
         cart_items.delete()
         common.clear_session(request)
+        request.session["last_order_id"] = order.id
         tasks.send_registration_email_task.delay(order.id, order.billingEmail)
 
         notify_terminal(request, order)

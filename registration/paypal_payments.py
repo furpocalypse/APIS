@@ -72,6 +72,13 @@ logger = logging.getLogger("registration.paypal_payments")
 orders_controller: OrdersController = client.orders
 payments_controller: PaymentsController = client.payments
 
+if getattr(settings, "E2E_MODE", False):
+    from registration.e2e import paypal_stub as _paypal_stub
+
+    orders_controller = _paypal_stub.orders_controller
+    payments_controller = _paypal_stub.payments_controller
+    logger.warning("E2E_MODE active: PayPal controllers replaced with in-process stub")
+
 
 def format_errors(api_response: ApiResponse) -> str:
     """
