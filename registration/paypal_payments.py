@@ -117,63 +117,80 @@ def create_unpaid_paypal_order(
     ``Order.reference`` when the Order row is later created by
     ``capture_paypal_payment``.
     """
-    registrations = []
-    donations = []
-    donation_total = 0
+    registrations: list[Item] = []
+    donations: list[Item] = []
+    donation_total = Decimal("0")
     for item in cart_items:
+        is_donation = item.get("donation", False)
         pp_item = Item(
             name=item["name"],
             unit_amount=Money(currency_code="USD", value=str(item["total"])),
             quantity=1,
-            category=ItemCategory.DIGITAL_GOODS,
-        )
-        registrations.append(pp_item)
-        # TODO: I'd like to separate out donations in this call but even if I
-        # break them out into separate purchase units it complains that I'm
-        # mixing item categories in a purchase unit when I'm not.
-        # if item["donation"]:
-        #     pp_item.category = ItemCategory.DONATION
-        #     total -= item["total"]
-        #     donation_total += item["total"]
-        #     donations.append(pp_item)
-        # else:
-        #     registrations.append(pp_item)
-
-    purchase_unit_kwargs = dict(
-        reference_id="registration",
-        amount=AmountWithBreakdown(
-            currency_code="USD",
-            value=str(total),
-            breakdown=AmountBreakdown(
-                item_total=Money(
-                    currency_code="USD",
-                    value=str(Decimal(str(total)) - Decimal(str(discount))),
-                ),
-                discount=Money(currency_code="USD", value=str(discount)),
+            category=(
+                ItemCategory.DONATION if is_donation else ItemCategory.DIGITAL_GOODS
             ),
-        ),
-        items=registrations,
-    )
-    if apis_reference:
-        purchase_unit_kwargs["invoice_id"] = apis_reference
-        purchase_unit_kwargs["custom_id"] = apis_reference
+        )
+        if is_donation:
+            donations.append(pp_item)
+            donation_total += Decimal(str(item["total"]))
+        else:
+            registrations.append(pp_item)
 
-    purchase_units = [PurchaseUnitRequest(**purchase_unit_kwargs)]
+    discount_decimal = Decimal(str(discount))
+    registration_total = Decimal(str(total)) - donation_total
+    registration_amount = registration_total - discount_decimal
 
-    # for donationItem in donations:
-    #     purchase_units.append(PurchaseUnitRequest(
-    #         reference_id="donations",
-    #         amount=AmountWithBreakdown(
-    #             currency_code="USD",
-    #             value=str(donationItem.unit_amount.value),
-    #             breakdown=AmountBreakdown(
-    #                 item_total=Money(
-    #                     currency_code="USD", value=str(donationItem.unit_amount.value)
-    #                 )
-    #             )
-    #         ),
-    #         items=[donationItem]
-    #     ))
+    purchase_units: list[PurchaseUnitRequest] = []
+
+    # Registration purchase unit. Always emitted when registrations are
+    # present; also emitted for an empty cart so the Orders API receives at
+    # least one purchase_unit (and to preserve the legacy behavior of the
+    # total==0 empty-cart call site).
+    if registrations or not donations:
+        registration_kwargs = dict(
+            reference_id="registration",
+            amount=AmountWithBreakdown(
+                currency_code="USD",
+                value=str(registration_amount),
+                breakdown=AmountBreakdown(
+                    item_total=Money(
+                        currency_code="USD",
+                        value=str(registration_amount),
+                    ),
+                    discount=Money(currency_code="USD", value=str(discount)),
+                ),
+            ),
+            items=registrations,
+        )
+        if apis_reference:
+            registration_kwargs["invoice_id"] = apis_reference
+            registration_kwargs["custom_id"] = apis_reference
+        purchase_units.append(PurchaseUnitRequest(**registration_kwargs))
+
+    # Donation purchase unit — separate so PayPal reports DONATION category
+    # accurately on receipts and in merchant reporting. PayPal requires
+    # invoice_id to be unique across the merchant account, so suffix it;
+    # custom_id is unconstrained and carries the unsuffixed reference so
+    # webhook handlers resolve the local Order via the custom_id fallback.
+    if donations:
+        donation_kwargs = dict(
+            reference_id="donation",
+            amount=AmountWithBreakdown(
+                currency_code="USD",
+                value=str(donation_total),
+                breakdown=AmountBreakdown(
+                    item_total=Money(
+                        currency_code="USD",
+                        value=str(donation_total),
+                    ),
+                ),
+            ),
+            items=donations,
+        )
+        if apis_reference:
+            donation_kwargs["invoice_id"] = f"{apis_reference}-don"
+            donation_kwargs["custom_id"] = apis_reference
+        purchase_units.append(PurchaseUnitRequest(**donation_kwargs))
 
     logger.debug("---- Begin PayPal Order Creation ----")
 

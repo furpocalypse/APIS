@@ -59,14 +59,14 @@ PGPASSWORD="$DATABASE_PASS" psql \
        -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" \
        "$DATABASE_NAME"
 
-echo ">>> migrating"
-uv run python manage.py migrate --noinput
-
 echo ">>> building frontend bundle (Vite)"
 ( cd registration/frontend && npm install --no-audit --no-fund && npm run build )
 
 echo ">>> collectstatic"
 uv run python manage.py collectstatic --noinput >/dev/null
+
+echo ">>> migrating"
+uv run python manage.py migrate --noinput
 
 echo ">>> seeding reference data"
 uv run python manage.py e2e_seed
