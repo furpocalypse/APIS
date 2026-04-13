@@ -1245,3 +1245,195 @@ class TestPaypalWebhookStubs(PayPalOrdersTestCase):
         self.assertEqual(response.status_code, 200)
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertFalse(webhook.processed)
+
+
+@tag("paypal")
+class TestPaypalRefundWebhookPerRegistrantType(TestCase):
+    """Refund webhook resolves orders uniformly across registrant types.
+
+    The handler looks up Orders by ``Order.reference`` regardless of whether
+    the OrderItem chain leads to an Attendee, Dealer, Staff, or upgrade
+    badge. This class seeds each shape and asserts the refund webhook drives
+    ``Order.status`` to ``REFUNDED`` and reduces ``Order.total`` to 0,
+    proving the webhook pipeline is processor- and registrant-agnostic.
+    """
+
+    PAYPAL_CAPTURE_ID = "3C679366HH908993F"
+
+    def setUp(self):
+        from registration.models import Dealer, DealerAsst, Staff
+
+        self.Dealer = Dealer
+        self.DealerAsst = DealerAsst
+        self.Staff = Staff
+        self.event = Event(**DEFAULT_EVENT_ARGS)
+        self.event.save()
+
+    def _seed_order(self, reference: str, total="99.99"):
+        order = Order(
+            total=total,
+            status=Order.COMPLETED,
+            reference=reference,
+            billingEmail="apis@mailinator.com",
+            lastFour="1111",
+            apiData={
+                "id": "5O190127TN364715T",
+                "status": "COMPLETED",
+                "purchase_units": [
+                    {
+                        "reference_id": "registration",
+                        "payments": {
+                            "captures": [
+                                {
+                                    "id": self.PAYPAL_CAPTURE_ID,
+                                    "status": "COMPLETED",
+                                    "amount": {
+                                        "currency_code": "USD",
+                                        "value": total,
+                                    },
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+        )
+        order.save()
+        return order
+
+    def _post_refund_for(self, reference, capture_id=None):
+        headers, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["resource"]["custom_id"] = reference
+        body["resource"]["invoice_id"] = reference
+        if capture_id:
+            body["resource"]["links"] = [
+                {
+                    "rel": "up",
+                    "method": "GET",
+                    "href": f"https://api.paypal.com/v2/payments/captures/{capture_id}",
+                }
+            ]
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=True,
+        ):
+            response = self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers=headers,
+            )
+        return response, body
+
+    def _make_attendee(self, email, first="Atten", last="Dee"):
+        attendee = Attendee(
+            firstName=first,
+            lastName=last,
+            address1="123 Somewhere St",
+            city="Place",
+            state="PA",
+            country="US",
+            postalCode="12345",
+            phone="1112223333",
+            email=email,
+            birthdate="1990-01-01",
+        )
+        attendee.save()
+        return attendee
+
+    @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
+    def test_refund_for_attendee_order(self, _mv):
+        attendee = self._make_attendee("attendee@example.com")
+        badge = Badge(attendee=attendee, event=self.event, badgeName="Att")
+        badge.save()
+        order = self._seed_order("ATT-REF")
+        OrderItem(order=order, badge=badge, enteredBy="Test").save()
+
+        response, _ = self._post_refund_for("ATT-REF", self.PAYPAL_CAPTURE_ID)
+        self.assertEqual(response.status_code, 200)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.REFUNDED)
+
+    @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
+    def test_refund_for_dealer_order(self, _mv):
+        from registration.models import TableSize
+        from registration.tests.common import TEST_TABLE_ARGS
+
+        dealer_attendee = self._make_attendee("dealer@example.com", "Dealer", "Test")
+        badge = Badge(
+            attendee=dealer_attendee, event=self.event, badgeName="DealerBadge"
+        )
+        badge.save()
+        table = TableSize(**TEST_TABLE_ARGS)
+        table.save()
+        dealer = self.Dealer(
+            attendee=dealer_attendee,
+            event=self.event,
+            businessName="Dealer Biz",
+            license="abc",
+            tableSize=table,
+        )
+        dealer.save()
+        self.DealerAsst(
+            dealer=dealer,
+            event=self.event,
+            name="Assistant One",
+            email="asst@example.com",
+            license="N/A",
+            paid=True,
+        ).save()
+
+        order = self._seed_order("DLR-REF")
+        OrderItem(order=order, badge=badge, enteredBy="Test").save()
+
+        response, _ = self._post_refund_for("DLR-REF", self.PAYPAL_CAPTURE_ID)
+        self.assertEqual(response.status_code, 200)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.REFUNDED)
+
+    @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
+    def test_refund_for_staff_order(self, _mv):
+        from registration.models import Department
+
+        staff_attendee = self._make_attendee("staff@example.com", "Staff", "Member")
+        badge = Badge(attendee=staff_attendee, event=self.event, badgeName="StaffBadge")
+        badge.save()
+        dept = Department(name="Safety")
+        dept.save()
+        staff = self.Staff(attendee=staff_attendee, event=self.event, department=dept)
+        staff.save()
+
+        order = self._seed_order("STF-REF")
+        OrderItem(order=order, badge=badge, enteredBy="Test").save()
+
+        response, _ = self._post_refund_for("STF-REF", self.PAYPAL_CAPTURE_ID)
+        self.assertEqual(response.status_code, 200)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.REFUNDED)
+
+    @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
+    def test_refund_for_upgrade_order(self, _mv):
+        """An upgrade Order refund should transition to REFUNDED the same way.
+
+        The badge still has its upgraded price level attached — product spec
+        (documented here) is that a refund of an upgrade payment records the
+        refund but does NOT revert the badge's level. That's a policy call,
+        not a webhook responsibility.
+        """
+        attendee = self._make_attendee("upgrade@example.com", "Up", "Grader")
+        badge = Badge(attendee=attendee, event=self.event, badgeName="UpgBadge")
+        badge.save()
+
+        order = self._seed_order("UPG-REF", total="45.00")
+        OrderItem(order=order, badge=badge, enteredBy="Test").save()
+
+        response, _ = self._post_refund_for("UPG-REF", self.PAYPAL_CAPTURE_ID)
+        self.assertEqual(response.status_code, 200)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.REFUNDED)

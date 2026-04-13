@@ -55,6 +55,7 @@ def do_paypal_checkout(
     donationOrg: Decimal,
     donationCharity: Decimal,
     request: Optional[HttpRequest] = None,
+    billingData: Optional[dict] = None,
 ) -> tuple[bool, dict, Order]:
     event = Event.objects.get(default=True)
     # Reuse the reference token set on the PayPal order at create_paypal_order
@@ -67,12 +68,26 @@ def do_paypal_checkout(
     if not reference:
         reference = common.get_unique_confirmation_token(Order)
 
+    billingData = billingData or {}
     order = Order(
         total=Decimal(total),
         reference=reference,
         discount=discount,
         orgDonation=donationOrg,
         charityDonation=donationCharity,
+        billingName=" ".join(
+            filter(
+                None,
+                [billingData.get("cc_firstname"), billingData.get("cc_lastname")],
+            )
+        ),
+        billingAddress1=billingData.get("address1", "") or "",
+        billingAddress2=billingData.get("address2", "") or "",
+        billingCity=billingData.get("city", "") or "",
+        billingState=billingData.get("state", "") or "",
+        billingCountry=billingData.get("country", "") or "",
+        billingEmail=billingData.get("email", "") or "",
+        billingPostal=billingData.get("postal", "") or "",
     )
 
     status, response = capture_paypal_payment(paypal_order_id, order)
@@ -227,9 +242,18 @@ def get_order_item_option_total(options):
 
 
 def get_discount_total(disc, subtotal):
+    """Accept either a ``Discount`` model instance or a string code name.
+
+    Callers in ``cart.py``/``onsite.py``/``onsite_admin.py`` hand in already-
+    looked-up ``Discount`` objects, while ``get_line_item_total`` forwards
+    the raw session value which is a string. Normalize to a string code
+    name before the DB lookup.
+    """
+    if isinstance(disc, Discount):
+        disc = disc.codeName
     try:
         discount = Discount.objects.get(codeName=disc)
-    except Discount.DoesNotExist:
+    except (Discount.DoesNotExist, ValueError, TypeError):
         return 0
     if discount.isValid():
         if discount.amountOff:
@@ -471,10 +495,6 @@ def checkout(request):
         logger.error("Unable to decode JSON for checkout()")
         return common.abort(400, "Unable to parse input options")
 
-    # Expect the order ID to be sent in POST data.
-    if not "orderID" in post_data:
-        return common.abort(400, "Missing PayPal order ID")
-
     event = Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items = list(Cart.objects.filter(id__in=session_items))
@@ -496,7 +516,8 @@ def checkout(request):
     if order_items:
         order_items = list(OrderItem.objects.filter(id__in=order_items))
 
-    subtotal, _ = get_total(cart_items, order_items, discount)
+    gross_subtotal, subtotal_discount = get_total(cart_items, order_items, discount)
+    subtotal = gross_subtotal - subtotal_discount
 
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
@@ -523,7 +544,7 @@ def checkout(request):
         tasks.send_registration_email_task.delay(order.id, order.billingEmail)
         return common.success()
 
-    onsite = post_data["onsite"]
+    onsite = post_data.get("onsite", False)
     if onsite:
         reference = common.get_unique_confirmation_token(Order)
         order = Order(
@@ -550,6 +571,10 @@ def checkout(request):
         status = True
         message = "Onsite success"
     else:
+        # PayPal path requires the order id created earlier via
+        # create_paypal_order (passed back by the client's JS SDK).
+        if "orderID" not in post_data:
+            return common.abort(400, "Missing PayPal order ID")
         status, message, order = do_paypal_checkout(
             post_data["orderID"],
             total,
@@ -559,6 +584,7 @@ def checkout(request):
             porg,
             pcharity,
             request,
+            billingData=post_data.get("billingData") or {},
         )
 
     if status:

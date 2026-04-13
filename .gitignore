@@ -18,6 +18,7 @@ localhost.key
 venv3/
 .env
 htmlcov/
+build/
 .DS_Store
 pgdb/
 node_modules/

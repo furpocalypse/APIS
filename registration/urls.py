@@ -42,6 +42,11 @@ urlpatterns = [
         registration.views.upgrade.checkout_upgrade,
         name="checkout_upgrade",
     ),
+    re_path(
+        r"^upgrade/paypalcreate/?$",
+        registration.views.upgrade.upgrade_paypal_create,
+        name="upgrade_paypalcreate",
+    ),
     path("upgrade/done/", registration.views.upgrade.done_upgrade, name="done_upgrade"),
     path("upgrade/<slug:guid>/", registration.views.upgrade.upgrade, name="upgrade"),
     path(
@@ -107,6 +112,11 @@ urlpatterns = [
         registration.views.dealers.checkout_dealer,
         name="checkout_dealer",
     ),
+    re_path(
+        r"^dealer/paypalcreate/?$",
+        registration.views.dealers.dealer_paypal_create,
+        name="dealer_paypalcreate",
+    ),
     path("dealer/<slug:guid>/", registration.views.dealers.dealers, name="dealers"),
     path(
         "dealer/<slug:guid>/assistants/",
@@ -127,6 +137,11 @@ urlpatterns = [
         r"^dealer/assistants/checkout/?$",
         registration.views.dealers.add_assistants_checkout,
         name="add_assistants_checkout",
+    ),
+    re_path(
+        r"^dealer/assistants/paypalcreate/?$",
+        registration.views.dealers.dealer_assistants_paypal_create,
+        name="dealer_assistants_paypalcreate",
     ),
     path(
         "dealerassistant/<slug:guid>/",
