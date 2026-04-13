@@ -29,7 +29,7 @@ from qrcode.image.svg import SvgPathFillImage
 
 import registration.emails
 import registration.views.onsite_admin
-from registration import mqtt, payments, tasks
+from registration import mqtt, payments, paypal_payments, tasks
 from registration.forms import FirebaseForm
 from registration.models import *
 from registration.services import CreateAttendeeOptions
@@ -1300,7 +1300,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         # Update status accordingly
         order = Order.objects.get(id=order_id)
         try:
-            success, message = payments.refresh_payment(order)
+            success, message = paypal_payments.refresh_payment(order)
         except ValueError as e:
             messages.error(
                 request,
@@ -1370,7 +1370,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                         reason = "[{0}]".format(request.user)
                     else:
                         reason += " [{0}]".format(request.user)
-                    result, msg = payments.refund_payment(order, amount, reason)
+                    result, msg = paypal_payments.refund_payment(order, amount, reason)
                     if result:
                         messages.success(
                             request,
