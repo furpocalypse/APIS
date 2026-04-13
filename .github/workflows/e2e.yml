@@ -1,0 +1,122 @@
+name: Playwright E2E
+
+on:
+  push:
+    branches: [production, stage]
+  pull_request:
+    branches: [production, stage]
+
+jobs:
+  playwright:
+    runs-on: ubuntu-24.04
+    # Non-blocking: failures surface in the check list but do not gate merge
+    # while the suite is stabilizing. Flip to ``false`` once it is reliable.
+    continue-on-error: true
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: secret
+          POSTGRES_USER: apis
+          POSTGRES_DB: apis
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      gotenberg:
+        image: gotenberg/gotenberg:8
+        options: >-
+          --health-cmd "curl --fail http://localhost:3000/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 3000:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python deps
+        run: uv sync
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/playwright/package.json') }}
+
+      - name: Install Playwright + browsers
+        working-directory: e2e/playwright
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium firefox
+
+      - name: Prepare Django settings
+        run: cp fm_eventmanager/settings.py.ci fm_eventmanager/settings.py
+
+      - name: Build frontend
+        working-directory: registration/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Run Playwright suite
+        env:
+          TEST_DATABASE_HOST: 127.0.0.1
+          TEST_DATABASE_PORT: 5432
+          TEST_DATABASE_USER: apis
+          TEST_DATABASE_PASS: secret
+          TEST_DATABASE_NAME: apis_e2e
+          TEST_REDIS_HOST: 127.0.0.1
+          TEST_REDIS_PORT: 6379
+          PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID || 'test' }}
+          PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET || 'test' }}
+          PAYPAL_WEBHOOK_ID: test-webhook
+          SQUARE_APPLICATION_ID: ${{ secrets.SQUARE_APPLICATION_ID || 'test' }}
+          SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN || 'test' }}
+          SQUARE_LOCATION_ID: ${{ secrets.SQUARE_LOCATION_ID || 'test' }}
+        run: make e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright/playwright-report/
+          retention-days: 14
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apis-e2e-server-log
+          path: e2e/playwright/server.log
+          if-no-files-found: ignore
+          retention-days: 14

@@ -865,6 +865,8 @@ class Order(models.Model):
     lastFour = models.CharField(max_length=4, blank=True, verbose_name="Last 4")
     apiData = models.JSONField(null=True)
     onsite_reference = models.UUIDField(null=True, blank=True)
+    email_sent = models.BooleanField(null=True, blank=True, default=None)
+    email_error = models.TextField(blank=True, default="")
 
     def __str__(self):
         return "${0} {1} ({2}) [{3}]".format(

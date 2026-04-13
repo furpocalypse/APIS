@@ -18,7 +18,7 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "esnext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true
   }

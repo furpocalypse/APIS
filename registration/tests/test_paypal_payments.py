@@ -1821,3 +1821,118 @@ class TestGetAvailableRefundAmount(OrdersTestCase):
         order = PayPalOrder.from_dictionary(data)
         self.assertFalse(hasattr(order.purchase_units[0].payments, "refunds"))
         self.assertEqual(50.0, get_available_refund_amount(order))
+
+
+# ---------------------------------------------------------------------------
+# A.9 - coverage gap fills for paypal_payments.py
+# ---------------------------------------------------------------------------
+
+
+@tag("paypal")
+class TestPayPalPaymentsCoverageGaps(OrdersTestCase):
+    """Branches not reached by the A.1-A.8 matrix:
+
+    * format_errors description-present branch (L92)
+    * create_unpaid_paypal_order with apis_reference propagated (L151-152)
+    * capture_paypal_payment non-JSON ApiException body (L200-201)
+    * capture_paypal_payment non-JSON success body (L216-220)
+    """
+
+    @patch(
+        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
+    )
+    def test_A9_1_apis_reference_sets_invoice_and_custom_ids(self, mock_create):
+        """When apis_reference is provided it must be mirrored on the purchase
+        unit as both invoice_id and custom_id so PayPal can echo it back on
+        every downstream capture/refund/dispute event."""
+        body = {
+            "id": "ORD-NEW",
+            "status": "CREATED",
+            "purchase_units": [
+                {
+                    "reference_id": "registration",
+                    "amount": {"currency_code": "USD", "value": "45.00"},
+                }
+            ],
+        }
+        mock_create.return_value = create_api_response(body, PayPalOrder, 201)
+
+        create_unpaid_paypal_order(
+            total="45.00",
+            discount="0",
+            cart_items=[{"name": "Reg", "total": "45.00", "donation": False}],
+            apis_reference="APIS-REF-123",
+        )
+
+        call_args = mock_create.call_args[0][0]
+        pu = call_args["body"].purchase_units[0]
+        self.assertEqual("APIS-REF-123", pu.invoice_id)
+        self.assertEqual("APIS-REF-123", pu.custom_id)
+
+    @patch(
+        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
+    )
+    def test_A9_2_capture_api_exception_non_json_body(self, mock_capture):
+        """ApiException whose .response.text is not JSON must fall through the
+        except(ValueError, JSONDecodeError) branch and return the generic
+        unknown-error message."""
+        response = Mock(spec=HttpResponse)
+        response.status_code = 500
+        response.text = "<html><body>PayPal gateway error</body></html>"
+        exc = ApiException("PayPal API failure", response)
+        mock_capture.side_effect = exc
+
+        apis_order = Order(total=95, status=Order.PENDING, reference="CAP-NONJSON")
+        apis_order.save()
+
+        ok, body = capture_paypal_payment("ABCDEF", apis_order)
+
+        self.assertFalse(ok)
+        self.assertIn("errors", body)
+        self.assertEqual(
+            ["An unknown PayPal error occurred during payment capture"],
+            body["errors"],
+        )
+
+    @patch(
+        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
+    )
+    def test_A9_3_capture_success_non_json_text_body(self, mock_capture):
+        """A successful ApiResponse (is_error() False) whose .text is not
+        valid JSON must hit the JSONDecodeError branch and return an error
+        tuple without persisting apiData."""
+        bogus_response = Mock(spec=ApiResponse)
+        bogus_response.is_error = Mock(return_value=False)
+        bogus_response.text = "not actually json"
+        mock_capture.return_value = bogus_response
+
+        apis_order = Order(total=95, status=Order.PENDING, reference="CAP-BADJSON")
+        apis_order.save()
+
+        ok, body = capture_paypal_payment("ABCDEF", apis_order)
+
+        self.assertFalse(ok)
+        self.assertIn("errors", body)
+        self.assertIn("Unable to decode response from PayPal", body["errors"][0])
+
+    def test_A9_4_format_errors_includes_description_when_present(self):
+        """format_errors appends the description when the ErrorDetails object
+        carries one — the hasattr(error, "description") true branch."""
+        from registration.paypal_payments import format_errors
+
+        stub = Mock(spec=ApiResponse)
+        stub.text = json.dumps(
+            {
+                "errors": [
+                    {
+                        "issue": "INSTRUMENT_DECLINED",
+                        "description": "Card was declined",
+                    }
+                ]
+            }
+        )
+
+        result = format_errors(stub)
+
+        self.assertIn("INSTRUMENT_DECLINED", result)
+        self.assertIn("Card was declined", result)

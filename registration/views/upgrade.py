@@ -12,19 +12,14 @@ from django.shortcuts import get_object_or_404, render
 from paypalserversdk.exceptions.api_exception import ApiException
 
 import registration.emails
+from registration import tasks
 from registration.models import *
 from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import (
-    clear_session,
-    get_registration_email,
-    getOptionsDict,
-    handler,
-    logger,
-)
+from .common import clear_session, getOptionsDict, handler, logger
 from .ordering import do_checkout, do_paypal_checkout, doZeroCheckout, get_total
 
 logger = logging.getLogger(__name__)
@@ -158,28 +153,18 @@ def invoice_upgrade(request):
 
 def done_upgrade(request):
     event = Event.objects.get(default=True)
-    context = {"event": event}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "order": order}
     return render(request, "registration/upgrade-done.html", context)
 
 
 def send_upgrade_email(request, attendee, order):
-    event = Event.objects.get(default=True)
     clear_session(request)
-    try:
-        registration.emails.send_upgrade_payment_email(attendee, order)
-    except Exception as e:
-        logger.exception("Error sending UpgradePaymentEmail")
-        registration_email = get_registration_email(event)
-        return JsonResponse(
-            {
-                "success": False,
-                "message": "Your upgrade payment succeeded but we may have been unable to send you a "
-                "confirmation email. If you do not receive one within the next hour, please "
-                "contact {0} to get your confirmation number.".format(
-                    registration_email
-                ),
-            }
-        )
+    request.session["last_order_id"] = order.id
+    tasks.send_upgrade_payment_email_task.delay(attendee.id, order.id)
     return JsonResponse({"success": True})
 
 

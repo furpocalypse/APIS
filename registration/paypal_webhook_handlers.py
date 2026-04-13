@@ -369,6 +369,102 @@ def handle_sale_refunded_v1(notification: PaymentWebhookNotification) -> bool:
     return True
 
 
+def _find_order_for_v2_capture(resource: dict) -> Optional[Order]:
+    """Resolve the Order for a v2 capture resource (PAYMENT.CAPTURE.COMPLETED /
+    PAYMENT.CAPTURE.DENIED).
+    """
+    order = _find_order_by_reference(resource.get("invoice_id"))
+    if order:
+        return order
+    order = _find_order_by_reference(resource.get("custom_id"))
+    if order:
+        return order
+    return _find_order_by_capture_id(resource.get("id"))
+
+
+def handle_capture_completed(notification: PaymentWebhookNotification) -> bool:
+    """PAYMENT.CAPTURE.COMPLETED — primary payment capture confirmation.
+
+    The synchronous capture in :func:`registration.paypal_payments.capture_paypal_payment`
+    already sets ``Order.status = COMPLETED`` for the happy path. This handler
+    is a safety net for captures that PayPal initially returned as PENDING
+    (held for review, pending eCheck, etc.) and later cleared. Transitions
+    PENDING -> COMPLETED and enqueues the registration email if one has not
+    yet been sent.
+    """
+    resource = notification.body.get("resource")
+    if not isinstance(resource, dict):
+        logger.warning("PAYMENT.CAPTURE.COMPLETED: missing resource")
+        return False
+    order = _find_order_for_v2_capture(resource)
+    if not order:
+        logger.warning(
+            "PAYMENT.CAPTURE.COMPLETED for capture %s: no matching order",
+            resource.get("id"),
+        )
+        return False
+
+    if order.status == Order.COMPLETED:
+        return True
+
+    if order.status in (
+        Order.REFUNDED,
+        Order.REFUND_PENDING,
+        Order.DISPUTE_EVIDENCE_REQUIRED,
+        Order.DISPUTE_PROCESSING,
+        Order.DISPUTE_WON,
+        Order.DISPUTE_LOST,
+        Order.DISPUTE_ACCEPTED,
+    ):
+        logger.warning(
+            "PAYMENT.CAPTURE.COMPLETED for order %s ignored: terminal status %s",
+            order.reference,
+            order.status,
+        )
+        return True
+
+    previous_status = order.status
+    order.status = Order.COMPLETED
+    order.save()
+
+    if (
+        previous_status == Order.PENDING
+        and order.email_sent is None
+        and order.billingEmail
+    ):
+        try:
+            tasks.send_registration_email_task.delay(order.id, order.billingEmail)
+        except Exception:
+            logger.exception(
+                "Failed to queue registration email for late-completed order %s",
+                order.id,
+            )
+    return True
+
+
+def handle_capture_denied(notification: PaymentWebhookNotification) -> bool:
+    """PAYMENT.CAPTURE.DENIED — capture was denied by PayPal.
+
+    Mark the Order as FAILED so admins see it in reconciliation dashboards.
+    Idempotent: no-op if the order is already FAILED.
+    """
+    resource = notification.body.get("resource")
+    if not isinstance(resource, dict):
+        logger.warning("PAYMENT.CAPTURE.DENIED: missing resource")
+        return False
+    order = _find_order_for_v2_capture(resource)
+    if not order:
+        logger.warning(
+            "PAYMENT.CAPTURE.DENIED for capture %s: no matching order",
+            resource.get("id"),
+        )
+        return False
+    if order.status != Order.FAILED:
+        order.status = Order.FAILED
+        order.save()
+    return True
+
+
 def _add_attendees_to_banlist_and_hold(order: Order) -> None:
     dispute_hold = get_hold_type("Chargeback")
     for oi in OrderItem.objects.filter(order=order):

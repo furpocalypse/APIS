@@ -8,12 +8,16 @@ if (window.paypal) {
         },
         async createOrder() {
             try {
+                const payload = {
+                    charityDonation: $("#donateCharity").val(),
+                    orgDonation: $("#donateOrg").val()
+                };
+                if (typeof window.getExtraOrderData === 'function') {
+                    Object.assign(payload, window.getExtraOrderData());
+                }
                 const response = await postJSON(
                     URL_REGISTRATION_CREATEORDER,
-                    JSON.stringify({
-                        charityDonation: $("#donateCharity").val(),
-                        orgDonation: $("#donateOrg").val()
-                    })
+                    JSON.stringify(payload)
                 );
 
                 const orderResponse = await response.json();

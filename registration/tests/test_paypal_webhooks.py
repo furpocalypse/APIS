@@ -1437,3 +1437,903 @@ class TestPaypalRefundWebhookPerRegistrantType(TestCase):
 
         order.refresh_from_db()
         self.assertEqual(order.status, Order.REFUNDED)
+
+
+# ---------------------------------------------------------------------------
+# Coverage-gap fills for views/paypal_webhooks.py
+# ---------------------------------------------------------------------------
+
+
+@tag("PayPal")
+class TestPaypalViewsCoverageGaps(TestCase):
+    """Branches in registration/views/paypal_webhooks.py not reached by the
+    signature, malformed-body, or refund-happy-path suites above:
+
+    * _paypal_api_base production switch (L27)
+    * _get_paypal_access_token missing credentials (L39-40)
+    * verify_signature body not valid JSON (L95-97)
+    * verify_signature verify-call urlopen raises (L131-133)
+    * paypal_webhook IntegrityError on notification.save (L171-174)
+    * process_webhook handler raises exception (L200-205)
+    """
+
+    ALL_HEADERS = {
+        "paypal-auth-algo": "SHA256withRSA",
+        "paypal-cert-url": "https://api.paypal.com/v1/notifications/certs/CERT",
+        "paypal-transmission-id": "TRANS-ID",
+        "paypal-transmission-sig": "SIG",
+        "paypal-transmission-time": "2024-10-14T21:58:35.000Z",
+    }
+
+    @override_settings(PAYPAL_ENVIRONMENT="production")
+    def test_paypal_api_base_returns_live_when_production(self):
+        from registration.views.paypal_webhooks import (
+            PAYPAL_LIVE_API_BASE,
+            _paypal_api_base,
+        )
+
+        self.assertEqual(PAYPAL_LIVE_API_BASE, _paypal_api_base())
+
+    @override_settings(PAYPAL_CLIENT_ID="", PAYPAL_CLIENT_SECRET="")
+    def test_get_paypal_access_token_returns_none_without_credentials(self):
+        from registration.views.paypal_webhooks import _get_paypal_access_token
+
+        with self.assertLogs(
+            "registration.views.paypal_webhooks", level="WARNING"
+        ) as captured:
+            self.assertIsNone(_get_paypal_access_token())
+        self.assertTrue(
+            any("credentials not configured" in msg for msg in captured.output)
+        )
+
+    @override_settings(
+        PAYPAL_WEBHOOK_ID="TEST-WEBHOOK-ID",
+        PAYPAL_CLIENT_ID="CID",
+        PAYPAL_CLIENT_SECRET="SEC",
+    )
+    @patch("urllib.request.urlopen")
+    def test_verify_signature_returns_false_for_invalid_json_body(self, mock_urlopen):
+        """verify_signature reads request.body as JSON; a malformed body must
+        fail-closed without making any HTTP calls."""
+        factory = RequestFactory()
+        meta = {
+            "HTTP_" + name.upper().replace("-", "_"): value
+            for name, value in self.ALL_HEADERS.items()
+        }
+        request = factory.post(
+            "/paypal-webhook",
+            data='{"not valid json',
+            content_type="application/json",
+            **meta,
+        )
+        with self.assertLogs(
+            "registration.views.paypal_webhooks", level="WARNING"
+        ) as captured:
+            self.assertFalse(verify_signature(request))
+        self.assertFalse(mock_urlopen.called)
+        self.assertTrue(any("not valid JSON" in msg for msg in captured.output))
+
+    @override_settings(
+        PAYPAL_WEBHOOK_ID="TEST-WEBHOOK-ID",
+        PAYPAL_CLIENT_ID="CID",
+        PAYPAL_CLIENT_SECRET="SEC",
+    )
+    @patch("urllib.request.urlopen")
+    def test_verify_signature_returns_false_when_verify_call_raises(self, mock_urlopen):
+        """OAuth token fetch succeeds, but the verify-webhook-signature call
+        raises URLError — this hits the second try/except (L131-133) rather
+        than the token-fetch except block."""
+        token_response = MagicMock()
+        inner = MagicMock()
+        inner.read.return_value = json.dumps(
+            {"access_token": "token", "token_type": "Bearer"}
+        ).encode("utf-8")
+        inner.status = 200
+        token_response.__enter__.return_value = inner
+        token_response.__exit__.return_value = False
+
+        mock_urlopen.side_effect = [token_response, URLError("verify exploded")]
+
+        factory = RequestFactory()
+        meta = {
+            "HTTP_" + name.upper().replace("-", "_"): value
+            for name, value in self.ALL_HEADERS.items()
+        }
+        request = factory.post(
+            "/paypal-webhook",
+            data=json.dumps({"id": "WH-1", "event_type": "X"}),
+            content_type="application/json",
+            **meta,
+        )
+        with self.assertLogs(
+            "registration.views.paypal_webhooks", level="ERROR"
+        ) as captured:
+            self.assertFalse(verify_signature(request))
+        self.assertTrue(
+            any(
+                "verify-webhook-signature call failed" in msg for msg in captured.output
+            )
+        )
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    @patch("registration.models.PaymentWebhookNotification.save")
+    def test_paypal_webhook_integrity_error_returns_200(self, mock_save, mock_verify):
+        """An IntegrityError raised during notification.save (race with a
+        concurrent duplicate delivery) must be caught; endpoint returns 200."""
+        from django.db import IntegrityError
+
+        mock_verify.return_value = True
+        mock_save.side_effect = IntegrityError("duplicate event_id")
+
+        body = {"id": "WH-RACE", "event_type": "PAYMENT.CAPTURE.REFUNDED"}
+        with self.assertLogs(
+            "registration.views.paypal_webhooks", level="WARNING"
+        ) as captured:
+            response = self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any("already exists" in msg for msg in captured.output))
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_process_webhook_catches_handler_exception(self, mock_verify):
+        """A registered handler that raises must be caught by process_webhook;
+        the notification is stored with processed=False and the endpoint
+        still returns 200. The _HANDLERS dict captures function references
+        at import time, so we patch the dict entry directly rather than the
+        handler module attribute."""
+        from registration.views.paypal_webhooks import _HANDLERS
+
+        mock_verify.return_value = True
+
+        body = {
+            "id": "WH-HANDLER-BOOM",
+            "event_type": "PAYMENT.CAPTURE.REFUNDED",
+            "resource_type": "refund",
+            "resource": {
+                "id": "R-1",
+                "status": "COMPLETED",
+                "amount": {"currency_code": "USD", "value": "1.00"},
+            },
+        }
+
+        def boom(_notification):
+            raise RuntimeError("handler boom")
+
+        with (
+            patch.dict(_HANDLERS, {"PAYMENT.CAPTURE.REFUNDED": boom}),
+            self.assertLogs(
+                "registration.views.paypal_webhooks", level="ERROR"
+            ) as captured,
+        ):
+            response = self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+        self.assertTrue(
+            any("crashed; marking unprocessed" in msg for msg in captured.output)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Coverage-gap fills for paypal_webhook_handlers.py
+# ---------------------------------------------------------------------------
+
+
+@tag("PayPal")
+class TestPaypalHandlerHelperCoverageGaps(TestCase):
+    """Direct unit tests for private helpers in paypal_webhook_handlers.py.
+
+    These helpers are normally reached only by webhook-endpoint tests with a
+    well-formed payload. To drive the defensive branches (None inputs,
+    malformed apiData, malformed HATEOAS links) we call the helpers directly.
+    """
+
+    def test_find_order_by_capture_id_returns_none_for_none(self):
+        from registration.paypal_webhook_handlers import (
+            _find_order_by_capture_id,
+        )
+
+        self.assertIsNone(_find_order_by_capture_id(None))
+        self.assertIsNone(_find_order_by_capture_id(""))
+
+    def test_find_order_by_capture_id_skips_orders_without_apidata(self):
+        """Orders whose apiData is None, empty-dict, or missing purchase_units
+        must be skipped without crashing the scan."""
+        from registration.paypal_webhook_handlers import (
+            _find_order_by_capture_id,
+        )
+
+        Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="NO-API-DATA",
+            billingEmail="x@example.com",
+            apiData=None,
+        ).save()
+        Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="EMPTY-PURCHASE-UNITS",
+            billingEmail="x@example.com",
+            apiData={"purchase_units": []},
+        ).save()
+        # Legitimately captures-bearing order with a non-matching id:
+        Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="NON-MATCH",
+            billingEmail="x@example.com",
+            apiData={
+                "purchase_units": [
+                    {"payments": {"captures": [{"id": "SOMETHING-ELSE"}]}}
+                ]
+            },
+        ).save()
+
+        self.assertIsNone(_find_order_by_capture_id("not-a-real-capture"))
+
+    def test_find_order_by_capture_id_handles_malformed_shapes(self):
+        """Orders whose purchase_units chain has non-dict payments must be
+        skipped via the except (AttributeError, IndexError, TypeError)
+        clause rather than propagating."""
+        from registration.paypal_webhook_handlers import (
+            _find_order_by_capture_id,
+        )
+
+        # purchase_units[0] is None — safe via `(None or {})`, just skipped.
+        Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="PU0-NONE",
+            billingEmail="x@example.com",
+            apiData={"purchase_units": [None]},
+        ).save()
+        # payments is a string — `.get("captures")` raises AttributeError,
+        # which is caught by the except clause and skipped.
+        Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="PAYMENTS-STR",
+            billingEmail="x@example.com",
+            apiData={"purchase_units": [{"payments": "not a dict"}]},
+        ).save()
+
+        # No exception raised; returns None.
+        self.assertIsNone(_find_order_by_capture_id("no-match"))
+
+    def test_parse_capture_id_from_links_handles_malformed_href(self):
+        """A link with rel=up but whose href does not contain /captures/
+        hits the IndexError/continue branch and produces None."""
+        from registration.paypal_webhook_handlers import (
+            _parse_capture_id_from_links,
+        )
+
+        resource = {
+            "links": [
+                {"rel": "up", "href": "https://api.paypal.com/v2/something-else/xxx"}
+            ]
+        }
+        self.assertIsNone(_parse_capture_id_from_links(resource))
+
+    def test_parse_capture_id_from_links_returns_none_without_rel_up(self):
+        from registration.paypal_webhook_handlers import (
+            _parse_capture_id_from_links,
+        )
+
+        resource = {
+            "links": [
+                {"rel": "self", "href": "https://api.paypal.com/v2/payments/refunds/R"},
+                {
+                    "rel": "refund",
+                    "href": "https://api.paypal.com/v2/payments/captures/CAP",
+                },
+            ]
+        }
+        self.assertIsNone(_parse_capture_id_from_links(resource))
+
+    def test_find_order_for_v2_refund_falls_back_to_custom_id(self):
+        """When invoice_id doesn't resolve an Order, the helper must try
+        custom_id before falling through to the capture-id scan."""
+        from registration.paypal_webhook_handlers import (
+            _find_order_for_v2_refund,
+        )
+
+        order = Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="CUSTOM-REF-ONLY",
+            billingEmail="x@example.com",
+        )
+        order.save()
+
+        found = _find_order_for_v2_refund(
+            {"invoice_id": "does-not-exist", "custom_id": "CUSTOM-REF-ONLY"}
+        )
+        self.assertEqual(found.pk, order.pk)
+
+    def test_find_order_for_v1_sale_falls_back_to_custom(self):
+        from registration.paypal_webhook_handlers import _find_order_for_v1_sale
+
+        order = Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="V1-CUSTOM",
+            billingEmail="x@example.com",
+        )
+        order.save()
+
+        found = _find_order_for_v1_sale(
+            {"invoice_number": "missing", "custom": "V1-CUSTOM"}
+        )
+        self.assertEqual(found.pk, order.pk)
+
+    def test_find_order_for_dispute_fallback_paths(self):
+        """The dispute lookup tries custom, then invoice_number, then the
+        seller_transaction_id capture-id fallback. Hit the first two
+        fall-through branches explicitly."""
+        from registration.paypal_webhook_handlers import _find_order_for_dispute
+
+        invoice_order = Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="DISPUTE-INVOICE",
+            billingEmail="x@example.com",
+        )
+        invoice_order.save()
+        custom_order = Order(
+            total="1.00",
+            status=Order.COMPLETED,
+            reference="DISPUTE-CUSTOM",
+            billingEmail="x@example.com",
+        )
+        custom_order.save()
+
+        found_by_custom = _find_order_for_dispute(
+            {
+                "disputed_transactions": [
+                    {"custom": "DISPUTE-CUSTOM", "invoice_number": "nothing"}
+                ]
+            }
+        )
+        self.assertEqual(found_by_custom.pk, custom_order.pk)
+
+        found_by_invoice = _find_order_for_dispute(
+            {"disputed_transactions": [{"invoice_number": "DISPUTE-INVOICE"}]}
+        )
+        self.assertEqual(found_by_invoice.pk, invoice_order.pk)
+
+
+@tag("PayPal")
+class TestPaypalHandlerMissingResourceCoverageGaps(PayPalOrdersTestCase):
+    """Every handler has a defensive `if not isinstance(resource, dict)` guard.
+    The existing test_missing_resource_key test covers the CAPTURE_REFUNDED
+    branch; cover the remaining 4 siblings here."""
+
+    def _post_missing_resource(self, event_type: PaypalNotificationEventType):
+        _, body = generate_paypal_notification_example(event_type)
+        body.pop("resource", None)
+        body["id"] = f"WH-NO-RESOURCE-{event_type.name}"
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=True,
+        ):
+            return (
+                self.client.post(
+                    reverse("registration:paypal_webhook"),
+                    json.dumps(body),
+                    content_type="application/json",
+                    headers={"content-type": "application/json"},
+                ),
+                body,
+            )
+
+    def test_capture_reversed_missing_resource(self):
+        response, body = self._post_missing_resource(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_sale_refunded_missing_resource(self):
+        response, body = self._post_missing_resource(
+            PaypalNotificationEventType.PAYMENT_SALE_REFUNDED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_dispute_created_missing_resource(self):
+        response, body = self._post_missing_resource(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_dispute_updated_missing_resource(self):
+        response, body = self._post_missing_resource(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_dispute_resolved_missing_resource(self):
+        response, body = self._post_missing_resource(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+
+@tag("PayPal")
+class TestPaypalHandlerNoMatchingOrderCoverageGaps(TestCase):
+    """Every handler has a `no matching order` fall-through branch. The
+    existing tests cover capture-refunded and dispute-created; cover the
+    remaining siblings here. Each test runs against an empty order table so
+    the lookup cannot succeed."""
+
+    def _post(self, event_type: PaypalNotificationEventType):
+        _, body = generate_paypal_notification_example(event_type)
+        body["id"] = f"WH-NO-ORDER-{event_type.name}"
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=True,
+        ):
+            return (
+                self.client.post(
+                    reverse("registration:paypal_webhook"),
+                    json.dumps(body),
+                    content_type="application/json",
+                    headers={"content-type": "application/json"},
+                ),
+                body,
+            )
+
+    def test_capture_reversed_no_matching_order(self):
+        response, body = self._post(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_sale_refunded_no_matching_order(self):
+        response, body = self._post(PaypalNotificationEventType.PAYMENT_SALE_REFUNDED)
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_dispute_updated_no_matching_order(self):
+        response, body = self._post(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+    def test_dispute_resolved_no_matching_order(self):
+        response, body = self._post(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED
+        )
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(webhook.processed)
+
+
+@tag("PayPal")
+class TestPaypalHandlerApiDataInitCoverageGaps(PayPalOrdersTestCase):
+    """The dispute_* and _upsert_refund_in_apidata paths all have an
+    ``if not isinstance(order.apiData, dict): order.apiData = {}`` guard.
+    Drive it by seeding orders whose apiData is None *and* whose reference
+    will resolve the lookup so the guard branch is taken."""
+
+    def setUp(self):
+        super().setUp()
+        # Clobber apiData after base setUp so the handler's apiData-init
+        # guard activates. Order stays resolvable because we route the
+        # webhook via invoice_id/custom_id (refund) or disputed_transactions
+        # custom (dispute) matching self.order.reference="FOOBAR".
+        self.order.apiData = None
+        self.order.save()
+
+    def _post_refund_routed_to_order(self):
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+        )
+        body["id"] = "WH-NONE-APIDATA-REFUND"
+        body["resource"]["invoice_id"] = self.order.reference
+        body["resource"]["custom_id"] = self.order.reference
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=True,
+        ):
+            return (
+                self.client.post(
+                    reverse("registration:paypal_webhook"),
+                    json.dumps(body),
+                    content_type="application/json",
+                    headers={"content-type": "application/json"},
+                ),
+                body,
+            )
+
+    def _post_dispute_routed_to_order(self, event_type: PaypalNotificationEventType):
+        _, body = generate_paypal_notification_example(event_type)
+        body["id"] = f"WH-NONE-APIDATA-{event_type.name}"
+        body["resource"]["disputed_transactions"][0]["custom"] = self.order.reference
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=True,
+        ):
+            return (
+                self.client.post(
+                    reverse("registration:paypal_webhook"),
+                    json.dumps(body),
+                    content_type="application/json",
+                    headers={"content-type": "application/json"},
+                ),
+                body,
+            )
+
+    def test_refund_initializes_apidata_when_not_dict(self):
+        """_upsert_refund_in_apidata — reached indirectly via
+        PAYMENT.CAPTURE.REFUNDED when the seeded apiData is None."""
+        response, body = self._post_refund_routed_to_order()
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertTrue(webhook.processed)
+        self.order.refresh_from_db()
+        self.assertIsInstance(self.order.apiData, dict)
+        self.assertIn("refunds", self.order.apiData)
+
+    def test_dispute_created_initializes_apidata_when_not_dict(self):
+        response, _ = self._post_dispute_routed_to_order(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
+        )
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertIsInstance(self.order.apiData, dict)
+        self.assertIn("dispute", self.order.apiData)
+
+    def test_dispute_updated_initializes_apidata_when_not_dict(self):
+        response, _ = self._post_dispute_routed_to_order(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED
+        )
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertIsInstance(self.order.apiData, dict)
+        self.assertIn("dispute", self.order.apiData)
+
+    def test_dispute_resolved_initializes_apidata_when_not_dict(self):
+        response, _ = self._post_dispute_routed_to_order(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED
+        )
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertIsInstance(self.order.apiData, dict)
+        self.assertIn("dispute", self.order.apiData)
+
+
+@tag("PayPal")
+class TestPaypalHandlerMiscCoverageGaps(PayPalOrdersTestCase):
+    """Remaining handler branches:
+
+    * _apply_refund_side_effects: CANCELLED refund undoes a prior COMPLETED
+      refund (status -> COMPLETED, total restored). L254.
+    * handle_dispute_created: email task enqueue raises; dispute state
+      already persisted so the handler logs and still returns True. L412-416.
+    * handle_dispute_resolved: donation-reset branch when outcome drops the
+      order below donation total. L481-487.
+    """
+
+    def test_refund_cancellation_restores_order_status_and_total(self):
+        """A refund delivered first as COMPLETED then as CANCELLED must
+        restore Order.status to COMPLETED and refund back the reduced total.
+        Hits _apply_refund_side_effects's undo branch."""
+        from decimal import Decimal
+
+        with patch(
+            "registration.views.paypal_webhooks.verify_signature",
+            return_value=True,
+        ):
+            # First: COMPLETED -> order becomes REFUNDED, total 0.
+            _, body1 = generate_paypal_notification_example(
+                PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+            )
+            body1["id"] = "WH-UNDO-1"
+            body1["resource"]["id"] = "REFUND-UNDO"
+            body1["resource"]["status"] = "COMPLETED"
+            body1["resource"]["amount"]["value"] = "99.99"
+            self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body1),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
+            self.order.refresh_from_db()
+            self.assertEqual(self.order.status, Order.REFUNDED)
+
+            # Second: same refund id, now CANCELLED -> undo.
+            _, body2 = generate_paypal_notification_example(
+                PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED
+            )
+            body2["id"] = "WH-UNDO-2"
+            body2["resource"]["id"] = "REFUND-UNDO"
+            body2["resource"]["status"] = "CANCELLED"
+            body2["resource"]["amount"]["value"] = "99.99"
+            self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body2),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+        self.assertEqual(self.order.total, Decimal("99.99"))
+
+    @patch(
+        "registration.tasks.send_chargeback_notice_email_task.delay",
+        side_effect=RuntimeError("broker unreachable"),
+    )
+    @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
+    def test_dispute_created_handles_email_task_enqueue_failure(
+        self, _mock_verify, _mock_delay
+    ):
+        """If Celery/broker is unreachable, the dispute state must still be
+        persisted and the handler must mark the webhook processed=True."""
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
+        )
+        body["id"] = "WH-DISPUTE-BROKER-DOWN"
+        with self.assertLogs(
+            "registration.paypal_webhook_handlers", level="ERROR"
+        ) as captured:
+            response = self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertTrue(webhook.processed)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.DISPUTE_EVIDENCE_REQUIRED)
+        self.assertTrue(
+            any(
+                "Failed to queue chargeback notice email" in msg
+                for msg in captured.output
+            )
+        )
+
+    @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
+    def test_dispute_resolved_resets_donations_on_lost_outcome(self, _mv):
+        """RESOLVED_BUYER_FAVOUR -> DISPUTE_LOST while the order carries
+        donations: donations must be zeroed and the notes field must record
+        the reset for admin audit."""
+        self.order.orgDonation = 10
+        self.order.charityDonation = 15
+        self.order.save()
+
+        _, body = generate_paypal_notification_example(
+            PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED
+        )
+        body["id"] = "WH-DISPUTE-LOST-RESETS-DONATIONS"
+        body["resource"]["dispute_outcome"]["outcome_code"] = "RESOLVED_BUYER_FAVOUR"
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.DISPUTE_LOST)
+        from decimal import Decimal
+
+        self.assertEqual(self.order.orgDonation, Decimal("0"))
+        self.assertEqual(self.order.charityDonation, Decimal("0"))
+        self.assertIn("donation", (self.order.notes or "").lower())
+
+
+@tag("PayPal")
+class TestPaypalCaptureWebhooks(TestCase):
+    """Handlers for PAYMENT.CAPTURE.COMPLETED and PAYMENT.CAPTURE.DENIED."""
+
+    PAYPAL_CAPTURE_ID = "3C679366HH908993F"
+    REFERENCE = "CAPREF"
+
+    def setUp(self):
+        self.event = Event(**DEFAULT_EVENT_ARGS)
+        self.event.save()
+        self.order = Order(
+            total="99.99",
+            status=Order.PENDING,
+            reference=self.REFERENCE,
+            billingEmail="apis@mailinator.com",
+            lastFour="1111",
+        )
+        self.order.save()
+
+    def _capture_body(self, event_type, status="COMPLETED"):
+        return {
+            "id": f"WH-{event_type}-1",
+            "event_type": event_type,
+            "resource_type": "capture",
+            "resource": {
+                "id": self.PAYPAL_CAPTURE_ID,
+                "status": status,
+                "amount": {"currency_code": "USD", "value": "99.99"},
+                "invoice_id": self.REFERENCE,
+                "custom_id": self.REFERENCE,
+            },
+        }
+
+    @patch("registration.paypal_webhook_handlers.tasks")
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_completed_pending_to_completed_queues_email(
+        self, mock_verify, mock_tasks
+    ):
+        mock_verify.return_value = True
+        body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+        mock_tasks.send_registration_email_task.delay.assert_called_once_with(
+            self.order.id, self.order.billingEmail
+        )
+
+    @patch("registration.paypal_webhook_handlers.tasks")
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_completed_is_idempotent_when_already_completed(
+        self, mock_verify, mock_tasks
+    ):
+        mock_verify.return_value = True
+        self.order.status = Order.COMPLETED
+        self.order.email_sent = True
+        self.order.save()
+        body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+        mock_tasks.send_registration_email_task.delay.assert_not_called()
+
+    @patch("registration.paypal_webhook_handlers.tasks")
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_completed_does_not_queue_email_when_already_sent(
+        self, mock_verify, mock_tasks
+    ):
+        """If email_sent is already set (True or False) don't re-queue."""
+        mock_verify.return_value = True
+        self.order.email_sent = True
+        self.order.save()
+        body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+        mock_tasks.send_registration_email_task.delay.assert_not_called()
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_completed_no_matching_order(self, mock_verify):
+        mock_verify.return_value = True
+        body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
+        body["resource"]["invoice_id"] = "NOMATCH"
+        body["resource"]["custom_id"] = "NOMATCH"
+        body["resource"]["id"] = "NOMATCHCAP"
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+        notification = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(notification.processed)
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_completed_missing_resource(self, mock_verify):
+        mock_verify.return_value = True
+        body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
+        del body["resource"]
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+        notification = PaymentWebhookNotification.objects.get(event_id=body["id"])
+        self.assertFalse(notification.processed)
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_denied_marks_order_failed(self, mock_verify):
+        mock_verify.return_value = True
+        body = self._capture_body("PAYMENT.CAPTURE.DENIED", status="DECLINED")
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.FAILED)
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_denied_idempotent(self, mock_verify):
+        mock_verify.return_value = True
+        self.order.status = Order.FAILED
+        self.order.save()
+        body = self._capture_body("PAYMENT.CAPTURE.DENIED", status="DECLINED")
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.FAILED)
+
+    @patch("registration.views.paypal_webhooks.verify_signature")
+    def test_capture_completed_skips_terminal_refunded(self, mock_verify):
+        mock_verify.return_value = True
+        self.order.status = Order.REFUNDED
+        self.order.save()
+        body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
+
+        response = self.client.post(
+            reverse("registration:paypal_webhook"),
+            json.dumps(body),
+            content_type="application/json",
+            headers={"content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.REFUNDED)

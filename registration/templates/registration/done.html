@@ -7,7 +7,19 @@
       <h3>Thank you for your Payment!</h3>
       <hr>
       <p>Thank you for registering!</p>
-      <p>You should receive an email shortly with your confirmation number. See you at the con!</p>
+      {% if order.email_sent is False %}
+        <div class="alert alert-warning" role="alert" style="margin-top:15px;">
+          <strong>Important:</strong> Your registration is confirmed
+          {% if order.reference %}(Order #{{ order.reference }}){% endif %},
+          but we were unable to send your confirmation email. Please contact
+          <a href="mailto:{{ event.registrationEmail }}">{{ event.registrationEmail }}</a>
+          to receive your badge details.
+        </div>
+      {% elif order.email_sent %}
+        <p>Your confirmation email has been sent. See you at the con!</p>
+      {% else %}
+        <p>You should receive an email shortly with your confirmation number. See you at the con!</p>
+      {% endif %}
       <p style='float:right;'><a href='/'>Back to Main Page</a></p>
       <p><br></p>
     </div>

@@ -180,6 +180,89 @@ Please see [this documentation](https://github.com/furthemore/APIS/wiki/MQTT-Con
 1. Install: `pip install pre-commit` or `brew install pre-commit`.
 2. then run: `pre-commit install`, this will apply the hooks defined in `.pre-commit-config.yaml` to evey commit
 
+### Running tests
+
+APIS has three test suites — Django (`unittest` via `manage.py test`), the
+Solid.js SPA (Vitest), and the Playwright end-to-end suite. The Makefile
+targets wire up every environment variable the suites expect; prefer them
+over invoking `manage.py test` / `npx vitest` / `npx playwright` directly
+unless you are narrowing down a specific failure.
+
+#### Prerequisites
+
+- `uv` installed (see the Manual setup section above).
+- Docker + Docker Compose running — the Django suite connects to real
+  PostgreSQL, Redis, and Gotenberg instances rather than mocking them.
+  `make test-django` runs `make services-up` for you, but you can start
+  them eagerly with:
+
+      make services-up        # postgres, redis, gotenberg via docker compose
+      make services-down      # tear down (volumes preserved)
+
+- `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` exported in the shell
+  running the tests. Sandbox credentials are fine; the suites that touch
+  PayPal substitute an in-process stub so no real API call is made, but the
+  settings module refuses to import without the env vars set. If you have
+  `direnv` wired up, these come from `.env` automatically.
+
+#### Targets
+
+| Target                         | What it runs                                                                 |
+|--------------------------------|------------------------------------------------------------------------------|
+| `make test`                    | Full regression gate: Django + Vitest + Playwright. Use before opening a PR. |
+| `make test-django`             | All 450+ Django tests against a throwaway Postgres DB.                       |
+| `make test-paypal`             | Only tests tagged `paypal` / `PayPal` — fastest feedback for payment work.   |
+| `make test-coverage`           | Django suite under `coverage`; emits `htmlcov/` + terminal summary.          |
+| `make test-all`                | Django (with coverage) + frontend. No Playwright. Good for CI parity.        |
+| `make test-frontend`           | Vitest suite in `registration/frontend`.                                     |
+| `make test-frontend-coverage`  | Vitest with v8 coverage.                                                     |
+| `make test-check-migrations`   | Fails if you've edited a model without a matching migration.                 |
+| `make test-build-frontend`     | Runs `npm install && npm run build` to produce the Vite manifest.            |
+| `make test-collectstatic`      | Populates the staticfiles manifest the Django suite reads.                   |
+| `make e2e-setup`               | Installs Playwright browsers under `e2e/playwright`. Run once.               |
+| `make e2e`                     | Spins up a throwaway local server and runs every Playwright spec.            |
+| `make e2e-smoke`               | Playwright specs tagged `@smoke` only.                                       |
+| `make e2e-ui`                  | Opens Playwright's interactive UI for debugging specs.                       |
+
+#### Running a single test
+
+The Makefile targets run the full suite. To drive a single test, bring up
+the services, then invoke `manage.py test` / `vitest` / `playwright`
+directly:
+
+```bash
+make services-up
+
+# A specific Django test class or method. The Makefile's TEST_ENV block
+# documents every env var the suite needs if you want to reproduce it
+# without the Makefile.
+uv run python manage.py test \
+    registration.tests.test_paypal_webhooks.TestPaypalCaptureWebhooks
+
+# A specific Vitest file
+cd registration/frontend && npx vitest run src/components/button.test.tsx
+
+# A specific Playwright spec
+cd e2e/playwright && npx playwright test tests/webhooks.spec.ts
+```
+
+The PayPal stub used by the webhook + checkout tests lives in
+`registration/e2e/paypal_stub.py`; the Playwright harness toggles it on via
+`E2E_MODE=1` when launching the local server.
+
+#### Interpreting failures
+
+- **`DjangoViteAssetNotFoundError: Cannot find src/index.tsx ...`** — the
+  Vite manifest hasn't been built. Run `make test-build-frontend` then
+  `make test-collectstatic`.
+- **`couldn't get a connection after 30.00 sec`** — Postgres (or Redis)
+  isn't running. Run `make services-up`.
+- **`PAYPAL_WEBHOOK_ID is not configured`** logged as ERROR during webhook
+  tests — expected in unit tests that exercise the fail-closed path of
+  `verify_signature`. Not a failure unless a test assertion actually fails.
+- **Pre-commit hook failures** — fix the reported issue and create a new
+  commit; never use `--no-verify` in this repo.
+
 [square]: https://square.com/
 [ipad]: https://github.com/furthemore/APIS-Register-Swift
 [android]: https://github.com/furthemore/APIS-register
