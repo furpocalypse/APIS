@@ -27,10 +27,7 @@ from registration.paypal_payments import (
 )
 from registration.tests.common import (
     DEFAULT_EVENT_ARGS,
-    TEST_ATTENDEE_ARGS,
     OrdersTestCase,
-    PayPalOrdersTestCase,
-    make_paypal_apidata,
     make_refund_dict,
     paypal_apidata_fully_refunded,
     paypal_apidata_multi_full,

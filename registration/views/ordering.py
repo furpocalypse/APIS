@@ -16,7 +16,7 @@ from registration.paypal_payments import (
     capture_paypal_payment,
     create_unpaid_paypal_order,
 )
-from registration.types import TranslatedCartItem
+from registration.types import BillingData, TranslatedCartItem
 
 from . import cart, common
 
@@ -46,16 +46,16 @@ def get_cart_data_from_session(
     )
 
 
-def do_paypal_checkout(
-    paypal_order_id: str,
+def do_checkout(
+    processor: str,
+    billingData: BillingData,
     total: Decimal,
     discount: Decimal,
     cartItems: list,
     orderItems: list,
     donationOrg: Decimal,
     donationCharity: Decimal,
-    request: Optional[HttpRequest] = None,
-    billingData: Optional[dict] = None,
+    request: HttpRequest = None,
 ) -> tuple[bool, dict, Order]:
     event = Event.objects.get(default=True)
     # Reuse the reference token set on the PayPal order at create_paypal_order
@@ -63,80 +63,23 @@ def do_paypal_checkout(
     # resolves to this Order via Order.reference. Fall back to a fresh token
     # when called outside the HTTP flow (e.g. direct unit tests).
     reference = None
-    if request is not None:
+    if processor == "paypal" and request is not None:
         reference = request.session.get("pending_paypal_reference")
     if not reference:
         reference = common.get_unique_confirmation_token(Order)
 
-    billingData = billingData or {}
-    order = Order(
-        total=Decimal(total),
-        reference=reference,
-        discount=discount,
-        orgDonation=donationOrg,
-        charityDonation=donationCharity,
-        billingName=" ".join(
-            filter(
-                None,
-                [billingData.get("cc_firstname"), billingData.get("cc_lastname")],
-            )
-        ),
-        billingAddress1=billingData.get("address1", "") or "",
-        billingAddress2=billingData.get("address2", "") or "",
-        billingCity=billingData.get("city", "") or "",
-        billingState=billingData.get("state", "") or "",
-        billingCountry=billingData.get("country", "") or "",
-        billingEmail=billingData.get("email", "") or "",
-        billingPostal=billingData.get("postal", "") or "",
-    )
-
-    status, response = capture_paypal_payment(paypal_order_id, order)
-
-    if status:
-        order.save()
-
-        if cartItems:
-            for item in cartItems:
-                order_item = cart.saveCart(item)
-                order_item.order = order
-                order_item.save()
-        elif orderItems:
-            for order_item in orderItems:
-                order_item.order = order
-                order_item.save()
-
-        if discount:
-            discount.used = discount.used + 1
-            discount.save()
-        return True, "", order
-
-    return False, response, order
-
-
-def do_checkout(
-    billingData,
-    total,
-    discount,
-    cartItems,
-    orderItems,
-    donationOrg,
-    donationCharity,
-    request=None,
-):
-    event = Event.objects.get(default=True)
-    reference = common.get_unique_confirmation_token(Order)
-
+    billName = None
+    if billingData.get("cc_firstname") and billingData.get("cc_lastname"):
+        billName = f"{billingData.get("cc_firstname")} {billingData.get("cc_lastname")}"
     form = OrderForm(
-        collect_billing_address=event.collectBillingAddress,
+        collect_billing_address=processor == "square" and event.collectBillingAddress,
         data={
             "total": Decimal(total),
             "reference": reference,
             "discount": discount,
             "orgDonation": donationOrg,
             "charityDonation": donationCharity,
-            "billingName": " ".join(
-                [billingData.get(k) for k in ["cc_firstname", "cc_lastname"]]
-            ),
+            "billingName": billName,
             "billingAddress1": billingData.get("address1"),
             "billingAddress2": billingData.get("address2"),
             "billingCity": billingData.get("city"),
@@ -152,7 +95,17 @@ def do_checkout(
 
     order: Order = form.save(commit=False)
 
-    status, response = charge_payment(order, billingData, request)
+    if processor == "paypal":
+        orderId = billingData.get("source_id")
+        if not orderId:
+            return False, "Missing PayPal order ID", None
+        mock_response = ""
+        if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
+            post_data = json.loads(request.body)
+            mock_response = post_data.get("paypalMockResponse")
+        status, response = capture_paypal_payment(orderId, order, mock_response)
+    if processor == "square":
+        status, response = charge_payment(order, billingData, request)
 
     if status:
         order.save()
@@ -302,15 +255,17 @@ def get_total(
 
     for item in cartItems:
         item_total, discount = get_line_item_total(item, disc)
+        total_discount += discount
+        item_total -= discount
         if item_total > 0:
             total += item_total
-        total_discount += discount
 
     for item in orderItems:
         item_total, discount = get_line_item_total(item, disc)
+        total_discount += discount
+        item_total -= discount
         if item_total > 0:
             total += item_total
-        total_discount += discount
 
     return total, total_discount
 
@@ -489,7 +444,7 @@ def checkout(request):
     """
 
     try:
-        post_data = json.loads(request.body)
+        post_data: dict = json.loads(request.body)
     except (ValueError, JSONDecodeError) as e:
         logger.exception(e)
         logger.error("Unable to decode JSON for checkout()")
@@ -516,14 +471,15 @@ def checkout(request):
     if order_items:
         order_items = list(OrderItem.objects.filter(id__in=order_items))
 
-    gross_subtotal, subtotal_discount = get_total(cart_items, order_items, discount)
-    subtotal = gross_subtotal - subtotal_discount
+    subtotal, _ = get_total(cart_items, order_items, discount)
 
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
 
     porg = Decimal(post_data.get("orgDonation") or "0.00")
     pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    pbill = post_data.get("billingData", {})
+    pproc = post_data.get("processor")
 
     if porg < 0:
         porg = 0
@@ -572,12 +528,9 @@ def checkout(request):
         status = True
         message = "Onsite success"
     else:
-        # PayPal path requires the order id created earlier via
-        # create_paypal_order (passed back by the client's JS SDK).
-        if "orderID" not in post_data:
-            return common.abort(400, "Missing PayPal order ID")
-        status, message, order = do_paypal_checkout(
-            post_data["orderID"],
+        status, message, order = do_checkout(
+            pproc,
+            pbill,
             total,
             discount,
             cart_items,
@@ -585,7 +538,6 @@ def checkout(request):
             porg,
             pcharity,
             request,
-            billingData=post_data.get("billingData") or {},
         )
 
     if status:

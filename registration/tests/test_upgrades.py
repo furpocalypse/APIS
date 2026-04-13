@@ -253,7 +253,7 @@ class TestUpgrades(OrdersTestCase):
     def test_upgrade_checkout_via_paypal(self, mock_capture):
         """End-to-end upgrade checkout via the PayPal path (capture mocked)."""
 
-        def fake_capture(paypal_order_id, apis_order):
+        def fake_capture(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.COMPLETED
             apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
             return True, {"id": paypal_order_id, "status": "COMPLETED"}
@@ -263,7 +263,8 @@ class TestUpgrades(OrdersTestCase):
         setup_call_count = mock_capture.call_count
 
         form = dict(self.attendee_form_upgrade_checkout)
-        form["orderID"] = "TEST-PAYPAL-UPGRADE-ORDER"
+        form["processor"] = "paypal"
+        form["billingData"]["source_id"] = "TEST-PAYPAL-UPGRADE-ORDER"
         cart, checkout = self.upgrade_add_and_checkout(
             self.price_90, form, badge, attendee
         )
@@ -294,12 +295,12 @@ class TestUpgrades(OrdersTestCase):
     def test_upgrade_paypal_capture_declined(self, mock_capture):
         """PayPal variant of test_upgrade_card_declined (Square version is skipped)."""
 
-        def fake_success(paypal_order_id, apis_order):
+        def fake_success(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.COMPLETED
             apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
             return True, {"id": paypal_order_id, "status": "COMPLETED"}
 
-        def fake_failed_capture(paypal_order_id, apis_order):
+        def fake_failed_capture(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.FAILED
             apis_order.save()
             return False, {"errors": ["INSTRUMENT_DECLINED"]}
@@ -309,7 +310,8 @@ class TestUpgrades(OrdersTestCase):
         mock_capture.side_effect = fake_failed_capture
 
         form = dict(self.attendee_form_upgrade_checkout)
-        form["orderID"] = "TEST-PAYPAL-UPGRADE-ORDER"
+        form["processor"] = "paypal"
+        form["billingData"]["source_id"] = "TEST-PAYPAL-UPGRADE-ORDER"
         cart, checkout = self.upgrade_add_and_checkout(
             self.price_90, form, badge, attendee
         )

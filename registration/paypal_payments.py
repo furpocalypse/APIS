@@ -106,6 +106,7 @@ def create_unpaid_paypal_order(
     discount: str | int | Decimal,
     cart_items: list[TranslatedCartItem],
     apis_reference: str | None = None,
+    paypal_mock_response: Optional[str] = "",
 ) -> ApiResponse:
     """Create an unpaid PayPal order.
 
@@ -194,29 +195,39 @@ def create_unpaid_paypal_order(
 
     logger.debug("---- Begin PayPal Order Creation ----")
 
-    api_response = orders_controller.create_order(
-        {
-            "body": OrderRequest(
-                intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units
-            )
-        }
-    )
+    params = {
+        "body": OrderRequest(
+            intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units
+        )
+    }
+    # Sandbox negative testing
+    if paypal_mock_response:
+        params["paypal_mock_response"] = paypal_mock_response
+    api_response = orders_controller.create_order(params)
     logger.debug("---- PayPal Order Creation complete ----")
     logger.debug(api_response)
     return api_response
 
 
 def capture_paypal_payment(
-    paypal_order_id: int | str, apis_order: ApisOrder
+    paypal_order_id: int | str,
+    apis_order: ApisOrder,
+    paypal_mock_response: Optional[str] = "",
 ) -> tuple[bool, dict]:
-    body = {"id": paypal_order_id, "prefer": "return=representation"}
-    logger.debug("---- Begin Capture ----")
-    logger.debug(body)
+    params = {"id": paypal_order_id, "prefer": "return=representation"}
 
+    # Sandbox negative testing
+    if paypal_mock_response:
+        params["paypal_mock_response"] = json.dumps(
+            {"mock_application_codes": paypal_mock_response}
+        )
+
+    logger.debug("---- Begin Capture ----")
+    logger.debug(params)
     api_response: ApiResponse = None
     try:
         with PAYPAL_REQUESTS.labels(endpoint="capture_order").time():
-            api_response = orders_controller.capture_order(body)
+            api_response = orders_controller.capture_order(params)
     except ApiException as ex:
         unknown_msg = "An unknown PayPal error occurred during payment capture"
         try:

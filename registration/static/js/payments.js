@@ -57,6 +57,7 @@ class PaymentError extends Error {
 async function createPayment(token, url) {
     const payload = {
         onsite: false,
+        processor: "square",
         billingData: {
             cc_firstname: $("#fname").val(),
             cc_lastname: $("#lname").val(),

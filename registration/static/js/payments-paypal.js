@@ -45,8 +45,8 @@ if (window.paypal) {
                 const response = await postJSON(
                     URL_REGISTRATION_CHECKOUT,
                     JSON.stringify({
-                        orderID: data.orderID,
                         onsite: false,
+                        processor: "paypal",
                         billingData: {
                             cc_firstname: $("#fname").val(),
                             cc_lastname: $("#lname").val(),
@@ -57,6 +57,7 @@ if (window.paypal) {
                             state: $("#state").val(),
                             country: $("#country").val(),
                             postal: $("#postal").val(),
+                            source_id: data.orderID,
                         },
                         charityDonation: $("#donateCharity").val(),
                         orgDonation: $("#donateOrg").val()

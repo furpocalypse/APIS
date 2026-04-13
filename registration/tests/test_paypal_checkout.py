@@ -21,7 +21,7 @@ from registration.models import (
 )
 from registration.tests.common import OrdersTestCase
 from registration.tests.test_paypal_payments import create_api_response
-from registration.views.ordering import do_paypal_checkout
+from registration.views.ordering import do_checkout
 
 
 def _paypal_order_api_response(order_id: str = "TEST-ORDER", status: str = "CREATED"):
@@ -221,7 +221,7 @@ class TestCreatePaypalOrder(OrdersTestCase):
 
 @tag("paypal")
 class TestDoPaypalCheckout(OrdersTestCase):
-    """Unit tests for the internal do_paypal_checkout helper."""
+    """Unit tests for do_checkout with PayPal as the processor."""
 
     def _make_cart(self):
         self.add_to_cart(self.attendee_form_2, self.price_45, [])
@@ -233,8 +233,9 @@ class TestDoPaypalCheckout(OrdersTestCase):
         mock_capture.return_value = (True, {"id": "TEST", "status": "COMPLETED"})
         cart_items = self._make_cart()
 
-        status, msg, order = do_paypal_checkout(
-            "TEST-PAYPAL-ORDER",
+        status, msg, order = do_checkout(
+            "paypal",
+            {"source_id": "TEST-PAYPAL-ORDER"},
             Decimal("45"),
             None,
             cart_items,
@@ -244,7 +245,7 @@ class TestDoPaypalCheckout(OrdersTestCase):
         )
 
         self.assertTrue(status)
-        self.assertEqual(msg, "")
+        self.assertDictEqual(msg, {"errors": []})
         self.assertIsNotNone(order.pk)
         self.assertGreaterEqual(OrderItem.objects.filter(order=order).count(), 1)
 
@@ -256,8 +257,9 @@ class TestDoPaypalCheckout(OrdersTestCase):
         )
         cart_items = self._make_cart()
 
-        status, response, order = do_paypal_checkout(
-            "TEST-PAYPAL-ORDER",
+        status, response, order = do_checkout(
+            "paypal",
+            {"source_id": "TEST-PAYPAL-ORDER"},
             Decimal("45"),
             None,
             cart_items,
@@ -298,8 +300,9 @@ class TestDoPaypalCheckout(OrdersTestCase):
             badge=badge, priceLevel=self.price_45, enteredBy="test"
         )
 
-        status, _msg, order = do_paypal_checkout(
-            "TEST-PAYPAL-ORDER",
+        status, _msg, order = do_checkout(
+            "paypal",
+            {"source_id": "TEST-PAYPAL-ORDER"},
             Decimal("45"),
             None,
             [],
@@ -317,8 +320,9 @@ class TestDoPaypalCheckout(OrdersTestCase):
         mock_capture.return_value = (True, {"id": "T", "status": "COMPLETED"})
         cart_items = self._make_cart()
 
-        status, _msg, _order = do_paypal_checkout(
-            "TEST-PAYPAL-ORDER",
+        status, _msg, _order = do_checkout(
+            "paypal",
+            {"source_id": "TEST-PAYPAL-ORDER"},
             Decimal("45"),
             None,
             cart_items,
@@ -334,8 +338,9 @@ class TestDoPaypalCheckout(OrdersTestCase):
         cart_items = self._make_cart()
         original_used = self.discount.used
 
-        status, _msg, _order = do_paypal_checkout(
-            "TEST-PAYPAL-ORDER",
+        status, _msg, _order = do_checkout(
+            "paypal",
+            {"source_id": "TEST-PAYPAL-ORDER"},
             Decimal("40"),
             self.discount,
             cart_items,
@@ -360,7 +365,7 @@ class TestCheckoutEndpointPayPal(OrdersTestCase):
         self.add_to_cart(self.attendee_form_2, self.price_45, [])
         response = self.client.post(
             reverse("registration:checkout"),
-            json.dumps({"onsite": False, "billingData": {}}),
+            json.dumps({"processor": "paypal", "onsite": False, "billingData": {}}),
             content_type="application/json",
             headers=self._idempotency_headers(),
         )
@@ -395,7 +400,7 @@ class TestCheckoutEndpointPayPal(OrdersTestCase):
         )
         self.add_to_cart(self.attendee_form_2, self.price_45, [])
 
-        response = self.checkout("cnon:card-nonce-ok")
+        response = self.checkout()
         self.assertEqual(response.status_code, 400)
         body = response.json()
         self.assertIn("errors", body["reason"])
@@ -404,7 +409,13 @@ class TestCheckoutEndpointPayPal(OrdersTestCase):
         self.add_to_cart(self.attendee_form_2, self.price_45, [])
         response = self.client.post(
             reverse("registration:checkout"),
-            json.dumps({"onsite": False, "orderID": "TEST-PAYPAL-ORDER"}),
+            json.dumps(
+                {
+                    "processor": "paypal",
+                    "onsite": False,
+                    "billingData": {"source_id": "TEST-PAYPAL-ORDER"},
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
