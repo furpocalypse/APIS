@@ -236,6 +236,7 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         }
 
         status, message, order = ordering.do_checkout(
+            "square",
             billing_data,
             Decimal("50.00"),
             None,
@@ -272,6 +273,7 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         }
 
         status, message, order = ordering.do_checkout(
+            "square",
             billing_data,
             Decimal("100.00"),
             None,

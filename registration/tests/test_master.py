@@ -175,7 +175,17 @@ class TestAttendeeCheckout(OrdersTestCase):
         result = self.checkout("")
         self.assertEqual(result.status_code, 400, result.content)
 
-        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
+        # With the pending-order approach (see limited-registration-stock
+        # branch), the Attendee/Badge/OrderItem rows are persisted up
+        # front so capacity counters tie to real DB rows. A capture
+        # failure leaves them in place with the Order marked FAILED.
+        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 1)
+        attendee = Attendee.objects.filter(firstName="Bea").first()
+        self.assertEqual(Badge.objects.filter(attendee=attendee).count(), 1)
+        badge = Badge.objects.filter(attendee=attendee).first()
+        self.assertEqual(OrderItem.objects.filter(badge=badge).count(), 1)
+        order_item = OrderItem.objects.filter(badge=badge).first()
+        self.assertEqual(order_item.order.status, Order.FAILED)
         self.assertEqual(
             Cart.objects.count(),
             pre_cart_count,

@@ -91,8 +91,8 @@ def _save_order_items(order, cartItems, orderItems):
         for order_item in orderItems:
             order_item.order = order
             order_item.save()
-            
-            
+
+
 def get_cart_data_from_session(
     request: HttpRequest,
 ) -> tuple[list[Cart], list[OrderItem], str]:
@@ -166,67 +166,69 @@ def do_checkout(
     order: Order = form.save(commit=False)
 
     price_level_counts = _count_price_levels(cartItems, orderItems)
-    if processor == "paypal":
-        orderId = billingData.get("source_id")
-        if not orderId:
-            return False, "Missing PayPal order ID", None
-        mock_response = ""
-        if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
-            post_data = json.loads(request.body)
-            mock_response = post_data.get("paypalMockResponse")
-        status, response = capture_paypal_payment(orderId, order, mock_response)
-    if processor == "square":
-        status, response = charge_payment(order, billingData, request)
-
-    if status:
-        order.save()
-
-        if cartItems:
-            for item in cartItems:
-                order_item = cart.saveCart(item)
-                order_item.order = order
-                order_item.save()
-        elif orderItems:
-            for order_item in orderItems:
-                order_item.order = order
-                order_item.save()
 
     try:
+        # Reserve capacity and persist a PENDING Order + cart items up
+        # front. This matches the limited-registration-stock design: the
+        # Attendee/Badge/OrderItem rows exist as soon as the reservation
+        # is held, so capacity counters and DB rows stay consistent even
+        # when payment later fails.
         with transaction.atomic():
             levels, error = _check_capacity(price_level_counts)
             if error:
                 return False, error, None
-
             for level, count in levels:
                 level.reserve_slots(count)
-
             order.status = Order.PENDING
             order.save()
             _save_order_items(order, cartItems, orderItems)
 
-        # Order and OrderItems now exist with PENDING status.
-        # Slots are reserved in counters.
+        # Payment dispatch. charge_payment / capture_paypal_payment set
+        # order.status and save on their own success/failure branches
+        # (except a couple of PayPal early-return error paths handled by
+        # the normalization guard below).
+        if processor == "paypal":
+            orderId = billingData.get("source_id")
+            if not orderId:
+                status, response = False, "Missing PayPal order ID"
+            else:
+                mock_response = ""
+                if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
+                    post_data = json.loads(request.body)
+                    mock_response = post_data.get("paypalMockResponse")
+                status, response = capture_paypal_payment(orderId, order, mock_response)
+        elif processor == "square":
+            status, response = charge_payment(order, billingData, request)
+        else:
+            status, response = (
+                False,
+                {"errors": [{"code": f"Unknown processor: {processor}"}]},
+            )
 
-        # Attempt payment — charge_payment sets order.status and saves.
-        status, response = charge_payment(order, billingData, request)
+        # Normalize order.status and persist. Payment handlers usually
+        # save themselves, but some mocks only mutate the in-memory
+        # object, and a few PayPal early-return branches (Missing-id /
+        # ApiException / JSON-decode) return without saving at all. We
+        # always save so the DB reflects the terminal state, and we coerce
+        # PENDING into a concrete terminal before the capacity call so
+        # update_capacity_for_status_change doesn't see old==new==PENDING.
+        if order.status == Order.PENDING:
+            order.status = Order.COMPLETED if status else Order.FAILED
+        order.save()
 
-        # Use the general-purpose status change handler to update capacity
-        # counters. This handles PENDING→COMPLETED (confirm) and
-        # PENDING→FAILED (release) uniformly.
+        # Uniform capacity transition PENDING→COMPLETED (confirm) or
+        # PENDING→FAILED (release).
         update_capacity_for_status_change(order, Order.PENDING, order.status)
 
         if status:
             if discount:
                 discount.used = discount.used + 1
                 discount.save()
-            return True, "", order
-        else:
-            return False, response, order
+            return True, {"errors": []}, order
+        return False, response, order
 
     except Exception as e:
         logger.error(f"Error during checkout: {e}")
-        # If the atomic block raised, everything was rolled back — no cleanup.
-        # If charge_payment raised, the order exists as PENDING with reserved slots.
         if order.id:
             try:
                 order.refresh_from_db()

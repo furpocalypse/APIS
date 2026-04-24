@@ -399,6 +399,7 @@ def refund_cash_payment(
     :param reason: An optional reason for the refund.
     :return: A tuple of a boolean and nothing - this always succeeds.
     """
+    old_status = order.status
     # Change order status
     order.status = Order.REFUNDED
     order.notes += "\nRefund issued {0}: {1}".format(timezone.now(), reason)
@@ -432,6 +433,7 @@ def refund_card_payment(
     :param request: Original HTTP request from Django. Unused.
     :return: A tuple of a boolean success status and an accompanying message.
     """
+    old_status = order.status
     api_data = order.apiData
     payment_id = api_data["payment"]["id"]
     converted_amount = int(amount * 100)
