@@ -9,19 +9,17 @@ from django.http import (
     JsonResponse,
 )
 from django.shortcuts import get_object_or_404, render
+from paypalserversdk.exceptions.api_exception import ApiException
 
 import registration.emails
+from registration import tasks
 from registration.models import *
+from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
+from registration.types import TranslatedCartItem
 
 from . import common
-from .common import (
-    clear_session,
-    get_registration_email,
-    getOptionsDict,
-    handler,
-    logger,
-)
+from .common import clear_session, getOptionsDict, handler, logger
 from .ordering import do_checkout, doZeroCheckout, get_total
 
 logger = logging.getLogger(__name__)
@@ -155,29 +153,89 @@ def invoice_upgrade(request):
 
 def done_upgrade(request):
     event = Event.objects.get(default=True)
-    context = {"event": event}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "order": order}
     return render(request, "registration/upgrade-done.html", context)
 
 
 def send_upgrade_email(request, attendee, order):
-    event = Event.objects.get(default=True)
     clear_session(request)
+    request.session["last_order_id"] = order.id
+    tasks.send_upgrade_payment_email_task.delay(attendee.id, order.id)
+    return JsonResponse({"success": True})
+
+
+def upgrade_paypal_create(request):
+    """Create a PayPal order for an upgrade checkout.
+
+    Mirrors :func:`registration.views.ordering.create_paypal_order` but
+    uses the pre-staged OrderItems from session (populated by
+    :func:`add_upgrade`).
+    """
+    session_items = request.session.get("order_items", [])
+    order_items = list(OrderItem.objects.filter(id__in=session_items))
+    if "attendee_id" not in request.session:
+        return common.abort(400, "Session expired")
+    if not order_items:
+        return common.abort(400, "No upgrade items in session")
+
     try:
-        registration.emails.send_upgrade_payment_email(attendee, order)
-    except Exception as e:
-        logger.exception("Error sending UpgradePaymentEmail")
-        registration_email = get_registration_email(event)
-        return JsonResponse(
+        post_data = json.loads(request.body)
+    except ValueError:
+        logger.error("Unable to decode JSON for upgrade_paypal_create()")
+        return common.abort(400, "Unable to parse input options")
+
+    subtotal, total_discount = get_total([], order_items)
+
+    porg = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    if porg < 0:
+        porg = 0
+    if pcharity < 0:
+        pcharity = 0
+
+    total = subtotal + porg + pcharity
+    if total <= 0:
+        return common.abort(400, "Cart total is zero; use the zero-checkout flow")
+
+    event = Event.objects.get(default=True)
+    first = order_items[0]
+    label = f"{first.priceLevel} - {first.badge.attendee}"
+    translated_cart: list[TranslatedCartItem] = [
+        {
+            "name": f"{event} Upgrade - {label}",
+            "total": subtotal - total_discount,
+            "donation": False,
+        }
+    ]
+    if porg > 0:
+        translated_cart.append(
+            {"name": f"Donation to {event}", "total": porg, "donation": True}
+        )
+    if pcharity > 0:
+        translated_cart.append(
             {
-                "success": False,
-                "message": "Your upgrade payment succeeded but we may have been unable to send you a "
-                "confirmation email. If you do not receive one within the next hour, please "
-                "contact {0} to get your confirmation number.".format(
-                    registration_email
-                ),
+                "name": f"Donation to {event.charity}",
+                "total": pcharity,
+                "donation": True,
             }
         )
-    return JsonResponse({"success": True})
+
+    reference = request.session.get("pending_paypal_reference")
+    if not reference:
+        reference = common.get_unique_confirmation_token(Order)
+        request.session["pending_paypal_reference"] = reference
+
+    try:
+        result = create_unpaid_paypal_order(
+            total, total_discount, translated_cart, apis_reference=reference
+        )
+        return common.success(reason=json.loads(result.text))
+    except ApiException as ex:
+        return common.abort(ex.response_code, json.loads(ex.response.text))
 
 
 def checkout_upgrade(request):
@@ -212,13 +270,17 @@ def checkout_upgrade(request):
 
     total = subtotal + porg + pcharity
 
-    pbill = post_data["billingData"]
+    pproc = post_data.get("processor")
+    pbill = post_data.get("billingData", {})
+    if pproc == "paypal" and "source_id" not in pbill:
+        return common.abort(400, "Missing PayPal order ID")
     status, message, order = do_checkout(
-        pbill, total, None, [], order_items, porg, pcharity
+        pproc, pbill, total, None, [], order_items, porg, pcharity
     )
 
     if status:
         return send_upgrade_email(request, attendee, order)
     else:
-        order.delete()
+        if order is not None:
+            order.delete()
         return common.abort(400, message)

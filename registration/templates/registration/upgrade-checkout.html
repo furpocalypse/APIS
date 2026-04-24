@@ -188,18 +188,11 @@
             <input type="hidden" name="postal" id="postal" value="">
 
             <div>
-              <form id="payment-form">
-                <div id="card-container"></div>
-              </form>
               <div id="payment-status-container"></div>
+              <div id="card-container"></div>
             </div>
 
             {% csrf_token %}
-            <div class="form-group" style="margin-right:0px;">
-              <button class="btn btn-primary col-sm-3 col-sm-offset-9" style="padding-right:10px;" id="checkout">
-                Checkout
-              </button>
-            </div>
           </form>
 
 
@@ -232,18 +225,23 @@
 
 
 {% block javascript %}
-  {% if SQUARE_ENVIRONMENT == "sandbox" %}
-    <script type="text/javascript" src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
-  {% else %}
-    <script type="text/javascript" src="https://web.squarecdn.com/v1/square.js"></script>
+  {% if total > 0 %}
+    {% if PAYPAL_ENVIRONMENT == "sandbox" %}
+      <script
+          src="https://www.paypal.com/sdk/js?client-id={% settings_value 'PAYPAL_CLIENT_ID' %}&buyer-country=US&currency=USD&components=buttons&enable-funding=venmo,card"
+          data-sdk-integration-source="developer-studio"
+      ></script>
+    {% else %}
+      <script
+          src="https://www.paypal.com/sdk/js?client-id={% settings_value 'PAYPAL_CLIENT_ID' %}&components=buttons&enable-funding=venmo,card"
+          data-sdk-integration-source="developer-studio"
+      ></script>
+    {% endif %}
   {% endif %}
 
   <script type="text/javascript">
-      /* Square & Payments constants */
-      const APPLICATION_ID = "{% settings_value 'SQUARE_APPLICATION_ID' %}";
-      const LOCATION_ID = "{% settings_value 'SQUARE_LOCATION_ID' %}";
-
       /* APIS URLs */
+      const URL_REGISTRATION_CREATEORDER = "{% url 'registration:upgrade_paypalcreate' %}";
       const URL_REGISTRATION_CHECKOUT = "{% url 'registration:checkout_upgrade' %}";
       const URL_REGISTRATION_INDEX = "{% url 'registration:index' %}";
       const URL_REGISTRATION_DONE = "{% url 'registration:done_upgrade' %}";
@@ -257,7 +255,43 @@
 
   </script>
   <script type="application/javascript" src="{% static 'js/checkout.js' %}"></script>
-  <script type="application/javascript" src="{% static 'js/payments.js' %}"></script>
+  {% if total > 0 %}
+    <script type="application/javascript" src="{% static 'js/payments-paypal.js' %}"></script>
+  {% else %}
+    <script type="application/javascript">
+        async function checkout(event) {
+            event.preventDefault();
+            const checkoutButton = document.getElementById('checkout');
+            checkoutButton.disabled = true;
+
+            const body = JSON.stringify({});
+            try {
+                const response = await postJSON(URL_REGISTRATION_CHECKOUT, body);
+                if (response.ok) {
+                    window.location = URL_REGISTRATION_DONE;
+                    return;
+                } else {
+                    const reason = await formatError(response);
+                    alert(`Sorry, an error occurred while submitting your upgrade:\n\n${reason}`);
+                }
+            } catch (e) {
+                alert(`Sorry, an error occurred while submitting your upgrade:\n\n${e}`);
+            }
+
+            checkoutButton.disabled = false;
+        }
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            const cardButton = document.getElementById('checkout');
+            if (cardButton === null) {
+                return;
+            }
+            cardButton.addEventListener('click', async function (event) {
+                await checkout(event);
+            });
+        });
+    </script>
+  {% endif %}
   <script type="application/javascript" src="{% static 'js/upgrade.js' %}"></script>
 
 

@@ -167,12 +167,28 @@ LOGIN_REDIRECT_URL = "admin:index"
 
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
+MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
+    'MAINTENANCE_MODE_STATE_FILE_PATH',
+    os.path.join(BASE_DIR, 'fm_eventmanager', 'maintenance_mode_state.txt'),
+)
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = '/static/'
-STATIC_ROOT = '/var/www/APIS/static/'
+STATIC_ROOT = os.getenv('STATIC_ROOT', '/var/www/APIS/static/')
+# NOTE: do NOT add a ("bundler", ...) STATICFILES_DIRS entry here. Vite
+# builds into ``registration/static/bundler/``; Django's AppDirectoriesFinder
+# picks that up automatically because ``registration`` is an INSTALLED_APP.
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 # Session Management
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
@@ -186,8 +202,15 @@ SQUARE_APPLICATION_ID = 'sandbox-sq0idp-1a_xxxxxxxxxxxxxxxxxxx'
 SQUARE_ACCESS_TOKEN = 'sandbox-sq0atb-xxxxxxxxxxxxxxxxxxxxxx'
 SQUARE_LOCATION_ID = 'xxxxxxxxx...'
 SQUARE_CURRENCY = 'USD'
-SQUARE_ENVIRONMENT = 'production'  # Or "sandbox"
+SQUARE_ENVIRONMENT = os.getenv('SQUARE_ENVIRONMENT', 'production')  # Or "sandbox"
 SQUARE_WEBHOOK_SIGNATURE_KEY = 'xxx...'
+PAYPAL_CLIENT_ID = ''
+PAYPAL_CLIENT_SECRET = ''
+PAYPAL_CURRENCY = ''
+PAYPAL_ENVIRONMENT = os.getenv('PAYPAL_ENVIRONMENT', 'production')  # Or "sandbox"
+# Create a webhook in the PayPal developer dashboard (https://developer.paypal.com/dashboard/applications)
+# and paste its Webhook ID (e.g. "1AB23456CD789012E") here.
+PAYPAL_WEBHOOK_ID = ''
 
 
 EMAIL_HOST = 'smtp.mailgun.org'

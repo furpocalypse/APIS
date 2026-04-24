@@ -5,6 +5,7 @@ from json import JSONDecodeError
 
 from django.forms import model_to_dict
 from django.http import (
+    HttpRequest,
     HttpResponse,
     HttpResponseNotFound,
     HttpResponseServerError,
@@ -12,10 +13,14 @@ from django.http import (
 )
 from django.shortcuts import render
 from django.urls import reverse
+from paypalserversdk.exceptions.api_exception import ApiException
 
 import registration.emails
+from registration import tasks
 from registration.models import *
+from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
+from registration.types import TranslatedCartItem
 
 from . import common
 from .common import clear_session, handler, logger
@@ -39,7 +44,11 @@ def thanks_dealer(request):
 
 def done_dealer(request):
     event = Event.objects.get(default=True)
-    context = {"event": event, "form_type": form_type}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "form_type": form_type, "order": order}
     return render(request, "registration/dealer/dealer-done.html", context)
 
 
@@ -67,7 +76,11 @@ def dealer_asst(request, guid):
 
 def done_asst_dealer(request):
     event = Event.objects.get(default=True)
-    context = {"event": event, "form_type": form_type}
+    order = None
+    last_order_id = request.session.get("last_order_id")
+    if last_order_id:
+        order = Order.objects.filter(id=last_order_id).first()
+    context = {"event": event, "form_type": form_type, "order": order}
     return render(request, "registration/dealer/dealerasst-done.html", context)
 
 
@@ -257,37 +270,53 @@ def add_assistants(request):
     return render(request, "registration/dealer/dealerasst-add.html", context)
 
 
-def add_assistants_checkout(request):
-    try:
-        form_data = json.loads(request.body)
-    except ValueError as e:
-        logger.warning(f"Unable to decode JSON for add_assistants_checkout(): {e}")
-        return common.abort(400, str(e))
-    billing_data = form_data["billingData"]
-    assistants_form = form_data["assistants"]
-    dealer_id = request.session["dealer_id"]
-    dealer = Dealer.objects.get(id=dealer_id)
-    event = Event.objects.get(default=True)
+ASSISTANT_PARTNER_PRICE = Decimal("55")
 
+
+def _set_up_assistant_checkout(
+    request: HttpRequest, form_data: dict, dealer: Dealer, event: Event
+) -> tuple[Decimal, list[OrderItem]]:
+    assistants_form = form_data.get("assistants") or []
     badge = Badge.objects.filter(attendee=dealer.attendee, event=dealer.event).last()
-
-    price_level = badge.effectiveLevel()
+    price_level = badge and badge.effectiveLevel()
     if price_level is None:
-        return common.abort(
+        raise RuntimeError(
             402,
             "Dealer account has not been paid. Please pay for your table before adding assistants.",
         )
 
-    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
+    error_response = _apply_assistants_form(dealer, event, assistants_form)
+    if error_response is not None:
+        raise RuntimeError(error_response)
 
+    unpaid_partner_count = dealer.getUnpaidPartnerCount()
+    total = ASSISTANT_PARTNER_PRICE * unpaid_partner_count
+    if total <= 0:
+        raise RuntimeError(400, "No unpaid assistants to charge for.")
+
+    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
+    order_item.save()
+    session_items = request.session.get("order_items", [])
+    session_items.append(order_item.id)
+    request.session["order_items"] = session_items
+
+    return total, [order_item]
+
+
+def _apply_assistants_form(
+    dealer: Dealer, event: Event, assistants_form: dict
+) -> tuple[int, str] | None:
+    """Create/update DealerAsst rows from the assistants payload.
+
+    Returns either a tuple with an http error code and message, or None if
+    everything went well.
+    """
     for assistant in assistants_form:
         if assistant.get("id"):
-            # Update an existing dealer assistant by ID
             dealer_asst_obj = DealerAsst.objects.get(
                 dealer=dealer, id=assistant.get("id")
             )
         else:
-            # Otherwise, create a new one:
             dealer_asst_obj = DealerAsst(
                 dealer=dealer,
                 event=event,
@@ -301,26 +330,92 @@ def add_assistants_checkout(request):
             dealer_asst_obj.license = assistant["license"]
             dealer_asst_obj.save()
         except KeyError:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "message": f"Bad request: name, email, and license fields are required to update assistant",
-                }
+            return (
+                400,
+                "Bad request: name, email, and license fields are required to update assistant",
             )
+    return None
 
-    unpaid_partner_count = dealer.getUnpaidPartnerCount()
 
-    # FIXME: remove hardcoded costs
-    total = Decimal(55 * unpaid_partner_count)
-
-    if total <= 0:
+def dealer_assistants_paypal_create(request):
+    """Create a PayPal order for adding paid dealer assistants."""
+    try:
+        form_data = json.loads(request.body)
+    except ValueError as e:
         logger.warning(
-            f"Error checking out dealer while adding assistants: total too low: {total} <= 0"
+            f"Unable to decode JSON for dealer_assistants_paypal_create(): {e}"
         )
-        return common.abort(500, "An error occurred while adding your assistants.")
+        return common.abort(400, str(e))
+
+    if "dealer_id" not in request.session:
+        return common.abort(400, "Session expired")
+    dealer = Dealer.objects.get(id=request.session["dealer_id"])
+    event = Event.objects.get(default=True)
+
+    try:
+        total = _set_up_assistant_checkout(request, form_data, dealer, event)
+    except RuntimeError as ex:
+        common.abort(*ex.args)
+
+    translated_cart: list[TranslatedCartItem] = [
+        {
+            "name": f"{event} Dealer Assistant(s) - {dealer.businessName or dealer.attendee}",
+            "total": total,
+            "donation": False,
+        },
+    ]
+
+    reference = request.session.get("pending_paypal_reference")
+    if not reference:
+        reference = common.get_unique_confirmation_token(Order)
+        request.session["pending_paypal_reference"] = reference
+
+    try:
+        result = create_unpaid_paypal_order(
+            total, Decimal("0.00"), translated_cart, apis_reference=reference
+        )
+        return common.success(reason=json.loads(result.text))
+    except ApiException as ex:
+        return common.abort(ex.response_code, json.loads(ex.response.text))
+
+
+def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
+    try:
+        form_data = json.loads(request.body)
+    except ValueError as e:
+        logger.warning(f"Unable to decode JSON for add_assistants_checkout(): {e}")
+        return common.abort(400, str(e))
+
+    if "dealer_id" not in request.session:
+        return common.abort(400, "Session expired")
+    billing_data = form_data.get("billingData", {})
+    dealer = Dealer.objects.get(id=request.session["dealer_id"])
+    event = Event.objects.get(default=True)
+    processor = form_data.get("processor")
+
+    # Skip setup if this is PayPal - we already did all that
+    if "pending_paypal_reference" in request.session:
+        if "source_id" not in billing_data:
+            return common.abort(400, "Missing PayPal order ID")
+
+        session_items = request.session.get("order_items", [])
+        order_items = list(OrderItem.objects.filter(id__in=session_items))
+        if not order_items:
+            return common.abort(
+                400,
+                "No pending assistant order; call dealer_assistants_paypalcreate first",
+            )
+        unpaid_partner_count = dealer.getUnpaidPartnerCount()
+        total = ASSISTANT_PARTNER_PRICE * unpaid_partner_count
+        if total <= 0:
+            raise RuntimeError(400, "No unpaid assistants to charge for.")
+    else:
+        total, order_items = _set_up_assistant_checkout(
+            request, form_data, dealer, event
+        )
 
     status, message, order = do_checkout(
-        billing_data, total, None, [], [order_item], 0, 0
+        processor, billing_data, total, None, [], order_items, 0, 0
     )
 
     if status:
@@ -330,21 +425,11 @@ def add_assistants_checkout(request):
             assistant.save()
 
         clear_session(request)
-        try:
-            registration.emails.send_dealer_assistant_email(dealer.id)
-            # Send registration instruction emails to assistants that haven't registered yet:
-            for assistant in dealer.dealerasst_set.all().filter(attendee__isnull=True):
-                registration.emails.send_dealer_assistant_registration_invite(assistant)
-        except Exception as e:
-            logger.error("Error emailing DealerAsstEmail")
-            logger.exception(e)
-            dealer_email = get_dealer_email()
-            return common.abort(
-                500,
-                f"Your payment succeeded but we may have been unable to send you a confirmation email. "
-                f"If you do not receive one within the next hour, please contact {dealer_email} to get your "
-                f"confirmation number.",
-            )
+        request.session["last_order_id"] = order.id
+        tasks.send_dealer_assistant_email_task.delay(dealer.id, order.id)
+        # Send registration instruction emails to assistants that haven't registered yet:
+        for assistant in dealer.dealerasst_set.all().filter(attendee__isnull=True):
+            tasks.send_dealer_assistant_registration_invite_task.delay(assistant.id)
         return common.success()
     else:
         # Payment failed
@@ -435,6 +520,90 @@ def add_dealer(request):
     return JsonResponse({"success": True})
 
 
+def _build_dealer_translated_cart(
+    dealer, subtotal: Decimal, porg: Decimal, pcharity: Decimal
+) -> list[TranslatedCartItem]:
+    event = dealer.event
+    label = (
+        dealer.businessName
+        or (
+            dealer.attendee
+            and f"{dealer.attendee.firstName} {dealer.attendee.lastName}"
+        )
+        or "Dealer"
+    )
+    translated_cart: list[TranslatedCartItem] = [
+        {
+            "name": f"{event} Dealer Registration - {label}",
+            "total": subtotal,
+            "donation": False,
+        },
+    ]
+    if porg > 0:
+        translated_cart.append(
+            {"name": f"Donation to {event}", "total": porg, "donation": True}
+        )
+    if pcharity > 0:
+        translated_cart.append(
+            {
+                "name": f"Donation to {event.charity}",
+                "total": pcharity,
+                "donation": True,
+            }
+        )
+    return translated_cart
+
+
+def dealer_paypal_create(request):
+    """Create a PayPal order for a dealer checkout.
+
+    Mirrors :func:`registration.views.ordering.create_paypal_order` but uses
+    :func:`get_dealer_total` for the dealer-specific pricing rules. The
+    returned PayPal order id is captured later via ``checkout_dealer``.
+    """
+    session_items = request.session.get("order_items", [])
+    pdisc = request.session.get("discount", "")
+    order_items = list(OrderItem.objects.filter(id__in=session_items))
+    if "dealer_id" not in request.session:
+        return common.abort(400, "Session expired")
+
+    dealer = Dealer.objects.get(id=request.session["dealer_id"])
+    try:
+        post_data = json.loads(request.body)
+    except (ValueError, JSONDecodeError) as e:
+        logger.warning(f"Unable to decode JSON for dealer_paypal_create(): {e}")
+        return common.abort(400, "Unable to parse input options")
+
+    discount = Discount.objects.filter(codeName=pdisc).first()
+    subtotal = get_dealer_total(order_items, discount, dealer)
+
+    porg = Decimal((post_data.get("orgDonation") or "0.00").strip() or "0.00")
+    pcharity = Decimal((post_data.get("charityDonation") or "0.00").strip() or "0.00")
+    if porg < 0:
+        porg = 0
+    if pcharity < 0:
+        pcharity = 0
+
+    total = subtotal + porg + pcharity
+    if total <= 0:
+        return common.abort(400, "Cart total is zero; use the zero-checkout flow")
+
+    translated_cart = _build_dealer_translated_cart(dealer, subtotal, porg, pcharity)
+
+    reference = request.session.get("pending_paypal_reference")
+    if not reference:
+        reference = common.get_unique_confirmation_token(Order)
+        request.session["pending_paypal_reference"] = reference
+
+    try:
+        result = create_unpaid_paypal_order(
+            total, Decimal("0.00"), translated_cart, apis_reference=reference
+        )
+        return common.success(reason=json.loads(result.text))
+    except ApiException as ex:
+        return common.abort(ex.response_code, json.loads(ex.response.text))
+
+
 def checkout_dealer(request):
     session_items = request.session.get("order_items", [])
     pdisc = request.session.get("discount", "")
@@ -458,18 +627,8 @@ def checkout_dealer(request):
             return common.abort(400, message)
 
         clear_session(request)
-
-        try:
-            registration.emails.send_dealer_payment_email(dealer, order)
-        except Exception as e:
-            logger.error("Error sending DealerPaymentEmail - zero sum.")
-            logger.exception(e)
-            dealer_email = get_dealer_email()
-            return common.abort(
-                500,
-                "Your registration succeeded but we may have been unable to send you a confirmation "
-                f"email. If you have any questions, please contact {dealer_email}",
-            )
+        request.session["last_order_id"] = order.id
+        tasks.send_dealer_payment_email_task.delay(dealer.id, order.id)
         return JsonResponse({"success": True})
 
     porg = Decimal(post_data["orgDonation"].strip() or "0.00")
@@ -481,9 +640,12 @@ def checkout_dealer(request):
 
     total = subtotal + porg + pcharity
 
-    pbill = post_data["billingData"]
+    pproc = post_data.get("processor")
+    pbill = post_data.get("billingData", {})
+    if pproc == "paypal" and "source_id" not in pbill:
+        return common.abort(400, "Missing PayPal order ID")
     status, message, order = do_checkout(
-        pbill, total, discount, None, order_items, porg, pcharity
+        pproc, pbill, total, discount, None, order_items, porg, pcharity, request
     )
 
     if status:
@@ -491,19 +653,10 @@ def checkout_dealer(request):
             assistant.paid = True
             assistant.save()
 
+        dealer.resetToken()
         clear_session(request)
-        try:
-            dealer.resetToken()
-            registration.emails.send_dealer_payment_email(dealer, order)
-        except Exception as e:
-            logger.error("Error sending DealerPaymentEmail. " + request.body)
-            logger.exception(e)
-            dealer_email = get_dealer_email()
-            return common.abort(
-                500,
-                "Your registration succeeded but we may have been unable to send you a confirmation "
-                f"email. If you have any questions, please contact {dealer_email}",
-            )
+        request.session["last_order_id"] = order.id
+        tasks.send_dealer_payment_email_task.delay(dealer.id, order.id)
         return common.success()
     else:
         order.delete()

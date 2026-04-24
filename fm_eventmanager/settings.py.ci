@@ -201,6 +201,14 @@ LOGIN_REDIRECT_URL = "admin:index"
 
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
+# State file is written to on every request by the maintenance_mode middleware.
+# Env-override so CI runners / devel / docker / test can each point at a
+# writable location without code changes.
+MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
+    'MAINTENANCE_MODE_STATE_FILE_PATH',
+    os.path.join(os.getenv('GITHUB_WORKSPACE', os.getcwd()),
+                 'fm_eventmanager', 'maintenance_mode_state.txt'),
+)
 
 INTERNAL_IPS = ['127.0.0.1']
 
@@ -209,6 +217,18 @@ INTERNAL_IPS = ['127.0.0.1']
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(os.getenv('GITHUB_WORKSPACE', '/root/projects/furthemore/'),  'static', '')
+# NOTE: do NOT add a ("bundler", ...) STATICFILES_DIRS entry here. Vite
+# builds into ``registration/static/bundler/``; Django's AppDirectoriesFinder
+# picks that up automatically because ``registration`` is an INSTALLED_APP.
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 # Session Management
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
@@ -222,8 +242,12 @@ SQUARE_APPLICATION_ID = os.environ['SQUARE_APPLICATION_ID']
 SQUARE_ACCESS_TOKEN = os.environ['SQUARE_ACCESS_TOKEN']
 SQUARE_LOCATION_ID = os.environ['SQUARE_LOCATION_ID']
 SQUARE_CURRENCY = 'USD'
-SQUARE_ENVIRONMENT = 'sandbox'  # Or "production"
+SQUARE_ENVIRONMENT = os.getenv('SQUARE_ENVIRONMENT', 'sandbox')  # Or "production"
 SQUARE_WEBHOOK_SIGNATURE_KEY = os.getenv('SQUARE_WEBHOOK_SIGNATURE_KEY', 'unset')
+PAYPAL_CLIENT_ID = os.environ['PAYPAL_CLIENT_ID']
+PAYPAL_CLIENT_SECRET = os.environ['PAYPAL_CLIENT_SECRET']
+PAYPAL_CURRENCY = os.getenv('PAYPAL_CURRENCY', 'USD')
+PAYPAL_ENVIRONMENT = os.getenv('PAYPAL_ENVIRONMENT', 'sandbox')  # Or "production"
 
 # Sandbox values - DO NOT check in production credentials
 EMAIL_HOST = 'smtp.mailgun.org'

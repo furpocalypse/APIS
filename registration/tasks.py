@@ -7,6 +7,25 @@ from registration import emails
 logger = logging.getLogger("registration.tasks")
 
 
+def _mark_order_email_sent(order_id):
+    from registration.models import Order
+
+    Order.objects.filter(id=order_id).update(email_sent=True, email_error="")
+
+
+def _mark_order_email_failed(order_id, exc):
+    from registration.models import Order
+
+    Order.objects.filter(id=order_id).update(
+        email_sent=False, email_error=str(exc)[:2000]
+    )
+
+
+def _retries_exhausted(task):
+    max_retries = task.max_retries if task.max_retries is not None else 0
+    return task.request.retries >= max_retries
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_registration_email_task(self, order_id, email, send_vip=True):
     from registration.models import Order
@@ -16,7 +35,12 @@ def send_registration_email_task(self, order_id, email, send_vip=True):
         emails.send_registration_email(order, email, send_vip)
     except Exception as exc:
         logger.exception("Failed to send registration email for order %s", order_id)
+        if _retries_exhausted(self):
+            _mark_order_email_failed(order_id, exc)
+            raise
         raise self.retry(exc=exc)
+    else:
+        _mark_order_email_sent(order_id)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -45,7 +69,12 @@ def send_upgrade_payment_email_task(self, attendee_id, order_id):
             attendee_id,
             order_id,
         )
+        if _retries_exhausted(self):
+            _mark_order_email_failed(order_id, exc)
+            raise
         raise self.retry(exc=exc)
+    else:
+        _mark_order_email_sent(order_id)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -56,7 +85,12 @@ def send_staff_registration_email_task(self, order_id):
         logger.exception(
             "Failed to send staff registration email for order %s", order_id
         )
+        if _retries_exhausted(self):
+            _mark_order_email_failed(order_id, exc)
+            raise
         raise self.retry(exc=exc)
+    else:
+        _mark_order_email_sent(order_id)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -109,14 +143,21 @@ def send_dealer_assistant_form_email_task(self, dealer_id):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_dealer_assistant_email_task(self, dealer_id):
+def send_dealer_assistant_email_task(self, dealer_id, order_id=None):
     try:
         emails.send_dealer_assistant_email(dealer_id)
     except Exception as exc:
         logger.exception(
             "Failed to send dealer assistant email for dealer %s", dealer_id
         )
+        if _retries_exhausted(self):
+            if order_id is not None:
+                _mark_order_email_failed(order_id, exc)
+            raise
         raise self.retry(exc=exc)
+    else:
+        if order_id is not None:
+            _mark_order_email_sent(order_id)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -148,7 +189,12 @@ def send_dealer_payment_email_task(self, dealer_id, order_id):
             dealer_id,
             order_id,
         )
+        if _retries_exhausted(self):
+            _mark_order_email_failed(order_id, exc)
+            raise
         raise self.retry(exc=exc)
+    else:
+        _mark_order_email_sent(order_id)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)

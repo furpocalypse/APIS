@@ -401,6 +401,7 @@ class OrdersTestCase(TestCase):
         self.attendee_form_upgrade["badgeName"] = "Upgrade Test"
 
         self.attendee_form_upgrade_checkout = {
+            "processor": "paypal",
             "billingData": {
                 "address1": "Qui qui quasi amet",
                 "address2": "Sunt voluptas dolori",
@@ -465,16 +466,29 @@ class OrdersTestCase(TestCase):
         )
         return response
 
-    def checkout(self, token, orgDonation="", charityDonation="", onsite=False):
+    def get_paypal_checkout_postdata(
+        self, code="", orgDonation="", charityDonation=""
+    ) -> dict:
         postData = {
-            "billingData": {},
+            "processor": "paypal",
+            "billingData": {"source_id": "TEST-PAYPAL-ORDER"},
             "charityDonation": charityDonation,
             "onsite": False,
             "orgDonation": orgDonation,
         }
 
+        if code:
+            postData["paypalMockResponse"] = code
+
+        return postData
+
+    def get_square_checkout_postdata(
+        self, token="", orgDonation="", charityDonation="", onsite=False
+    ) -> dict:
+        billingData = {}
+
         if not onsite:
-            postData["billingData"] = {
+            billingData = {
                 "address1": "123 Any Street",
                 "address2": "Apt 4",
                 "cc_firstname": "Buffy",
@@ -487,6 +501,28 @@ class OrdersTestCase(TestCase):
                 "state": "ID",
             }
 
+        return {
+            "processor": "square",
+            "billingData": billingData,
+            "charityDonation": charityDonation,
+            "onsite": onsite,
+            "orgDonation": orgDonation,
+        }
+
+    def checkout(
+        self, token_or_code="", orgDonation="", charityDonation="", onsite=False
+    ):
+        postData = {}
+
+        if token_or_code[:5] in ("cnon:", "ccof:", "bnon:", "wnon:"):
+            postData = self.get_square_checkout_postdata(
+                token_or_code, orgDonation, charityDonation, onsite
+            )
+        else:
+            postData = self.get_paypal_checkout_postdata(
+                token_or_code, orgDonation, charityDonation
+            )
+
         response = self.client.post(
             reverse("registration:checkout"),
             json.dumps(postData),
@@ -495,3 +531,247 @@ class OrdersTestCase(TestCase):
         )
 
         return response
+
+
+# ---------------------------------------------------------------------------
+# PayPal test fixtures / helper factories
+# ---------------------------------------------------------------------------
+#
+# These helpers build plain-dict fixtures shaped like the PayPal v2 Orders API
+# response that APIS stores on ``Order.apiData``. They intentionally do NOT
+# import any ``paypalserversdk`` symbols so they can be used anywhere without
+# requiring the PayPal SDK to be importable (e.g. status/enum strings are
+# spelled out literally).
+#
+# The canonical shape replicated here mirrors the one produced by
+# ``registration/paypal_payments.py`` for a single-purchase-unit,
+# single-capture order (see ``test_paypal_payments.py:248-271`` for the
+# reference ``order_no_refund`` shape). Variations actually observed in the
+# existing tests that drove parameterization:
+#
+#   * ``payment_source.card.last_digits`` is present in the refresh tests but
+#     absent from the refund/webhook tests -> controlled by ``last_four``.
+#   * Top-level ``status`` field present in the webhook test only -> always
+#     emitted with the sensible default ``"COMPLETED"`` so both shapes match.
+#   * Outer ``purchase_units[0].amount`` present in the refund/webhook tests
+#     but absent from the refresh tests -> always emitted for consistency
+#     with what production actually writes (harmless when present).
+#   * ``refunds`` array may be absent, contain one COMPLETED refund of
+#     partial or full value, or contain multiple COMPLETED refunds summing
+#     to partial or full value -> covered by the five convenience wrappers.
+
+
+def make_refund_dict(
+    id="TEST-PAYPAL-REFUND",
+    amount="0.00",
+    status="COMPLETED",
+    note="",
+    currency="USD",
+):
+    """Return a single PayPal refund dict in the ``currency_code``/``value``
+    shape used in production.
+
+    ``amount`` is coerced to a two-decimal string. ``status`` is a plain
+    string (e.g. ``"COMPLETED"``, ``"PENDING"``, ``"FAILED"``) so callers
+    don't need to import ``RefundStatus``.
+    """
+    refund = {
+        "id": id,
+        "status": status,
+        "amount": {
+            "currency_code": currency,
+            "value": "%.2f" % Decimal(str(amount)),
+        },
+    }
+    if note:
+        refund["note_to_payer"] = note
+    return refund
+
+
+def make_paypal_apidata(
+    *,
+    order_id="TEST-PAYPAL-ORDER",
+    capture_id="TEST-PAYPAL-CAPTURE",
+    capture_status="COMPLETED",
+    capture_amount="99.99",
+    currency="USD",
+    refunds=None,
+    last_four=None,
+):
+    """Build an APIS ``Order.apiData`` dict shaped like a PayPal v2 Orders
+    API response.
+
+    Represents the single-purchase-unit, single-capture shape APIS always
+    creates (see ``registration/paypal_payments.py:84-148``).
+
+    Parameters
+    ----------
+    order_id:
+        Top-level PayPal order id.
+    capture_id:
+        Capture id inside ``purchase_units[0].payments.captures[0]``.
+    capture_status:
+        Capture status string (e.g. ``"COMPLETED"``, ``"DECLINED"``,
+        ``"PENDING"``). Passed through unchanged.
+    capture_amount:
+        Capture amount; coerced to a two-decimal string.
+    currency:
+        Currency code used for both the purchase unit amount and the
+        capture amount.
+    refunds:
+        Either ``None`` (no ``refunds`` key emitted) or a list of refund
+        dicts (as produced by :func:`make_refund_dict`).
+    last_four:
+        If given, a ``payment_source.card.last_digits`` field is added.
+    """
+    amount_value = "%.2f" % Decimal(str(capture_amount))
+    data = {
+        "id": order_id,
+        "status": "COMPLETED",
+        "purchase_units": [
+            {
+                "reference_id": "registration",
+                "amount": {
+                    "currency_code": currency,
+                    "value": amount_value,
+                },
+                "payments": {
+                    "captures": [
+                        {
+                            "id": capture_id,
+                            "status": capture_status,
+                            "amount": {
+                                "currency_code": currency,
+                                "value": amount_value,
+                            },
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    if last_four is not None:
+        data["payment_source"] = {"card": {"last_digits": str(last_four)}}
+    if refunds is not None:
+        data["purchase_units"][0]["payments"]["refunds"] = list(refunds)
+    return data
+
+
+def paypal_apidata_no_refunds(**overrides):
+    """PayPal apiData with no ``refunds`` key at all."""
+    overrides.pop("refunds", None)
+    return make_paypal_apidata(**overrides)
+
+
+def paypal_apidata_one_partial_refund(amount, **overrides):
+    """PayPal apiData with a single COMPLETED refund strictly less than the
+    capture total.
+
+    Raises ``ValueError`` if ``amount`` is not strictly less than
+    ``capture_amount`` (default ``"99.99"``).
+    """
+    capture_amount = overrides.get("capture_amount", "99.99")
+    if Decimal(str(amount)) >= Decimal(str(capture_amount)):
+        raise ValueError(
+            "partial refund amount %s must be < capture amount %s"
+            % (amount, capture_amount)
+        )
+    refund_id = overrides.pop("refund_id", "TEST-PAYPAL-PARTIAL-REFUND")
+    overrides["refunds"] = [make_refund_dict(id=refund_id, amount=amount)]
+    return make_paypal_apidata(**overrides)
+
+
+def paypal_apidata_fully_refunded(**overrides):
+    """PayPal apiData with a single COMPLETED refund equal to the capture
+    total."""
+    capture_amount = overrides.get("capture_amount", "99.99")
+    refund_id = overrides.pop("refund_id", "TEST-PAYPAL-FULL-REFUND")
+    overrides["refunds"] = [make_refund_dict(id=refund_id, amount=capture_amount)]
+    return make_paypal_apidata(**overrides)
+
+
+def paypal_apidata_multi_partial(amounts, **overrides):
+    """PayPal apiData with multiple COMPLETED refunds summing to strictly
+    less than the capture total.
+
+    ``amounts`` is an iterable of ``Decimal``/``float``/``str`` values.
+    """
+    capture_amount = Decimal(str(overrides.get("capture_amount", "99.99")))
+    decs = [Decimal(str(a)) for a in amounts]
+    if sum(decs) >= capture_amount:
+        raise ValueError(
+            "multi-partial refund amounts %s must sum to < capture amount %s"
+            % (amounts, capture_amount)
+        )
+    overrides["refunds"] = [
+        make_refund_dict(id="TEST-PAYPAL-PARTIAL-REFUND-%d" % i, amount=a)
+        for i, a in enumerate(decs, start=1)
+    ]
+    return make_paypal_apidata(**overrides)
+
+
+def paypal_apidata_multi_full(amounts, **overrides):
+    """PayPal apiData with multiple COMPLETED refunds summing to exactly the
+    capture total."""
+    capture_amount = Decimal(str(overrides.get("capture_amount", "99.99")))
+    decs = [Decimal(str(a)) for a in amounts]
+    if sum(decs) != capture_amount:
+        raise ValueError(
+            "multi-full refund amounts %s must sum to == capture amount %s"
+            % (amounts, capture_amount)
+        )
+    overrides["refunds"] = [
+        make_refund_dict(id="TEST-PAYPAL-FULL-REFUND-%d" % i, amount=a)
+        for i, a in enumerate(decs, start=1)
+    ]
+    return make_paypal_apidata(**overrides)
+
+
+class PayPalOrdersTestCase(OrdersTestCase):
+    """An :class:`OrdersTestCase` with a seeded COMPLETED PayPal-backed order.
+
+    Creates:
+
+    * ``self.order``      - an :class:`Order` in state ``COMPLETED`` with
+      ``apiData`` shaped by :func:`paypal_apidata_no_refunds` and
+      ``capture_id=PAYPAL_CAPTURE_ID``.
+    * ``self.attendee``   - an :class:`Attendee` built from
+      :data:`TEST_ATTENDEE_ARGS`.
+    * ``self.badge``      - a :class:`Badge` tying the attendee to the event.
+    * ``self.order_item`` - an :class:`OrderItem` linking the order and badge.
+
+    The parent ``OrdersTestCase.setUp`` already creates the :class:`Event`
+    and the full suite of :class:`PriceLevel` objects; this subclass reuses
+    ``self.event`` rather than creating a second one.
+    """
+
+    PAYPAL_CAPTURE_ID = "3C679366HH908993F"
+    PAYPAL_ORDER_ID = "5O190127TN364715T"
+    PAYPAL_ORDER_TOTAL = "99.99"
+
+    def setUp(self):
+        super().setUp()
+        self.order = Order(
+            total=self.PAYPAL_ORDER_TOTAL,
+            status=Order.COMPLETED,
+            reference="FOOBAR",
+            billingEmail="apis@mailinator.com",
+            lastFour="1111",
+            apiData=paypal_apidata_no_refunds(
+                order_id=self.PAYPAL_ORDER_ID,
+                capture_id=self.PAYPAL_CAPTURE_ID,
+                capture_amount=self.PAYPAL_ORDER_TOTAL,
+            ),
+        )
+        self.order.save()
+        self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
+        self.attendee.save()
+        self.badge = Badge(
+            attendee=self.attendee, event=self.event, badgeName="Test Badge"
+        )
+        self.badge.save()
+        self.order_item = OrderItem(
+            order=self.order, badge=self.badge, enteredBy="Test"
+        )
+        self.order_item.save()
+        self.order.refresh_from_db()

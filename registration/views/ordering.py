@@ -2,11 +2,13 @@ import json
 import logging
 from collections import Counter
 from json import JSONDecodeError
+from typing import Optional
 
 from django.core.signing import TimestampSigner
 from django.db import transaction
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from idempotency_key.decorators import idempotency_key
+from paypalserversdk.exceptions.api_exception import ApiException
 
 from registration import mqtt, tasks
 from registration.forms import OrderForm
@@ -15,6 +17,11 @@ from registration.payments import (
     charge_payment,
     update_capacity_for_status_change,
 )
+from registration.paypal_payments import (
+    capture_paypal_payment,
+    create_unpaid_paypal_order,
+)
+from registration.types import BillingData, TranslatedCartItem
 
 from . import cart, common
 
@@ -84,32 +91,65 @@ def _save_order_items(order, cartItems, orderItems):
         for order_item in orderItems:
             order_item.order = order
             order_item.save()
+            
+            
+def get_cart_data_from_session(
+    request: HttpRequest,
+) -> tuple[list[Cart], list[OrderItem], str]:
+    """
+    Retrieve cart data from the Django session.
+
+    :param request: The request sent by the client.
+    :return: A tuple consisting of:
+
+        * A list of Cart models
+        * A list of OrderItem models
+        * The discount code applied to the cart, if any
+    """
+
+    cart_ids = request.session.get("cart_items", [])
+    order_ids = request.session.get("order_items", [])
+    return (
+        list(Cart.objects.filter(id__in=cart_ids)),
+        list(OrderItem.objects.filter(id__in=order_ids)),
+        request.session.get("discount", ""),
+    )
 
 
 def do_checkout(
-    billingData,
-    total,
-    discount,
-    cartItems,
-    orderItems,
-    donationOrg,
-    donationCharity,
-    request=None,
-):
+    processor: str,
+    billingData: BillingData,
+    total: Decimal,
+    discount: Decimal,
+    cartItems: list,
+    orderItems: list,
+    donationOrg: Decimal,
+    donationCharity: Decimal,
+    request: HttpRequest = None,
+) -> tuple[bool, dict, Order]:
     event = Event.objects.get(default=True)
-    reference = common.get_unique_confirmation_token(Order)
+    # Reuse the reference token set on the PayPal order at create_paypal_order
+    # time so that invoice_id/custom_id on every downstream PayPal webhook
+    # resolves to this Order via Order.reference. Fall back to a fresh token
+    # when called outside the HTTP flow (e.g. direct unit tests).
+    reference = None
+    if processor == "paypal" and request is not None:
+        reference = request.session.get("pending_paypal_reference")
+    if not reference:
+        reference = common.get_unique_confirmation_token(Order)
 
+    billName = None
+    if billingData.get("cc_firstname") and billingData.get("cc_lastname"):
+        billName = f"{billingData.get("cc_firstname")} {billingData.get("cc_lastname")}"
     form = OrderForm(
-        collect_billing_address=event.collectBillingAddress,
+        collect_billing_address=processor == "square" and event.collectBillingAddress,
         data={
             "total": Decimal(total),
             "reference": reference,
             "discount": discount,
             "orgDonation": donationOrg,
             "charityDonation": donationCharity,
-            "billingName": " ".join(
-                [billingData.get(k) for k in ["cc_firstname", "cc_lastname"]]
-            ),
+            "billingName": billName,
             "billingAddress1": billingData.get("address1"),
             "billingAddress2": billingData.get("address2"),
             "billingCity": billingData.get("city"),
@@ -126,6 +166,30 @@ def do_checkout(
     order: Order = form.save(commit=False)
 
     price_level_counts = _count_price_levels(cartItems, orderItems)
+    if processor == "paypal":
+        orderId = billingData.get("source_id")
+        if not orderId:
+            return False, "Missing PayPal order ID", None
+        mock_response = ""
+        if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
+            post_data = json.loads(request.body)
+            mock_response = post_data.get("paypalMockResponse")
+        status, response = capture_paypal_payment(orderId, order, mock_response)
+    if processor == "square":
+        status, response = charge_payment(order, billingData, request)
+
+    if status:
+        order.save()
+
+        if cartItems:
+            for item in cartItems:
+                order_item = cart.saveCart(item)
+                order_item.order = order
+                order_item.save()
+        elif orderItems:
+            for order_item in orderItems:
+                order_item.order = order
+                order_item.save()
 
     try:
         with transaction.atomic():
@@ -253,9 +317,18 @@ def get_order_item_option_total(options):
 
 
 def get_discount_total(disc, subtotal):
+    """Accept either a ``Discount`` model instance or a string code name.
+
+    Callers in ``cart.py``/``onsite.py``/``onsite_admin.py`` hand in already-
+    looked-up ``Discount`` objects, while ``get_line_item_total`` forwards
+    the raw session value which is a string. Normalize to a string code
+    name before the DB lookup.
+    """
+    if isinstance(disc, Discount):
+        disc = disc.codeName
     try:
         discount = Discount.objects.get(codeName=disc)
-    except Discount.DoesNotExist:
+    except (Discount.DoesNotExist, ValueError, TypeError):
         return 0
     if discount.isValid():
         if discount.amountOff:
@@ -265,13 +338,10 @@ def get_discount_total(disc, subtotal):
     return 0
 
 
-def get_total(cartItems, orderItems, disc=""):
-    total = 0
-    total_discount = 0
-    if not cartItems and not orderItems:
-        return 0, 0
-
-    for item in cartItems:
+def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Decimal:
+    item_total = 0
+    discount = 0
+    if isinstance(item, Cart):
         post_data = json.loads(item.formData)
         pdp = post_data["priceLevel"]
         price_level = PriceLevel.objects.get(id=pdp["id"])
@@ -280,15 +350,7 @@ def get_total(cartItems, orderItems, disc=""):
         options = pdp["options"]
         item_total += getCartItemOptionTotal(options)
 
-        if disc:
-            discount = get_discount_total(disc, item_total)
-            total_discount += discount
-            item_total -= discount
-
-        if item_total > 0:
-            total += item_total
-
-    for item in orderItems:
+    elif isinstance(item, OrderItem):
         item_sub_total = item.priceLevel.basePrice
         eff_level = item.badge.effectiveLevel()
 
@@ -299,11 +361,31 @@ def get_total(cartItems, orderItems, disc=""):
 
         item_total += get_order_item_option_total(item.attendeeoptions_set.all())
 
-        if disc:
-            discount = get_discount_total(disc, item_total)
-            total_discount += discount
-            item_total -= discount
+    if disc:
+        discount = get_discount_total(disc, item_total)
 
+    return item_total, discount
+
+
+def get_total(
+    cartItems: list[Cart], orderItems: list[OrderItem], disc: Optional[str] = ""
+) -> tuple[Decimal, Decimal]:
+    total = 0
+    total_discount = 0
+    if not cartItems and not orderItems:
+        return 0, 0
+
+    for item in cartItems:
+        item_total, discount = get_line_item_total(item, disc)
+        total_discount += discount
+        item_total -= discount
+        if item_total > 0:
+            total += item_total
+
+    for item in orderItems:
+        item_total, discount = get_line_item_total(item, disc)
+        total_discount += discount
+        item_total -= discount
         if item_total > 0:
             total += item_total
 
@@ -351,8 +433,145 @@ def add_attendee_to_assistant(request, attendee):
             pass
 
 
+def create_paypal_order(request: HttpRequest) -> JsonResponse:
+    """
+    Creates an order in PayPal.
+
+    REST endpoint used by PayPal's frontend script to create an order in
+    PayPal's system after the user clicks the pay with PayPal button. Constructs
+    cart details to send to PayPal, sends it, and returns the response from the
+    PayPal API. The checkout page scripts (the PayPal JavaScript library) use
+    the newly created order ID to capture payment after the user verifies their
+    cart in PayPal.
+
+    :param request: Incoming HTTP request. May contain donation amounts in the
+        body.
+
+    :return: JSON response containing the response body from the PayPal Orders
+        API.
+    """
+    # We don't need to get cart items from the client - they're in the session
+    cart_items, order_items, discount_code = get_cart_data_from_session(request)
+
+    # Safety valve (in case session times out before checkout is complete)
+    if len(cart_items) == 0 and len(order_items) == 0:
+        return common.abort(
+            400, "Session expired or no session is stored for this client"
+        )
+
+    try:
+        post_data = json.loads(request.body)
+    except (ValueError, JSONDecodeError) as e:
+        logger.exception(e)
+        logger.error("Unable to decode JSON for checkout()")
+        return common.abort(400, "Unable to parse input options")
+
+    event = Event.objects.get(default=True)
+
+    discount = Discount.objects.filter(codeName=discount_code)
+    if discount.count() > 0 and discount.first().isValid():
+        discount = discount.first()
+    else:
+        discount = None
+
+    # Process cart item data and calculate totals
+    translated_cart: list[TranslatedCartItem] = []
+    for item in cart_items:
+        parsed_data = json.loads(item.formData)
+        pda = parsed_data["attendee"]
+        pdp = parsed_data["priceLevel"]
+
+        # DO NOT SAVE THESE MODELS
+        attendee = Attendee(
+            preferredName=pda.get("preferredName", ""),
+            firstName=pda["firstName"],
+            lastName=pda["lastName"],
+        )
+        priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
+
+        item_total, discount = get_line_item_total(item, discount_code)
+        translated_cart.append(
+            {
+                "name": "%s %s - %s" % (event, priceLevel, attendee),
+                "total": item_total,
+                "donation": False,
+            }
+        )
+
+    for item in order_items:
+        item_total, discount = get_line_item_total(item, discount_code)
+        badge = item.badge
+        translated_cart.append(
+            {
+                "name": str(event)
+                + " "
+                + str(item.priceLevel)
+                + " - "
+                + str(badge.attendee),
+                "total": item_total,
+                "donation": False,
+            }
+        )
+
+    subtotal, total_discount = get_total(cart_items, order_items, discount_code)
+
+    porg = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+
+    if porg < 0:
+        porg = 0
+    if pcharity < 0:
+        pcharity = 0
+
+    if porg > 0:
+        translated_cart.append(
+            {"name": "Donation to %s" % event, "total": porg, "donation": True}
+        )
+
+    if pcharity > 0:
+        translated_cart.append(
+            {
+                "name": "Donation to %s" % event.charity,
+                "total": pcharity,
+                "donation": True,
+            }
+        )
+
+    total = subtotal + porg + pcharity
+
+    # We only want to set up to capture payment if there is payment due
+    if total > 0:
+        # Generate (or reuse) the reference token that will become
+        # Order.reference. Send it to PayPal as both invoice_id and custom_id
+        # so every downstream webhook event carries it back to us.
+        reference = request.session.get("pending_paypal_reference")
+        if not reference:
+            reference = common.get_unique_confirmation_token(Order)
+            request.session["pending_paypal_reference"] = reference
+        try:
+            result = create_unpaid_paypal_order(
+                total, total_discount, translated_cart, apis_reference=reference
+            )
+            return common.success(reason=json.loads(result.text))
+        except ApiException as ex:
+            return common.abort(ex.response_code, json.loads(ex.response.text))
+
+    return common.abort(400, "Cart total is zero; use the zero-checkout flow")
+
+
 @idempotency_key(optional=False)
 def checkout(request):
+    """
+    Finalizes checkout, creating order data and capturing payment.
+    """
+
+    try:
+        post_data: dict = json.loads(request.body)
+    except (ValueError, JSONDecodeError) as e:
+        logger.exception(e)
+        logger.error("Unable to decode JSON for checkout()")
+        return common.abort(400, "Unable to parse input options")
+
     event = Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items = list(Cart.objects.filter(id__in=session_items))
@@ -364,13 +583,6 @@ def checkout(request):
         return common.abort(
             400, "Session expired or no session is stored for this client"
         )
-
-    try:
-        post_data = json.loads(request.body)
-    except (ValueError, JSONDecodeError) as e:
-        logger.exception(e)
-        logger.error("Unable to decode JSON for checkout()")
-        return common.abort(400, "Unable to parse input options")
 
     discount = Discount.objects.filter(codeName=pdisc)
     if discount.count() > 0 and discount.first().isValid():
@@ -386,6 +598,18 @@ def checkout(request):
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
 
+    porg = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    pbill = post_data.get("billingData", {})
+    pproc = post_data.get("processor")
+
+    if porg < 0:
+        porg = 0
+    if pcharity < 0:
+        pcharity = 0
+
+    total = subtotal + porg + pcharity
+
     if subtotal == 0:
         status, message, order = doZeroCheckout(discount, cart_items, order_items)
         if not status:
@@ -395,21 +619,11 @@ def checkout(request):
         if existing_order_item:
             add_attendee_to_assistant(request, existing_order_item.badge.attendee)
         common.clear_session(request)
+        request.session["last_order_id"] = order.id
         tasks.send_registration_email_task.delay(order.id, order.billingEmail)
         return common.success()
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    pbill = post_data["billingData"]
-
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
-
-    total = subtotal + porg + pcharity
-
-    onsite = post_data["onsite"]
+    onsite = post_data.get("onsite", False)
     if onsite:
         reference = common.get_unique_confirmation_token(Order)
         order = Order(
@@ -437,7 +651,15 @@ def checkout(request):
         message = "Onsite success"
     else:
         status, message, order = do_checkout(
-            pbill, total, discount, cart_items, order_items, porg, pcharity, request
+            pproc,
+            pbill,
+            total,
+            discount,
+            cart_items,
+            order_items,
+            porg,
+            pcharity,
+            request,
         )
 
     if status:
@@ -448,6 +670,7 @@ def checkout(request):
         cart_items = Cart.objects.filter(id__in=session_items)
         cart_items.delete()
         common.clear_session(request)
+        request.session["last_order_id"] = order.id
         tasks.send_registration_email_task.delay(order.id, order.billingEmail)
 
         notify_terminal(request, order)

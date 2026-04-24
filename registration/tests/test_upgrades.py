@@ -1,4 +1,6 @@
 import json
+import unittest
+from unittest.mock import patch
 
 from django.test import tag
 from django.urls import reverse
@@ -83,7 +85,12 @@ class TestUpgrades(OrdersTestCase):
         attendee.delete()
 
     @tag("square")
-    def test_findUpgrade_happy_path(self):
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_findUpgrade_happy_path(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         options = [
             {"id": self.option_conbook.id, "value": "true"},
             {"id": self.option_shirt.id, "value": self.shirt1.id},
@@ -188,7 +195,15 @@ class TestUpgrades(OrdersTestCase):
         return cart_response, checkout_response
 
     @tag("square")
-    def test_upgrade(self):
+    @unittest.skip(
+        "Square upgrade checkout path unwired; see test_upgrade_checkout_via_paypal for the PayPal equivalent."
+    )
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_upgrade(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         badge, attendee = self.setup_upgrade()
         cart, checkout = self.upgrade_add_and_checkout(
             self.price_90, self.attendee_form_upgrade_checkout, badge, attendee
@@ -202,7 +217,12 @@ class TestUpgrades(OrdersTestCase):
         attendee.delete()
 
     @tag("square")
-    def test_upgrade_zero(self):
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_upgrade_zero(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         badge, attendee = self.setup_upgrade()
         cart, checkout = self.upgrade_add_and_checkout(
             self.price_45, self.attendee_form_upgrade_checkout, badge, attendee
@@ -213,6 +233,9 @@ class TestUpgrades(OrdersTestCase):
         attendee.delete()
 
     @tag("square")
+    @unittest.skip(
+        "Square checkout removed; rewrite against PayPal capture failure path"
+    )
     def test_upgrade_card_declined(self):
         form = self.attendee_form_upgrade_checkout
         form["nonce"] = "cnon:card-nonce-declined"
@@ -221,6 +244,80 @@ class TestUpgrades(OrdersTestCase):
             self.price_45, form, badge, attendee
         )
         self.assertEqual(checkout.status_code, 200)
+        self.assertEqual(badge.effectiveLevel(), self.price_45)
+        badge.delete()
+        attendee.delete()
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_upgrade_checkout_via_paypal(self, mock_capture):
+        """End-to-end upgrade checkout via the PayPal path (capture mocked)."""
+
+        def fake_capture(paypal_order_id, apis_order, paypal_mock_response):
+            apis_order.status = Order.COMPLETED
+            apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
+            return True, {"id": paypal_order_id, "status": "COMPLETED"}
+
+        mock_capture.side_effect = fake_capture
+        badge, attendee = self.setup_upgrade()
+        setup_call_count = mock_capture.call_count
+
+        form = dict(self.attendee_form_upgrade_checkout)
+        form["processor"] = "paypal"
+        form["billingData"]["source_id"] = "TEST-PAYPAL-UPGRADE-ORDER"
+        cart, checkout = self.upgrade_add_and_checkout(
+            self.price_90, form, badge, attendee
+        )
+        self.assertEqual(cart.status_code, 200)
+        self.assertEqual(checkout.status_code, 200, checkout.content)
+        self.assertEqual(mock_capture.call_count - setup_call_count, 1)
+        self.assertEqual(mock_capture.call_args.args[0], "TEST-PAYPAL-UPGRADE-ORDER")
+
+        badge.refresh_from_db()
+        self.assertEqual(badge.effectiveLevel(), self.price_90)
+
+        upgrade_item = (
+            OrderItem.objects.filter(badge=badge, priceLevel=self.price_90)
+            .exclude(order__isnull=True)
+            .first()
+        )
+        self.assertIsNotNone(upgrade_item)
+        order = upgrade_item.order
+        self.assertEqual(order.billingType, Order.CREDIT)
+        self.assertEqual(order.status, Order.COMPLETED)
+        # price_90 ($90) - price_45 ($45) + orgDonation ($10) = $55
+        self.assertEqual(order.total, Decimal("55.00"))
+        badge.delete()
+        attendee.delete()
+
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_upgrade_paypal_capture_declined(self, mock_capture):
+        """PayPal variant of test_upgrade_card_declined (Square version is skipped)."""
+
+        def fake_success(paypal_order_id, apis_order, paypal_mock_response):
+            apis_order.status = Order.COMPLETED
+            apis_order.apiData = {"id": paypal_order_id, "status": "COMPLETED"}
+            return True, {"id": paypal_order_id, "status": "COMPLETED"}
+
+        def fake_failed_capture(paypal_order_id, apis_order, paypal_mock_response):
+            apis_order.status = Order.FAILED
+            apis_order.save()
+            return False, {"errors": ["INSTRUMENT_DECLINED"]}
+
+        mock_capture.side_effect = fake_success
+        badge, attendee = self.setup_upgrade()
+        mock_capture.side_effect = fake_failed_capture
+
+        form = dict(self.attendee_form_upgrade_checkout)
+        form["processor"] = "paypal"
+        form["billingData"]["source_id"] = "TEST-PAYPAL-UPGRADE-ORDER"
+        cart, checkout = self.upgrade_add_and_checkout(
+            self.price_90, form, badge, attendee
+        )
+        self.assertEqual(checkout.status_code, 400, checkout.content)
+
+        badge.refresh_from_db()
         self.assertEqual(badge.effectiveLevel(), self.price_45)
         badge.delete()
         attendee.delete()
