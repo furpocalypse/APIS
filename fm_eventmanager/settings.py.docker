@@ -106,7 +106,7 @@ SERVER_EMAIL = os.getenv("DJANGO_SERVER_EMAIL", "no-reply@example.com")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", SERVER_EMAIL)
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
-CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "*").split(",")
+CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://*,https://*").split(",")
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
@@ -406,8 +406,8 @@ SQUARE_LOCATION_ID = os.environ.get('SQUARE_LOCATION_ID')
 SQUARE_CURRENCY = os.getenv('SQUARE_CURRENCY', 'USD')
 SQUARE_ENVIRONMENT = os.getenv('SQUARE_ENVIRONMENT', 'production')  # Or "sandbox"
 SQUARE_WEBHOOK_SIGNATURE_KEY = os.getenv('SQUARE_WEBHOOK_SIGNATURE_KEY', 'unset')
-PAYPAL_CLIENT_ID = os.environ['PAYPAL_CLIENT_ID']
-PAYPAL_CLIENT_SECRET = os.environ['PAYPAL_CLIENT_SECRET']
+PAYPAL_CLIENT_ID = os.environ.get('PAYPAL_CLIENT_ID', '')
+PAYPAL_CLIENT_SECRET = os.environ.get('PAYPAL_CLIENT_SECRET', '')
 PAYPAL_CURRENCY = os.getenv('PAYPAL_CURRENCY', 'USD')
 PAYPAL_ENVIRONMENT = os.getenv('PAYPAL_ENVIRONMENT', 'production')  # Or "sandbox"
 
