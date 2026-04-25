@@ -139,6 +139,10 @@ dev = [
     { name = "ruff" },
     { name = "werkzeug" },
 ]
+test = [
+    { name = "coveralls" },
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -190,6 +194,10 @@ dev = [
     { name = "django-types", specifier = ">=0.22.0" },
     { name = "ruff", specifier = ">=0.15.4" },
     { name = "werkzeug", specifier = ">=3.1.5" },
+]
+test = [
+    { name = "coveralls", specifier = ">=4.1.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
 ]
 
 [[package]]

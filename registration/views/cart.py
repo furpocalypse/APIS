@@ -116,6 +116,16 @@ def get_cart(request):
             }
             orderItems.append(orderItem)
 
+        # Check if any price levels have limited capacity
+        has_limited_capacity = False
+        for item in orderItems:
+            price_level = item["priceLevel"]
+            if price_level.maxCapacity is not None:
+                capacity_status = price_level.get_capacity_status()
+                if capacity_status["show_count"] and not capacity_status["sold_out"]:
+                    has_limited_capacity = True
+                    break
+
         context = {
             "event": event,
             "orderItems": orderItems,
@@ -123,6 +133,7 @@ def get_cart(request):
             "total_discount": total_discount,
             "discount": discount,
             "hasMinors": hasMinors,
+            "has_limited_capacity": has_limited_capacity,
         }
     output = render(request, "registration/checkout.html", context)
     output.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"

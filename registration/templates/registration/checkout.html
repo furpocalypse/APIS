@@ -75,6 +75,15 @@
         </tr>
       </table>
 
+      {% comment %}Capacity warnings{% endcomment %}
+      {% if has_limited_capacity %}
+        <div class="capacity-warning">
+          <i class="fa fa-exclamation-triangle"></i>
+          <strong>Limited Availability</strong> - One or more registration levels in your cart have limited slots remaining.
+          Please complete your checkout promptly to secure your registration.
+        </div>
+      {% endif %}
+
       <br/>
       {% if not discount.newStaffEvent and not discount.staffEvent %}
         <a class="btn btn-primary" id="addAnother">Add Another Attendee</a>
@@ -330,8 +339,8 @@
                 } else {
                     const reason = await formatError(response);
                     showAlert(
-                        `<b>Sorry, an unknown error occurred while submitting your registration for the following reason:</b>` +
-                        `<br><br>${reason}<br><br>  Please try again later.  If the problem persists, please contact ` +
+                        `<b>Sorry, your registration could not be completed:</b>` +
+                        `<br><br>${reason}<br><br>Please try again later. If the problem persists, please contact ` +
                         `<a href="mailto:${EVENT_REGISTRATION_EMAIL}">${EVENT_REGISTRATION_EMAIL}</a> for assistance.`
                     );
                 }

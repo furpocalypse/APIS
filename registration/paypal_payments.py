@@ -40,7 +40,7 @@ from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 from prometheus_client import Histogram
 
 from .models import Order as ApisOrder
-from .payments import refund_cash_payment
+from .payments import refund_cash_payment, update_capacity_for_status_change
 from .types import TranslatedCartItem
 
 PAYPAL_REQUESTS = Histogram(
@@ -289,6 +289,7 @@ def refresh_payment(
         if not api_data:
             logger.warning("No order data yet for {0}".format(order.reference))
             return False, "No order data yet for {0}".format(order.reference)
+    old_status = order.status
     order_total = 0
 
     try:
@@ -336,6 +337,7 @@ def refresh_payment(
 
     order.apiData = APIHelper.to_dictionary(fresh_order)
     order.total = order_total
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
     return message == None, message
@@ -454,6 +456,7 @@ def refund_card_payment(
     :return: A tuple of a boolean success status and an accompanying message.
     """
 
+    old_status = order.status
     api_data = PayPalOrder.from_dictionary(order.apiData)
     if api_data == None:
         return (False, "APIS Order %s has malformed or missing order data!" % order.id)
@@ -544,6 +547,7 @@ def refund_card_payment(
     if status in (RefundStatus.CANCELLED, RefundStatus.FAILED):
         order.status = ApisOrder.COMPLETED
 
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     message = "PayPal refund has been submitted and is %s" % status
     logger.debug(message)

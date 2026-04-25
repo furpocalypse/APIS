@@ -1,3 +1,4 @@
+import logging
 import random
 import string
 import uuid
@@ -7,10 +8,13 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import F
 from django.utils import timezone
 
 # Uppercase letters and digits, excluding visually ambiguous characters: 0/O, 1/I, 5/S, 8/B, 2/Z
 VISUALLY_UNAMBIGUOUS_CHARS = "ACDEFGHJKLMNPQRTUVWXY3467"
+
+logger = logging.getLogger(__name__)
 
 
 # Lookup and supporting tables.
@@ -138,6 +142,19 @@ class PriceLevel(models.Model):
     basePrice = models.DecimalField(max_digits=6, decimal_places=2)
     startDate = models.DateTimeField()
     endDate = models.DateTimeField()
+    maxCapacity = models.IntegerField(
+        blank=True, null=True, help_text="Leave blank for no limit"
+    )
+    remainingSlots = models.IntegerField(
+        blank=True,
+        null=True,
+        help_text="Remaining available slots. Null means unlimited. Managed automatically.",
+    )
+    reservedSlots = models.IntegerField(
+        default=0,
+        help_text="Slots currently held by pending payment leases.",
+    )
+    capacityDisplayThreshold = models.IntegerField(default=10)
     public = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     group = models.TextField(blank=True)
@@ -170,6 +187,215 @@ class PriceLevel(models.Model):
 
     get_level_active_status.boolean = True
     get_level_active_status.short_description = "Active"
+
+    # ---- Ground-truth verification methods (DB queries) ----
+
+    def verify_registration_count(self):
+        """
+        Count confirmed registrations via DB query (COMPLETED + CAPTURED).
+        Use for periodic verification, not hot-path capacity checks.
+        """
+        from registration.models import Order, OrderItem
+
+        confirmed_statuses = [Order.CAPTURED, Order.COMPLETED]
+        return OrderItem.objects.filter(
+            priceLevel=self, order__status__in=confirmed_statuses
+        ).count()
+
+    def verify_pending_count(self):
+        """
+        Count pending registrations via DB query.
+        Use for periodic verification, not hot-path capacity checks.
+        """
+        from registration.models import Order, OrderItem
+
+        return OrderItem.objects.filter(
+            priceLevel=self, order__status=Order.PENDING
+        ).count()
+
+    # ---- Counter-based methods (fast path) ----
+
+    def get_registration_count(self):
+        """Return count of confirmed registrations from counters (O(1))."""
+        if self.maxCapacity is None:
+            return 0
+        # confirmed + reserved = maxCapacity - remainingSlots
+        # confirmed alone = (maxCapacity - remainingSlots) - reservedSlots
+        return self.maxCapacity - (self.remainingSlots or 0) - self.reservedSlots
+
+    def get_pending_count(self):
+        """Return count of reserved (leased) slots from counter."""
+        return self.reservedSlots
+
+    def get_available_slots(self):
+        """Calculate remaining capacity based on confirmed registrations only.
+        Pending orders are excluded so the frontend shows an optimistic count —
+        slots held by pending payments may still free up."""
+        if self.maxCapacity is None:
+            return None  # Unlimited
+        return self.remainingSlots + self.reservedSlots
+
+    def is_sold_out(self):
+        """Check if confirmed registrations have reached capacity.
+        Pending orders are excluded — a tier is only "sold out" when all
+        slots are held by confirmed orders."""
+        if self.maxCapacity is None:
+            return False
+        return self.get_available_slots() <= 0
+
+    def get_capacity_status(self):
+        """Return dict with capacity information for frontend display."""
+        if self.maxCapacity is None:
+            return {
+                "available_slots": None,
+                "max_capacity": None,
+                "sold_out": False,
+                "show_count": False,
+            }
+
+        remaining = self.get_available_slots()
+        return {
+            "available_slots": remaining,
+            "max_capacity": self.maxCapacity,
+            "sold_out": remaining <= 0,
+            "show_count": remaining <= self.capacityDisplayThreshold,
+        }
+
+    # Capacity check results
+    CAPACITY_AVAILABLE = "available"
+    CAPACITY_SOLD_OUT = "sold_out"
+    CAPACITY_RESERVED = "reserved"
+
+    def check_capacity_available(self, quantity=1):
+        """
+        Check if the requested quantity can be reserved for checkout.
+
+        Uses counter fields for O(1) performance. Returns one of:
+          - CAPACITY_AVAILABLE: slots are free, proceed with checkout
+          - CAPACITY_SOLD_OUT: all slots held by confirmed orders (genuinely gone)
+          - CAPACITY_RESERVED: at capacity due to pending orders that may free up
+
+        This method should be called within a transaction that uses
+        select_for_update() on this PriceLevel, to ensure atomicity.
+        """
+        if self.maxCapacity is None:
+            return self.CAPACITY_AVAILABLE
+
+        if self.remainingSlots >= quantity:
+            return self.CAPACITY_AVAILABLE
+
+        if self.reservedSlots > 0:
+            return self.CAPACITY_RESERVED
+        return self.CAPACITY_SOLD_OUT
+
+    # ---- Counter manipulation methods ----
+
+    def reserve_slots(self, quantity):
+        """Atomically reserve slots (decrement remaining, increment reserved).
+        Called when creating a PENDING order at checkout start."""
+        if self.maxCapacity is None:
+            return
+        self.remainingSlots = F("remainingSlots") - quantity
+        self.reservedSlots = F("reservedSlots") + quantity
+        self.save(update_fields=["remainingSlots", "reservedSlots"])
+        self.refresh_from_db(fields=["remainingSlots", "reservedSlots"])
+
+    def confirm_reservation(self, quantity):
+        """Convert reserved slots to confirmed (decrement reserved only).
+        Called when a PENDING order succeeds (becomes COMPLETED/CAPTURED)."""
+        if self.maxCapacity is None:
+            return
+        self.reservedSlots = F("reservedSlots") - quantity
+        self.save(update_fields=["reservedSlots"])
+        self.refresh_from_db(fields=["reservedSlots"])
+
+    def release_slots(self, quantity):
+        """Release reserved slots back (increment remaining, decrement reserved).
+        Called when a PENDING order fails."""
+        if self.maxCapacity is None:
+            return
+        self.remainingSlots = F("remainingSlots") + quantity
+        self.reservedSlots = F("reservedSlots") - quantity
+        self.save(update_fields=["remainingSlots", "reservedSlots"])
+        self.refresh_from_db(fields=["remainingSlots", "reservedSlots"])
+
+    def consume_slots(self, quantity):
+        """Directly consume slots (decrement remaining only, no reservation).
+        Used for instant-completion orders (zero-cost) where no pending state exists."""
+        if self.maxCapacity is None:
+            return
+        self.remainingSlots = F("remainingSlots") - quantity
+        self.save(update_fields=["remainingSlots"])
+        self.refresh_from_db(fields=["remainingSlots"])
+
+    def release_confirmed_slots(self, quantity):
+        """Release confirmed slots back (increment remaining only).
+        Called when a COMPLETED/CAPTURED order is refunded."""
+        if self.maxCapacity is None:
+            return
+        self.remainingSlots = F("remainingSlots") + quantity
+        self.save(update_fields=["remainingSlots"])
+        self.refresh_from_db(fields=["remainingSlots"])
+
+    def verify_and_repair_counters(self):
+        """
+        Compare counters against ground-truth DB queries.
+        If drift is detected, log a warning and repair.
+        Returns True if counters were correct, False if repaired.
+        """
+        if self.maxCapacity is None:
+            return True
+
+        actual_confirmed = self.verify_registration_count()
+        actual_pending = self.verify_pending_count()
+        expected_remaining = self.maxCapacity - actual_confirmed - actual_pending
+
+        if (
+            self.remainingSlots != expected_remaining
+            or self.reservedSlots != actual_pending
+        ):
+            logger.warning(
+                "Counter drift detected for PriceLevel %d '%s': "
+                "remainingSlots=%s (expected %s), "
+                "reservedSlots=%s (expected %s)",
+                self.id,
+                self.name,
+                self.remainingSlots,
+                expected_remaining,
+                self.reservedSlots,
+                actual_pending,
+            )
+            self.remainingSlots = expected_remaining
+            self.reservedSlots = actual_pending
+            self.save(update_fields=["remainingSlots", "reservedSlots"])
+            return False
+        return True
+
+    def save(self, *args, **kwargs):
+        """Auto-initialize counters when maxCapacity is set."""
+        update_fields = kwargs.get("update_fields")
+        # Only auto-initialize on full saves (not targeted counter updates)
+        if update_fields is None and self.pk:
+            try:
+                old = PriceLevel.objects.get(pk=self.pk)
+                if old.maxCapacity != self.maxCapacity:
+                    # maxCapacity changed — recalculate counters
+                    if self.maxCapacity is None:
+                        self.remainingSlots = None
+                        self.reservedSlots = 0
+                    else:
+                        confirmed = self.verify_registration_count()
+                        pending = self.verify_pending_count()
+                        self.remainingSlots = self.maxCapacity - confirmed - pending
+                        self.reservedSlots = pending
+            except PriceLevel.DoesNotExist:
+                pass  # New instance
+        elif not self.pk and self.maxCapacity is not None:
+            # Brand new instance with capacity — initialize counters
+            if self.remainingSlots is None:
+                self.remainingSlots = self.maxCapacity
+                self.reservedSlots = 0
+        return super().save(*args, **kwargs)
 
 
 class Charity(LookupTable):
@@ -799,6 +1025,10 @@ class Order(models.Model):
         (DISPUTE_LOST, "Dispute Lost"),
         (DISPUTE_ACCEPTED, "Dispute Accepted"),
     )
+    # Status groups used for capacity tracking
+    CONFIRMED_STATUSES = frozenset({COMPLETED, CAPTURED})
+    PENDING_STATUSES = frozenset({PENDING})
+
     # Maps Square dispute status to above status choices
     DISPUTE_STATUS_MAP = {
         "EVIDENCE_REQUIRED": DISPUTE_EVIDENCE_REQUIRED,

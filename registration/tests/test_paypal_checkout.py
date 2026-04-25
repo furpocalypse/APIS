@@ -270,13 +270,15 @@ class TestDoPaypalCheckout(OrdersTestCase):
 
         self.assertFalse(status)
         self.assertIn("errors", response)
-        # TODO: do_paypal_checkout hands the Order to capture_paypal_payment
-        # which in the real flow saves it on failure (status=FAILED). With our
-        # mock, capture_paypal_payment is replaced entirely so the Order never
-        # reaches the DB. The helper itself also does not save the Order on the
-        # failure branch, so the returned Order has no pk and can never have
-        # OrderItems attached to it.
-        self.assertIsNone(order.pk)
+        # Under the pending-order approach the Order + cart items are
+        # persisted before payment is attempted so capacity counters and
+        # DB rows stay consistent. A failed capture leaves them in place
+        # with Order.status == FAILED (do_checkout normalizes PENDING →
+        # FAILED when the payment path returned False without saving).
+        self.assertIsNotNone(order.pk)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.FAILED)
+        self.assertGreaterEqual(OrderItem.objects.filter(order=order).count(), 1)
 
     @patch("registration.views.ordering.capture_paypal_payment")
     def test_order_items_branch(self, mock_capture):

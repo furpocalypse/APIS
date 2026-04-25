@@ -94,6 +94,80 @@ TEST_DEALER_ASST_ARGS = {
 }
 
 
+class CapacityTestMixin:
+    """Shared helpers for capacity-related tests.
+
+    Provides factory methods for creating orders, order items, and cart items
+    that correctly sync PriceLevel capacity counters. Expects subclasses to
+    set self.event to an Event instance before calling these helpers.
+    """
+
+    def _create_order_with_items(self, price_level, quantity, status=Order.COMPLETED):
+        """Create an order with OrderItems, then sync capacity counters."""
+        order = Order.objects.create(
+            total=price_level.basePrice * quantity,
+            reference=f"TEST-{Order.objects.count()}",
+            status=status,
+            billingType=Order.CREDIT,
+        )
+        for _ in range(quantity):
+            attendee = Attendee.objects.create(
+                firstName="Test",
+                lastName="User",
+                email=f"test{Attendee.objects.count()}@example.com",
+                birthdate=timezone.now().date() - timedelta(days=365 * 25),
+            )
+            badge = Badge.objects.create(
+                attendee=attendee,
+                event=self.event,
+                badgeName=f"Badge{Badge.objects.count()}",
+            )
+            OrderItem.objects.create(
+                badge=badge,
+                priceLevel=price_level,
+                order=order,
+                enteredBy="TEST",
+            )
+        price_level.verify_and_repair_counters()
+        return order
+
+    def _create_completed_order(self, price_level, quantity):
+        """Create completed orders that consume capacity."""
+        return self._create_order_with_items(price_level, quantity, Order.COMPLETED)
+
+    def _create_cart_item(self, price_level):
+        """Create a cart item targeting a price level."""
+        cart_data = {
+            "attendee": {
+                "firstName": "Test",
+                "lastName": "User",
+                "email": f"test{Cart.objects.count()}@example.com",
+                "phone": "555-1234",
+                "birthdate": "1990-01-01",
+                "address1": "123 Test St",
+                "city": "Testville",
+                "state": "PA",
+                "country": "US",
+                "postal": "12345",
+                "badgeName": f"TestBadge{Cart.objects.count()}",
+                "emailsOk": False,
+                "surveyOk": False,
+                "volDepts": "",
+                "asl": False,
+            },
+            "priceLevel": {
+                "id": price_level.id,
+                "options": [],
+            },
+            "event": self.event.name,
+        }
+        return Cart.objects.create(
+            form="Attendee",
+            formData=json.dumps(cart_data),
+            formHeaders="{}",
+        )
+
+
 class OrdersTestCase(TestCase):
     def setUp(self):
         self.price_free = PriceLevel(

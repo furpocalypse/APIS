@@ -112,8 +112,24 @@ class TestAttendeeCheckout(OrdersTestCase):
         logger.error(error_codes)
         self.assertIn(error, error_codes)
 
-        # Ensure a badge wasn't created
-        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
+        # With the new pending order approach, Attendee and Badge ARE created
+        # before payment, but the Order should be marked as FAILED
+        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 1)
+        attendee = Attendee.objects.filter(firstName="Bea").first()
+        # Verify the order exists and is marked as FAILED
+        self.assertEqual(Badge.objects.filter(attendee=attendee).count(), 1)
+        badge = Badge.objects.filter(attendee=attendee).first()
+        self.assertEqual(OrderItem.objects.filter(badge=badge).count(), 1)
+        order_item = OrderItem.objects.filter(badge=badge).first()
+        self.assertEqual(order_item.order.status, Order.FAILED)
+
+        # Verify capacity counters weren't corrupted by the failed payment
+        price_level = order_item.priceLevel
+        price_level.refresh_from_db()
+        self.assertTrue(
+            price_level.verify_and_repair_counters(),
+            "Counter drift after failed payment",
+        )
 
     # The four tests below check Square-specific error codes (CVV_FAILURE,
     # ADDRESS_VERIFICATION_FAILURE, INVALID_EXPIRATION, GENERIC_DECLINE) that
@@ -159,7 +175,17 @@ class TestAttendeeCheckout(OrdersTestCase):
         result = self.checkout("")
         self.assertEqual(result.status_code, 400, result.content)
 
-        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 0)
+        # With the pending-order approach (see limited-registration-stock
+        # branch), the Attendee/Badge/OrderItem rows are persisted up
+        # front so capacity counters tie to real DB rows. A capture
+        # failure leaves them in place with the Order marked FAILED.
+        self.assertEqual(Attendee.objects.filter(firstName="Bea").count(), 1)
+        attendee = Attendee.objects.filter(firstName="Bea").first()
+        self.assertEqual(Badge.objects.filter(attendee=attendee).count(), 1)
+        badge = Badge.objects.filter(attendee=attendee).first()
+        self.assertEqual(OrderItem.objects.filter(badge=badge).count(), 1)
+        order_item = OrderItem.objects.filter(badge=badge).first()
+        self.assertEqual(order_item.order.status, Order.FAILED)
         self.assertEqual(
             Cart.objects.count(),
             pre_cart_count,
