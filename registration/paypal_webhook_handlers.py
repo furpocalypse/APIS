@@ -35,6 +35,7 @@ from registration.models import (
     PaymentWebhookNotification,
     get_hold_type,
 )
+from registration.payments import update_capacity_for_status_change
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +294,7 @@ def handle_capture_refunded(notification: PaymentWebhookNotification) -> bool:
         logger.warning("PAYMENT.CAPTURE.REFUNDED: missing resource")
         return False
     order = _find_order_for_v2_refund(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "PAYMENT.CAPTURE.REFUNDED for refund %s: no matching order",
@@ -300,6 +302,7 @@ def handle_capture_refunded(notification: PaymentWebhookNotification) -> bool:
         )
         return False
     _apply_v2_refund(order, resource, reversal=False)
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -316,6 +319,7 @@ def handle_capture_reversed(notification: PaymentWebhookNotification) -> bool:
         logger.warning("PAYMENT.CAPTURE.REVERSED: missing resource")
         return False
     order = _find_order_for_v2_refund(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "PAYMENT.CAPTURE.REVERSED for refund %s: no matching order",
@@ -323,6 +327,7 @@ def handle_capture_reversed(notification: PaymentWebhookNotification) -> bool:
         )
         return False
     _apply_v2_refund(order, resource, reversal=True)
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -341,6 +346,7 @@ def handle_sale_refunded_v1(notification: PaymentWebhookNotification) -> bool:
         logger.warning("PAYMENT.SALE.REFUNDED: missing resource")
         return False
     order = _find_order_for_v1_sale(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "PAYMENT.SALE.REFUNDED for refund %s: no matching order",
@@ -365,6 +371,7 @@ def handle_sale_refunded_v1(notification: PaymentWebhookNotification) -> bool:
         "_source": "v1_sale_refund",
     }
     _apply_v2_refund(order, normalized, reversal=False)
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -397,6 +404,7 @@ def handle_capture_completed(notification: PaymentWebhookNotification) -> bool:
         logger.warning("PAYMENT.CAPTURE.COMPLETED: missing resource")
         return False
     order = _find_order_for_v2_capture(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "PAYMENT.CAPTURE.COMPLETED for capture %s: no matching order",
@@ -425,6 +433,7 @@ def handle_capture_completed(notification: PaymentWebhookNotification) -> bool:
 
     previous_status = order.status
     order.status = Order.COMPLETED
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
     if (
@@ -453,6 +462,7 @@ def handle_capture_denied(notification: PaymentWebhookNotification) -> bool:
         logger.warning("PAYMENT.CAPTURE.DENIED: missing resource")
         return False
     order = _find_order_for_v2_capture(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "PAYMENT.CAPTURE.DENIED for capture %s: no matching order",
@@ -462,6 +472,7 @@ def handle_capture_denied(notification: PaymentWebhookNotification) -> bool:
     if order.status != Order.FAILED:
         order.status = Order.FAILED
         order.save()
+    update_capacity_for_status_change(order, old_status, order.status)
     return True
 
 
@@ -491,6 +502,7 @@ def handle_dispute_created(notification: PaymentWebhookNotification) -> bool:
         logger.warning("CUSTOMER.DISPUTE.CREATED: missing resource")
         return False
     order = _find_order_for_dispute(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "CUSTOMER.DISPUTE.CREATED for dispute %s: no matching order",
@@ -501,6 +513,7 @@ def handle_dispute_created(notification: PaymentWebhookNotification) -> bool:
         order.apiData = {}
     order.apiData["dispute"] = resource
     order.status = Order.DISPUTE_EVIDENCE_REQUIRED
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     _add_attendees_to_banlist_and_hold(order)
     try:
@@ -524,6 +537,7 @@ def handle_dispute_updated(notification: PaymentWebhookNotification) -> bool:
         logger.warning("CUSTOMER.DISPUTE.UPDATED: missing resource")
         return False
     order = _find_order_for_dispute(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "CUSTOMER.DISPUTE.UPDATED for dispute %s: no matching order",
@@ -544,6 +558,7 @@ def handle_dispute_updated(notification: PaymentWebhookNotification) -> bool:
         status_value = (resource.get("status") or "").upper()
         if status_value in ("UNDER_REVIEW", "WAITING_FOR_BUYER_RESPONSE"):
             order.status = Order.DISPUTE_PROCESSING
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
 
@@ -558,6 +573,7 @@ def handle_dispute_resolved(notification: PaymentWebhookNotification) -> bool:
         logger.warning("CUSTOMER.DISPUTE.RESOLVED: missing resource")
         return False
     order = _find_order_for_dispute(resource)
+    old_status = order.status
     if not order:
         logger.warning(
             "CUSTOMER.DISPUTE.RESOLVED for dispute %s: no matching order",
@@ -581,5 +597,6 @@ def handle_dispute_resolved(notification: PaymentWebhookNotification) -> bool:
         )
         order.orgDonation = Decimal("0")
         order.charityDonation = Decimal("0")
+    update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True
