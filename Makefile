@@ -17,6 +17,14 @@ Commands:
 	make dev-setup                  : Sets up a venv for local development
 	make pre-commit-setup           : Installs (or updates) pre-commit hooks
 
+	make makemigrations             : Create new Django migrations (host-uv, dev DB)
+	make migrate                    : Apply Django migrations (host-uv, dev DB)
+	make createsuperuser            : Create a Django superuser (host-uv, dev DB, interactive)
+
+	make dev-makemigrations         : Create new Django migrations (inside `make dev` container)
+	make dev-migrate                : Apply Django migrations (inside `make dev` container)
+	make dev-createsuperuser        : Create a Django superuser (inside `make dev` container, interactive)
+
 	make test                       : Run Django + Playwright end-to-end suites (full regression gate)
 	make test-django                : Run only the Django test suite
 	make test-paypal                : Run only PayPal-tagged tests (uses uv)
@@ -87,6 +95,40 @@ dev-setup:
 pre-commit-setup:
 	pip3 install pre-commit
 	pre-commit install
+
+# --------------------------------------------------------------------------
+# Django management commands (dev environment)
+# --------------------------------------------------------------------------
+# Thin wrappers around `manage.py` for the most common ops commands. These
+# use the default DJANGO_SETTINGS_MODULE (fm_eventmanager.settings, populated
+# by `make dev-setup` from settings.py.devel) — i.e. the developer's local
+# DB, not the test DB. For the test-context migration check, see
+# `test-check-migrations`.
+
+makemigrations:
+	uv run python manage.py makemigrations
+
+migrate:
+	uv run python manage.py migrate
+
+createsuperuser:
+	uv run python manage.py createsuperuser
+
+# Docker-compose-exec equivalents of the three above. These run inside the
+# `app` container started by `make dev`, so the dev container must already
+# be up (`docker-compose up -d` / `make dev` in another shell). They use
+# whatever DJANGO_SETTINGS_MODULE the container's env defines (typically
+# fm_eventmanager.settings via settings.py.docker), pointing at the
+# docker-network postgres rather than a host-side DB.
+
+dev-makemigrations:
+	docker-compose exec app python /app/manage.py makemigrations
+
+dev-migrate:
+	docker-compose exec app python /app/manage.py migrate
+
+dev-createsuperuser:
+	docker-compose exec app python /app/manage.py createsuperuser
 
 # --------------------------------------------------------------------------
 # Local test runner
@@ -325,4 +367,6 @@ e2e-ui:
 	cd $(E2E_DIR) && npx playwright test --ui || true
 	bash $(E2E_DIR)/scripts/down.sh
 
-.PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django
+.PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django \
+        makemigrations migrate createsuperuser \
+        dev-makemigrations dev-migrate dev-createsuperuser
