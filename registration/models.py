@@ -1114,12 +1114,26 @@ class Order(models.Model):
 
 class PaymentWebhookNotification(models.Model):
     integration = models.CharField(max_length=50, default="square")
-    event_id = models.CharField(max_length=255, unique=True)
+    # Uniqueness was previously enforced on event_id alone, which means a
+    # PayPal id matching a Square event_id (or vice versa) silently swallows
+    # one of the two events. Audit P1: scope uniqueness to
+    # (integration, event_id). The event_id column itself is no longer
+    # globally unique — the composite constraint below is the
+    # replay-protection invariant.
+    event_id = models.CharField(max_length=255, db_index=True)
     event_type = models.CharField(max_length=50, default="")
     timestamp = models.DateTimeField(auto_now_add=True)
     processed = models.BooleanField(default=False)
     body = models.JSONField("Webhook body")
     headers = models.JSONField("Webhook headers")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "event_id"],
+                name="unique_integration_event_id",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.integration} {self.event_type} {self.event_id}"
@@ -1209,7 +1223,16 @@ class Firebase(models.Model):
         (MQTT_REGISTER_APP, "iPad"),
         (SQUARE_TERMINAL, "Square Terminal"),
     )
+    # P1.9: token plaintext is kept transitionally so existing provisioned
+    # terminals continue to authenticate. New code MUST look up Firebase
+    # rows via :meth:`find_by_token` (constant-time compare against the
+    # SHA-256 hash). A future cleanup will null this field out and drop it
+    # entirely once admin-side rotation has been completed for every
+    # terminal. ASVS V2.10.4: no plaintext bearer tokens at rest.
     token = models.CharField(max_length=500, default=uuid.uuid4)
+    # SHA-256 hex of the plaintext token. Indexed for fast lookup; the
+    # constant-time comparison happens on the resolved row.
+    token_hash = models.CharField(max_length=64, db_index=True, default="", blank=True)
     name = models.CharField(max_length=100)
     closed = models.BooleanField(default=False)
     cashdrawer = models.BooleanField(default=False, verbose_name="Cash drawer")
@@ -1248,6 +1271,43 @@ class Firebase(models.Model):
 
     def __str__(self):
         return str(self.name)
+
+    @staticmethod
+    def hash_token(plaintext):
+        """SHA-256 of the plaintext token. Stable across processes."""
+        if not plaintext:
+            return ""
+        import hashlib
+
+        return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
+
+    def save(self, *args, **kwargs):
+        # Keep token_hash in sync with token while both columns exist.
+        # Once token plaintext is removed (P2 follow-up), this becomes a
+        # one-way set during creation only.
+        if self.token:
+            self.token_hash = self.hash_token(self.token)
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def find_by_token(cls, plaintext):
+        """Constant-time lookup by plaintext token. Indexes the SHA-256
+        hash, then ``secrets.compare_digest``s to defeat timing leaks if
+        an attacker ever finds a hash collision (defense in depth).
+
+        Returns the Firebase row or ``None``. Use this — never
+        ``Firebase.objects.get(token=...)`` — when authenticating a
+        terminal request. ASVS V2.10.4 / V2.7.4.
+        """
+        if not plaintext:
+            return None
+        import secrets
+
+        candidate_hash = cls.hash_token(plaintext)
+        for f in cls.objects.filter(token_hash=candidate_hash):
+            if secrets.compare_digest(f.token_hash, candidate_hash):
+                return f
+        return None
 
     class Meta:
         verbose_name = "Terminal"

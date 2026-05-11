@@ -55,12 +55,17 @@ def clear_session(request):
 
 
 def get_client_ip(request):
-    x_forwarded_for = request.headers.get("x-forwarded-for")
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(",")[0]
-    else:
-        ip = request.META.get("REMOTE_ADDR")
-    return ip
+    # Single source of truth for the client IP. allauth reads
+    # ALLAUTH_TRUSTED_CLIENT_IP_HEADER (X-Real-IP by default) and validates
+    # the value parses as an IP address; if it doesn't (or the header is
+    # absent in tests), allauth falls back per its configured policy. Using
+    # the allauth helper rather than re-implementing the leftmost-XFF read
+    # closes the spoof path where an attacker controls $xff_hosts[0].
+    from allauth.core.internal.httpkit import (
+        get_client_ip as _allauth_get_client_ip,
+    )
+
+    return _allauth_get_client_ip(request)
 
 
 def get_request_meta(request):
@@ -143,8 +148,20 @@ def success(status=200, reason=None):
         )
 
 
+# Order.reference is the lookup key for cash/credit completion endpoints
+# (complete_cash_transaction, complete_square_transaction) and is the
+# `invoice_id` / `custom_id` Square and PayPal echo back in webhooks. Per
+# ASVS V6.3.1, identifiers used as auth tokens must carry >= 64 bits of
+# entropy. The character set is 25 visually-unambiguous symbols
+# (registration.models.VISUALLY_UNAMBIGUOUS_CHARS, ~4.64 bits/char). 16
+# characters yields ~74 bits, comfortably above the floor with margin
+# against future alphabet shrinkage. Order.reference column is CharField
+# max_length=50, so this fits without a migration.
+ORDER_REFERENCE_LENGTH = 16
+
+
 def get_confirmation_token():
-    return get_random_token(6)
+    return get_random_token(ORDER_REFERENCE_LENGTH)
 
 
 def get_unique_confirmation_token(model):
@@ -172,6 +189,22 @@ def handler(obj):
                 repr(obj),
             )
         )
+
+
+def to_json_safe(obj):
+    """Return a copy of *obj* containing only types that DjangoJSONEncoder
+    (used by Django's ``json_script`` filter) can serialize natively. The
+    custom :func:`handler` knows how to render the project's odd types
+    (``FieldFile``, ``Decimal``, ``datetime``); we round-trip through it so
+    the dict we hand to ``{{ value|json_script:"id" }}`` is plain JSON.
+
+    Used to feed templates that previously inlined
+    ``{{ json.dumps(...)|safe }}`` directly into a ``<script>`` block — a
+    JS-string-context XSS vector when any nested value contains
+    ``</script>`` or quote characters. Migrating to ``json_script`` closes
+    that vector. OWASP A03 / Cross-Site Scripting Prevention Cheat Sheet.
+    """
+    return json.loads(json.dumps(obj, default=handler))
 
 
 def index(request):

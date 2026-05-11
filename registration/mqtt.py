@@ -119,15 +119,29 @@ def get_state_token(firebase: Firebase) -> dict:
     sub = get_topic("payment/state", name=str(firebase.name))
 
     user = format_topic(str(firebase.name))
-    token = get_token(user, subs=[sub], publ=[])
+    # Match the other terminal tokens (payment / receipt / station): 7 days.
+    # Previously this caller relied on get_token's never-expires default,
+    # which violated ASVS V2.10.3 (bearer tokens must have a bounded TTL).
+    token = get_token(user, subs=[sub], publ=[], exp=60 * 60 * 24 * 7)
 
     return {"user": user, "token": token}
 
 
+# Default token lifetime when a caller doesn't pass `exp`. One hour is
+# short enough to bound capture-replay damage if a token leaks, but long
+# enough that no short-flow caller (e.g. a server notification round-
+# trip) is likely to hit it. Long-lived terminal tokens (payment,
+# receipt, station, state) MUST set `exp` explicitly. ASVS V2.10.3.
+DEFAULT_TOKEN_EXP_SECONDS = 60 * 60
+
+
 def get_token(sub, exp=None, subs=None, publ=None) -> str:
     if exp is None:
-        # Never expires
-        exp = 2**31 - 1
+        # Fall back to a bounded default rather than the previous
+        # 2**31-1 (effectively never expires).
+        exp = datetime.now(tz=timezone.utc) + timedelta(
+            seconds=DEFAULT_TOKEN_EXP_SECONDS
+        )
     else:
         exp = datetime.now(tz=timezone.utc) + timedelta(seconds=exp)
 

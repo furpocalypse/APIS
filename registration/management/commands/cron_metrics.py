@@ -1,5 +1,5 @@
-from datetime import datetime
 from abc import ABCMeta, abstractmethod
+from datetime import datetime
 
 from django.conf import settings
 from django.contrib.sites.models import Site
@@ -9,7 +9,6 @@ from django.utils import timezone
 from influxdb import InfluxDBClient
 
 from registration.models import *
-
 
 """
 There's a few options for where these metrics could end up.  These should eventually be configurable:
@@ -43,7 +42,19 @@ class Command(BaseCommand):
         now = timezone.now()
         today = now.date()
 
-        backend_class = eval(settings.APIS_METRICS_BACKEND)
+        # ASVS V5.2.4 / OWASP A03: do not evaluate configuration as
+        # Python source. Resolve the metrics backend through an explicit
+        # registry of allowed classes. Adding a new backend is a
+        # deliberate, code-review-able change to this dict, not a side
+        # effect of an env-var write.
+        try:
+            backend_class = METRICS_BACKENDS[settings.APIS_METRICS_BACKEND]
+        except KeyError as exc:
+            raise CommandError(
+                f"APIS_METRICS_BACKEND={settings.APIS_METRICS_BACKEND!r} is not a "
+                f"registered metrics backend. Allowed: {sorted(METRICS_BACKENDS)}"
+            ) from exc
+
         try:
             backend_settings = settings.APIS_METRICS_SETTINGS
         except AttributeError:
@@ -227,3 +238,13 @@ class InfluxDBReporter(CronReporterABC):
 
 
 CronReporterABC.register(InfluxDBReporter)
+
+
+# Registry of allowed metrics backends. Resolved by name from
+# settings.APIS_METRICS_BACKEND; see Command.handle. Adding a new
+# entry is the only way to introduce a new backend — `eval()` was
+# removed in the rescan P0 fix.
+METRICS_BACKENDS = {
+    "DummyReporter": DummyReporter,
+    "InfluxDBReporter": InfluxDBReporter,
+}

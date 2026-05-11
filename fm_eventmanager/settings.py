@@ -21,10 +21,20 @@ if SENTRY_ENABLED:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
 
+    # Drop attacker- or user-supplied data from events before they leave the
+    # process. CLAUDE.md forbids PII / payment / webhook bodies in logs.
+    # Sentry's default scrubber redacts known-secret keys but does not drop
+    # raw POST bodies or cookies; do both here.
     def _sentry_before_send(event, hint):
         request = (event or {}).get("request") or {}
+        # Webhook handlers (Square, PayPal) re-read request.body; Sentry's
+        # capture would otherwise serialize it. Drop the body and any cookies
+        # entirely.
         request.pop("data", None)
         request.pop("cookies", None)
+        # Strip any inbound trust headers that might carry session-bound
+        # values (Authorization, Cookie). Headers we keep are useful for
+        # debugging without being identity-bearing.
         headers = request.get("headers") or {}
         for hkey in list(headers):
             if hkey.lower() in {
@@ -40,9 +50,21 @@ if SENTRY_ENABLED:
     sentry_sdk.init(
         dsn=os.environ["SENTRY_DSN"],
         integrations=[DjangoIntegration()],
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        # We recommend adjusting this value in production,
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", 0.01)),
+        # NEVER attach request.user, IP, headers, or cookies to events by
+        # default. Operators can opt back in by setting
+        # SENTRY_SEND_DEFAULT_PII=true, but the OWASP / ASVS V7 / CLAUDE.md
+        # baseline is OFF.
         send_default_pii=eval_bool(os.environ.get("SENTRY_SEND_DEFAULT_PII", "False")),
         before_send=_sentry_before_send,
+        # By default the SDK will try to use the SENTRY_RELEASE
+        # environment variable, or infer a git commit
+        # SHA as release, however you may want to set
+        # something more human-readable.
+        # release="myapp@1.0.0",
         auto_session_tracking=False,
     )
 
@@ -115,7 +137,16 @@ SERVER_EMAIL = os.getenv("DJANGO_SERVER_EMAIL", "no-reply@example.com")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", SERVER_EMAIL)
 
 
-# ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS — mirror settings.py.
+# ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS — explicit allowlists, no wildcards in
+# production. ASVS V14.1.1 / OWASP A05.
+#
+#   - DEBUG=True (local dev / test):
+#       fall back to {localhost, 127.0.0.1, [::1], testserver} so runserver
+#       and the Django test client work without per-developer setup.
+#   - DEBUG=False (any deployment):
+#       the deployer MUST provide ALLOWED_HOSTS (comma-separated FQDNs) and
+#       CSRF_TRUSTED_ORIGINS (comma-separated https:// origins). A missing
+#       value is a deploy-blocking error.
 def _split_env(name):
     raw = os.environ.get(name, "")
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -132,20 +163,33 @@ if DEBUG:
 else:
     if not ALLOWED_HOSTS:
         raise RuntimeError(
-            "ALLOWED_HOSTS must be set (comma-separated FQDNs) when DEBUG=False."
+            "ALLOWED_HOSTS must be set (comma-separated FQDNs) when DEBUG=False. "
+            "Refusing to start with a wildcard or empty allowlist."
         )
     if not CSRF_TRUSTED_ORIGINS:
         raise RuntimeError(
             "CSRF_TRUSTED_ORIGINS must be set (comma-separated https:// origins) "
             "when DEBUG=False."
         )
-    if any(h == "*" for h in ALLOWED_HOSTS):
+    # Reject wildcard literals in production.
+    if any(h == "*" or h.startswith("*.") and h == "*" for h in ALLOWED_HOSTS):
         raise RuntimeError("ALLOWED_HOSTS must not contain '*' in production.")
     if any(o in ("http://*", "https://*", "*") for o in CSRF_TRUSTED_ORIGINS):
         raise RuntimeError(
             "CSRF_TRUSTED_ORIGINS must not contain wildcards in production."
         )
 
+# --- Trusted-proxy / client-IP plumbing ---------------------------------
+# nginx (the in-container reverse proxy) is the trust boundary. It always
+# overwrites X-Real-IP and X-Forwarded-For with the real client IP after
+# the realip module has rewritten $remote_addr from a trusted upstream
+# (Application Gateway / Front Door / nginx-ingress). Django and allauth
+# read X-Real-IP via ALLAUTH_TRUSTED_CLIENT_IP_HEADER below.
+#
+# To override (e.g. when Front Door is the only edge and X-Azure-ClientIP
+# is the canonical header), set TRUSTED_CLIENT_IP_HEADER in env. Setting
+# it to the empty string disables the header read and falls back to
+# REMOTE_ADDR (used by the test suite — see Makefile TEST_ENV).
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 
@@ -175,7 +219,7 @@ INSTALLED_APPS = [
     "django_prometheus",
     "django_vite",
     "csp",
-    "axes",
+    "axes",  # P1.10: brute-force protection on auth endpoints
 ]
 
 MIDDLEWARE = [
@@ -183,6 +227,11 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Fail closed if the trusted edge didn't supply a real client IP.
+    # See fm_eventmanager.middleware.RequireClientIPMiddleware. Position is
+    # after Common (so APPEND_SLASH redirects still work for unauth paths)
+    # and before CSRF / Auth (so we don't burn session/CSRF state on
+    # requests we are about to reject).
     "fm_eventmanager.middleware.RequireClientIPMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -192,13 +241,25 @@ MIDDLEWARE = [
     "allauth.account.middleware.AccountMiddleware",
     "idempotency_key.middleware.ExemptIdempotencyKeyMiddleware",
     "maintenance_mode.middleware.MaintenanceModeMiddleware",
+    # axes.middleware.AxesMiddleware MUST be the last middleware in the
+    # list per https://django-axes.readthedocs.io/ — it depends on the
+    # AuthenticationMiddleware-set request.user and on having seen the
+    # full response chain to record outcomes. Placed even after the
+    # Prometheus After middleware so axes can also see metric label
+    # state if it ever needs to.
     "django_prometheus.middleware.PrometheusAfterMiddleware",
     "axes.middleware.AxesMiddleware",
 ]
 
-# django-debug-toolbar is dev-only; gate same as settings.py.
+# django-debug-toolbar is dev-only. Adding the app/middleware unconditionally
+# (a) leaks SQL / settings / stacks to anyone who can reach the listener if
+# DEBUG flips to True for any reason, and (b) crashes import in any prod
+# image that doesn't have django-debug-toolbar installed (it's in the dev
+# group of pyproject.toml). Gate both entries here.
 if DEBUG:
     INSTALLED_APPS += ["debug_toolbar"]
+    # debug_toolbar wants to sit just after CommonMiddleware. Insert at a
+    # known position rather than appending so it works correctly.
     _DT_MW = "debug_toolbar.middleware.DebugToolbarMiddleware"
     if _DT_MW not in MIDDLEWARE:
         MIDDLEWARE.insert(
@@ -242,6 +303,13 @@ DATABASES = {
         "PORT": os.getenv("DATABASE_PORT", "5432"),
         "OPTIONS": {
             "pool": eval_bool(os.getenv("DJANGO_DATABASE_POOL", "True")),
+            # ASVS V9.1.1 / OWASP "Transport Layer Protection": enforce TLS
+            # to the database in transit. Driven by env so the local
+            # docker-compose Postgres (which doesn't terminate TLS) can use
+            # 'prefer'. Production targets (Azure Database for PostgreSQL
+            # Flexible Server, AWS RDS, etc.) MUST set DATABASE_SSLMODE=require
+            # — or stronger ('verify-ca' / 'verify-full' once the CA bundle
+            # is mounted). See psycopg docs for libpq sslmode semantics.
             "sslmode": os.getenv("DATABASE_SSLMODE", "prefer"),
         },
     }
@@ -277,24 +345,35 @@ CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(
 CELERY_TASK_SEND_SENT_EVENT = eval_bool(
     os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True")
 )
-# Match settings_test.py behavior: execute Celery tasks synchronously inside
-# Django tests so ``.delay(...)`` dispatches hit ``mail.outbox`` and mocked
-# task functions assertions fire before the HTTP response returns. Without
-# this, tasks would enqueue to a real Redis broker that CI does not run.
-CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "True"))
-CELERY_TASK_EAGER_PROPAGATES = eval_bool(
-    os.getenv("CELERY_TASK_EAGER_PROPAGATES", "True")
-)
 
 
 # Prometheus metrics
 PROMETHEUS_METRICS_EXPORT_PORT_RANGE = range(81, 90)
+# Bind the django-prometheus exporter to loopback only. The metrics
+# endpoint exposes per-route latency, query counts, and (depending on
+# configuration) request labels — all internal-only data. Per CLAUDE.md
+# operational rule, port 81 must NEVER be reachable from the public
+# internet. In Azure deployments scrape via:
+#   - sidecar in the same pod (AKS), or
+#   - metrics-server / Container Insights, or
+#   - VNET-private Prometheus targeting only the management subnet.
+# Override with PROMETHEUS_METRICS_EXPORT_ADDRESS=0.0.0.0 only if a
+# scraper is reachable inside the container's network namespace.
 PROMETHEUS_METRICS_EXPORT_ADDRESS = os.getenv(
     "PROMETHEUS_METRICS_EXPORT_ADDRESS", "127.0.0.1"
 )
 
 
-# Password validation: mirror settings.py.
+# Password validation
+# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
+#
+# Required by ASVS V2.1.1 / OWASP A07. Django runs these validators in
+# admin user-create / user-change forms, in `manage.py createsuperuser`
+# (interactive mode), and in any code that calls
+# `django.contrib.auth.password_validation.validate_password`. Programmatic
+# `User.objects.create_*` / `User.set_password()` do NOT run validators
+# (Django's design), so existing tests that build fixture users with short
+# passwords continue to work.
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
@@ -328,6 +407,9 @@ USE_TZ = True
 SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
+    # django-axes wraps every authenticate() call to record failures and
+    # block lockouts. Per axes docs it MUST be first so it can short-
+    # circuit an authentication attempt during a lockout window.
     "axes.backends.AxesStandaloneBackend",
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
@@ -335,17 +417,41 @@ AUTHENTICATION_BACKENDS = [
 
 ACCOUNT_ADAPTER = "fm_eventmanager.adapters.account.RegistrationAccountAdapter"
 
-# axes — mirror settings.py.
+# --- django-axes: brute-force protection ---------------------------------
+# OWASP A07 (Identification and Authentication Failures) / ASVS V2.2.1.
+#
+# AXES_FAILURE_LIMIT       : after N consecutive failed logins, lock out.
+# AXES_COOLOFF_TIME        : lockout duration (hours when set as int).
+# AXES_LOCKOUT_PARAMETERS  : key the lockout off (username, ip_address) so
+#                            a single attacker IP cannot trigger lockout
+#                            for unrelated users sharing that IP, and a
+#                            user is only locked from the IP they keep
+#                            failing from.
+# AXES_RESET_ON_SUCCESS    : clear failure count after a successful login,
+#                            so legitimate users don't accumulate state.
+# AXES_CLIENT_IP_CALLABLE  : delegate IP resolution to our central helper
+#                            (registration.views.common.get_client_ip),
+#                            which reads ALLAUTH_TRUSTED_CLIENT_IP_HEADER
+#                            (X-Real-IP) — the same trust contract every
+#                            other IP-derived control uses. Otherwise axes
+#                            would re-implement IP detection against the
+#                            wrong header.
 AXES_FAILURE_LIMIT = int(os.getenv("AXES_FAILURE_LIMIT", "5"))
 AXES_COOLOFF_TIME = int(os.getenv("AXES_COOLOFF_TIME_HOURS", "1"))
 AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
 AXES_RESET_ON_SUCCESS = True
 AXES_LOCKOUT_CALLABLE = None
 AXES_CLIENT_IP_CALLABLE = "fm_eventmanager.middleware.axes_client_ip"
+# Don't fail open if the DB is unreachable when checking lockout state.
 AXES_HANDLER = "axes.handlers.database.AxesDatabaseHandler"
 
-# Disable allauth's login_failed rate limit; axes covers it.
+# allauth has its own login_failed rate limit (default 10/m/ip,5/300s/key)
+# that conflicts with django-axes. Defer to axes for failed-login lockout
+# (per-(username,ip) with configurable cooldown) and keep allauth's
+# OTHER rate limits (signup, password reset, MFA, etc.) intact.
 ACCOUNT_RATE_LIMITS = {
+    # Inherit allauth's defaults except for the conflicting login_failed.
+    # Setting it to an empty string disables it (allauth contract).
     "login_failed": "",
     "signup": "20/m/ip",
     "reset_password": "20/m/ip,5/m/key",
@@ -427,12 +533,20 @@ IDEMPOTENCY_KEY = {
     },
 }
 
-# Maintenance mode — mirror settings.py: use the Redis cache
-# backend so state survives restarts and works under read-only root fs.
+# django-maintenance-mode state.
+#
+# Default backend persists state to a file under /app/, which fails when
+# the container runs with `read_only: true` (CIS Docker 5.12). Switch to
+# the Redis cache backend so state survives container restarts AND is
+# safe under a read-only root filesystem. The CacheBackend uses the
+# `default` cache (django_redis → Redis), keyed by `"maintenance_mode"`.
 MAINTENANCE_MODE_STATE_BACKEND = os.getenv(
     "MAINTENANCE_MODE_STATE_BACKEND",
     "maintenance_mode.backends.CacheBackend",
 )
+# Fallback file path — only consulted when MAINTENANCE_MODE_STATE_BACKEND
+# is explicitly set to a file-based backend (LocalFileBackend / similar).
+# Default goes to /tmp (the tmpfs allowlisted under read-only fs).
 MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
     "MAINTENANCE_MODE_STATE_FILE_PATH",
     "/tmp/maintenance_mode_state.txt",
@@ -454,10 +568,13 @@ if DEBUG:
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "/static/"
-STATIC_ROOT = os.getenv("STATIC_ROOT", "/app/apis/static/")
-# NOTE: no STATICFILES_DIRS("bundler", ...) — AppDirectoriesFinder picks up
-# ``registration/static/bundler/`` (Vite's output) automatically. See the
-# equivalent note in settings.py.
+STATIC_ROOT = "/app/apis/static/"
+# NOTE: do NOT add a ("bundler", ...) STATICFILES_DIRS entry here. The Vite
+# build in Dockerfile's ``assets`` stage outputs to
+# ``registration/static/bundler/`` — Django's AppDirectoriesFinder picks that
+# up automatically because ``registration`` is an INSTALLED_APP. Pointing
+# STATICFILES_DIRS at ``/app/apis/static/bundler`` is circular (that path is
+# ``collectstatic``'s destination, not its source) and triggers W004.
 
 STORAGES = {
     "default": {
@@ -468,9 +585,19 @@ STORAGES = {
     },
 }
 
-# Cookie / transport hardening — mirror settings.py.
+# --- Cookie / transport hardening ---------------------------------------
+# OWASP A02 / A05, ASVS V3.4 / V9.1, OWASP "Secure Cookie Attribute" and
+# "Transport Layer Protection" cheat sheets.
+#
+# The Secure-flagged settings below DEPEND on Fix 1 (the proxy / header
+# pipeline) being live so Django can see X-Forwarded-Proto and decide that
+# the request is HTTPS. They are gated on `not DEBUG` so local runserver
+# (plain HTTP) does not redirect-loop or refuse to send cookies.
+
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = (
+    "Lax"  # Strict would break PayPal/Square post-payment redirects.
+)
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = "Lax"
 
@@ -482,17 +609,36 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = True
+    # HSTS — 1 year by default, includeSubDomains on. Preload OFF until the
+    # operator explicitly opts in; submitting to hstspreload.org is a
+    # one-way commitment so we don't enable it implicitly.
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", str(60 * 60 * 24 * 365)))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = eval_bool(
         os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "True")
     )
     SECURE_HSTS_PRELOAD = eval_bool(os.getenv("SECURE_HSTS_PRELOAD", "False"))
 
-# CSP — mirror settings.py.
+# --- Content Security Policy (report-only) ------------------------------
+# OWASP A03 (XSS) / OWASP CSP cheat sheet / ASVS V14.4.
+#
+# We ship in *report-only* mode for the first phase: the policy below is
+# strict (no unsafe-inline, no unsafe-eval), but violations only generate
+# reports — they don't block resources. Once the templates are clean
+# (or nonced), flip CONTENT_SECURITY_POLICY_REPORT_ONLY to
+# CONTENT_SECURITY_POLICY to enforce.
+#
+# Set CSP_REPORT_URI to the URL of your report collector (Sentry's CSP
+# endpoint, an internal endpoint, etc.) to receive violation reports. When
+# unset, no `report-uri` is emitted (browsers will still apply the policy
+# but reports are silent).
 _CSP_REPORT_URI = os.getenv("CSP_REPORT_URI", "")
+
 CONTENT_SECURITY_POLICY_REPORT_ONLY = {
     "DIRECTIVES": {
         "default-src": ["'self'"],
+        # Vite produces hashed external scripts under /static/; they match
+        # 'self'. Square and PayPal SDKs load from their own CDNs — add them
+        # explicitly. No 'unsafe-inline' / 'unsafe-eval'.
         "script-src": [
             "'self'",
             "https://web.squarecdn.com",
@@ -500,6 +646,9 @@ CONTENT_SECURITY_POLICY_REPORT_ONLY = {
             "https://www.paypal.com",
             "https://www.paypalobjects.com",
         ],
+        # style-src will likely report violations from inline `style=""` in
+        # admin templates — that's expected and is what tells us what to
+        # clean up. Keep strict.
         "style-src": [
             "'self'",
             "https://web.squarecdn.com",
@@ -508,6 +657,8 @@ CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         ],
         "img-src": ["'self'", "data:", "https://www.paypalobjects.com"],
         "font-src": ["'self'", "data:"],
+        # XHR / fetch destinations: app origin, MQTT broker over WSS, payment
+        # SDK API endpoints, gotenberg if exposed.
         "connect-src": [
             "'self'",
             "wss:",
@@ -516,6 +667,7 @@ CONTENT_SECURITY_POLICY_REPORT_ONLY = {
             "https://api-m.paypal.com",
             "https://api-m.sandbox.paypal.com",
         ],
+        # Embedded payment iframes from Square / PayPal.
         "frame-src": [
             "'self'",
             "https://web.squarecdn.com",
@@ -527,6 +679,7 @@ CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         "form-action": ["'self'"],
         "base-uri": ["'self'"],
         "object-src": ["'none'"],
+        # report-uri is only set when CSP_REPORT_URI is configured.
         **({"report-uri": [_CSP_REPORT_URI]} if _CSP_REPORT_URI else {}),
     },
 }
@@ -550,14 +703,12 @@ SQUARE_APPLICATION_SECRET = os.environ.get("SQUARE_APPLICATION_SECRET")
 SQUARE_ACCESS_TOKEN = os.environ.get("SQUARE_ACCESS_TOKEN")
 SQUARE_LOCATION_ID = os.environ.get("SQUARE_LOCATION_ID")
 SQUARE_CURRENCY = os.getenv("SQUARE_CURRENCY", "USD")
-SQUARE_ENVIRONMENT = os.getenv("SQUARE_ENVIRONMENT", "sandbox")  # Or "production"
+SQUARE_ENVIRONMENT = os.getenv("SQUARE_ENVIRONMENT", "production")  # Or "sandbox"
 SQUARE_WEBHOOK_SIGNATURE_KEY = os.getenv("SQUARE_WEBHOOK_SIGNATURE_KEY", "unset")
-PAYPAL_CLIENT_ID = os.environ["PAYPAL_CLIENT_ID"]
-PAYPAL_CLIENT_SECRET = os.environ["PAYPAL_CLIENT_SECRET"]
+PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
+PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
 PAYPAL_CURRENCY = os.getenv("PAYPAL_CURRENCY", "USD")
-PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "sandbox")  # Or "production"
-PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
-E2E_MODE = eval_bool(os.getenv("E2E_MODE", "False"))
+PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "production")  # Or "sandbox"
 
 # Sandbox values - DO NOT check in production credentials
 EMAIL_BACKEND = os.getenv(

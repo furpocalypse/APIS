@@ -1,0 +1,139 @@
+# --------------------------------------------------------------------------
+# APIS — Azure production compose file.
+#
+# This is a STANDALONE compose file. Use it directly (not as an overlay on
+# docker-compose.yaml — which is the dev/local file). Two boot styles:
+#
+#   docker compose -f docker-compose.prod.yaml pull
+#   docker compose -f docker-compose.prod.yaml up -d
+#
+# Differences from docker-compose.yaml (the dev file):
+#   * Pulls the prebuilt image from Azure Container Registry — NO `build:`.
+#   * No host volume mounts shadowing the image's code. The runtime is what
+#     was baked at image-build time, period.
+#   * Hardening: read_only root filesystem, cap_drop ALL,
+#     no-new-privileges, tmpfs for every path the running app must write.
+#   * Postgres and Redis data persist to bind mounts under
+#     ${APIS_DATA_DIR:-/srv/apis}. On Azure VMs that should be on an
+#     attached managed disk so VM rebuilds don't lose state.
+#
+# REQUIRED on the VM before `docker compose ... up`:
+#   - `.env`           (created from .env.prod.example; never commit)
+#   - `database.env`   (POSTGRES_DB / USER / PASSWORD; must match the
+#                       DATABASE_* values in .env above)
+#   - ACR login:       `az acr login --name furpocalypse`  (or a service
+#                       principal write-token in `docker login`)
+#   - APIS_DATA_DIR    persistent disk mounted; owner uid 1000:1000 on
+#                       postgres and redis subdirs (chown -R 1000:1000
+#                       /srv/apis/{postgres,redis})
+#
+# Single-VM / VMSS notes:
+#   * For real production prefer Azure Database for PostgreSQL Flexible
+#     Server + Azure Cache for Redis (TLS, port 6380) over the in-VM
+#     services below — comment out the `postgres` and `redis` services
+#     and point DATABASE_HOST / DJANGO_REDIS_URL at the managed endpoints.
+#   * For VMSS instance replacement to be lossless, the managed disk
+#     mounted at APIS_DATA_DIR must be re-attachable across replacements.
+#     Or, again, prefer the managed services.
+
+services:
+  app:
+    # Pinned to a specific tag. For the strongest reproducibility (and
+    # CIS Docker 4.2), append the SHA256 digest:
+    #   image: furpocalypse.azurecr.io/apis:0.3.1@sha256:<digest>
+    # Resolve via:
+    #   az acr repository show --name furpocalypse --image apis:0.3.1 --query 'digest'
+    image: furpocalypse.azurecr.io/apis:0.3.1
+    pull_policy: always
+    restart: always
+    ports:
+      - "8080:80"   # nginx HTTP. If TLS terminates at AppGW / Front Door,
+                    # leave as 8080 and have the load balancer health-check
+                    # this port via X-Forwarded-Proto: https headers.
+    env_file:
+      - .env
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /app/log/nginx:rw,nosuid,nodev,size=32m,uid=1000,gid=1000
+      - /app/.gunicorn:rw,nosuid,nodev,size=4m,uid=1000,gid=1000
+      - /var/lib/nginx:rw,nosuid,nodev,size=16m,uid=1000,gid=1000
+      - /run:rw,nosuid,nodev,size=4m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Healthcheck is baked into the image; the orchestrator can read it
+    # via `docker inspect` for liveness probes.
+
+  worker:
+    image: furpocalypse.azurecr.io/apis:0.3.1
+    pull_policy: always
+    command: worker
+    restart: always
+    env_file:
+      - .env
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /run:rw,nosuid,nodev,size=4m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    restart: always
+    env_file:
+      - database.env
+    volumes:
+      # Bind mount onto the persistent data directory so postgres survives
+      # container/VM replacement. The host path must exist and be owned by
+      # uid 999:999 (the postgres image's user) before first boot:
+      #   sudo mkdir -p ${APIS_DATA_DIR}/postgres
+      #   sudo chown 999:999 ${APIS_DATA_DIR}/postgres
+      - ${APIS_DATA_DIR:-/srv/apis}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  redis:
+    image: redis:8
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --save 60 1
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      # Bind mount for AOF persistence. Pre-create:
+      #   sudo mkdir -p ${APIS_DATA_DIR}/redis
+      #   sudo chown 999:999 ${APIS_DATA_DIR}/redis    # redis image's uid
+      - ${APIS_DATA_DIR:-/srv/apis}/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gotenberg:
+    # PDF rendering. Behind a profile so it's only started when needed.
+    # If used, set GOTENBERG_HOST=http://gotenberg:3000 in .env.
+    profiles: [gotenberg]
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped

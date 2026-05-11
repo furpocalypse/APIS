@@ -23,7 +23,7 @@ from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import clear_session, handler, logger
+from .common import clear_session, handler, logger, to_json_safe
 from .ordering import do_checkout, doZeroCheckout, get_discount_total
 
 logger = logging.getLogger(__name__)
@@ -127,10 +127,12 @@ def info_dealer(request):
             "dealer": dealer,
             "badge": badge,
             "event": dealer.event,
-            "jsonDealer": json.dumps(dealer_dict, default=handler),
-            "jsonTable": json.dumps(table_dict, default=handler),
-            "jsonAttendee": json.dumps(attendee_dict, default=handler),
-            "jsonBadge": json.dumps(badge_dict, default=handler),
+            # Plain dicts for `{% json_script %}` (closes the JS-string-XSS
+            # vector that `|safe` interpolation in <script> blocks had).
+            "jsonDealer": to_json_safe(dealer_dict),
+            "jsonTable": to_json_safe(table_dict),
+            "jsonAttendee": to_json_safe(attendee_dict),
+            "jsonBadge": to_json_safe(badge_dict),
         }
     return render(request, "registration/dealer/dealer-payment.html", context)
 
@@ -263,7 +265,7 @@ def add_assistants(request):
             "assistants": assts,
             "extra_assistants_range": range(len(assts), dealer.tableSize.partnerMax),
             "asst_count_registered": asst_count_registered,
-            "json_assistants": json.dumps(assistants, default=handler),
+            "json_assistants": to_json_safe(assistants),
         }
     event = Event.objects.get(default=True)
     context["event"] = event
@@ -450,14 +452,25 @@ def add_dealer(request):
     pdp = postData["priceLevel"]
     event = Event.objects.get(name=evt)
 
-    if "dealer_id" not in request.session:
+    # Audit P1.8 (BOLA / IDOR fix): the dealer being mutated MUST be the
+    # one bound to this session, NOT whatever id the body asserts. Trusting
+    # pdd["id"] previously let an authenticated dealer A overwrite dealer
+    # B's record. The body-supplied attendee id is similarly ignored —
+    # we use dealer.attendee as the authoritative reference.
+    dealer_id = request.session.get("dealer_id")
+    if dealer_id is None:
         return HttpResponseServerError("Session expired")
 
-    # Update Dealer info
     try:
-        dealer = Dealer.objects.get(id=pdd["id"])
-    except dealer.DoesNotExist:
+        dealer = Dealer.objects.get(id=dealer_id)
+    except Dealer.DoesNotExist:
         return HttpResponseServerError("Dealer id not found")
+    if pdd.get("id") and int(pdd["id"]) != dealer.id:
+        logger.warning(
+            "BOLA attempt in add_dealer: session dealer %s tried to mutate dealer %s",
+            dealer_id,
+            pdd.get("id"),
+        )
 
     dealer.businessName = pdd["businessName"]
     dealer.website = pdd["website"]
@@ -479,11 +492,19 @@ def add_dealer(request):
 
     dealer.save()
 
-    # Update Attendee info
-    try:
-        attendee = Attendee.objects.get(id=pda["id"])
-    except attendee.DoesNotExist:
-        return HttpResponseServerError("Attendee id not found")
+    # Use the attendee bound to this dealer, NOT pda["id"] from the body.
+    # Same BOLA reasoning as the dealer guard above.
+    attendee = dealer.attendee
+    if attendee is None:
+        return HttpResponseServerError("Dealer has no attendee")
+    if pda.get("id") and int(pda["id"]) != attendee.id:
+        logger.warning(
+            "BOLA attempt in add_dealer: session dealer %s (attendee %s) tried "
+            "to mutate attendee %s",
+            dealer_id,
+            attendee.id,
+            pda.get("id"),
+        )
 
     attendee.preferredName = pda.get("preferredName", "")
     attendee.firstName = pda["firstName"]

@@ -69,7 +69,9 @@ jobs:
         run: npm run test:run
       - name: Run Tests
         run: |
-          cp fm_eventmanager/settings.py.ci fm_eventmanager/settings.py
+          # settings_test.py is the canonical test settings; no copy needed.
+          # The Django test runner picks up DJANGO_SETTINGS_MODULE; we set
+          # it explicitly below.
           uv run python ./manage.py collectstatic --noinput
           uv run coverage run ./manage.py test registration
         env:
