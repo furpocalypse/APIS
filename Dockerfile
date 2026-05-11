@@ -75,8 +75,8 @@ RUN set -eux; \
     # /var/mail is created by useradd's MAIL_DIR default and is unused
     rm -rf /var/mail /var/spool/mail
 
-RUN mkdir -p /var/lib/nginx /app/log/nginx && \
-    chown -R apis /var/lib/nginx /app/log/nginx
+RUN mkdir -p /var/lib/nginx /app/log/nginx /app/ssl && \
+    chown -R apis /var/lib/nginx /app/log/nginx /app/ssl
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.29 /uv /uvx /bin/
 

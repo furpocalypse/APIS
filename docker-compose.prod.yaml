@@ -40,16 +40,20 @@ services:
   app:
     # Pinned to a specific tag. For the strongest reproducibility (and
     # CIS Docker 4.2), append the SHA256 digest:
-    #   image: furpocalypse.azurecr.io/apis:0.3.1@sha256:<digest>
+    #   image: furpocalypse.azurecr.io/apis:0.4.2@sha256:<digest>
     # Resolve via:
-    #   az acr repository show --name furpocalypse --image apis:0.3.1 --query 'digest'
-    image: furpocalypse.azurecr.io/apis:0.3.1
+    #   az acr repository show --name furpocalypse --image apis:0.4.2 --query 'digest'
+    image: furpocalypse.azurecr.io/apis:0.4.2
     pull_policy: always
     restart: always
     ports:
       - "8080:80"   # nginx HTTP. If TLS terminates at AppGW / Front Door,
                     # leave as 8080 and have the load balancer health-check
                     # this port via X-Forwarded-Proto: https headers.
+      # Uncomment the line below when NGINX_SSL_MODE=on in .env. nginx
+      # terminates TLS itself in that mode; pair with the /app/ssl bind
+      # mount further down.
+      # - "8443:443"
     env_file:
       - .env
     cap_drop:
@@ -57,12 +61,22 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    # /tmp holds: nginx.pid, /tmp/realip.conf (rendered by start.sh),
+    # /tmp/apis.sock (gunicorn unix socket), and nginx temp paths
+    # (client_body / proxy / fastcgi / scgi / uwsgi — all pinned to
+    # /tmp/nginx-* in nginx.conf). 128m is sized for: 32 concurrent
+    # 4MB uploads (the client_max_body_size cap) with headroom.
     tmpfs:
-      - /tmp:rw,nosuid,nodev,size=64m
+      - /tmp:rw,nosuid,nodev,size=128m
       - /app/log/nginx:rw,nosuid,nodev,size=32m,uid=1000,gid=1000
       - /app/.gunicorn:rw,nosuid,nodev,size=4m,uid=1000,gid=1000
-      - /var/lib/nginx:rw,nosuid,nodev,size=16m,uid=1000,gid=1000
       - /run:rw,nosuid,nodev,size=4m
+    # Uncomment this volume when NGINX_SSL_MODE=on in .env. start.sh
+    # refuses to start in SSL mode without /app/ssl/fullchain.pem and
+    # /app/ssl/privkey.pem readable to uid 1000. Use :ro because the
+    # container has no business writing to your cert directory.
+    # volumes:
+    #   - /etc/letsencrypt/live/register.furpocalypse.org:/app/ssl:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,7 +86,7 @@ services:
     # via `docker inspect` for liveness probes.
 
   worker:
-    image: furpocalypse.azurecr.io/apis:0.3.1
+    image: furpocalypse.azurecr.io/apis:0.4.2
     pull_policy: always
     command: worker
     restart: always

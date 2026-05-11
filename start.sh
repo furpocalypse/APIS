@@ -83,6 +83,47 @@ map \"\$trusted_origin_ip:\$http_x_azure_fdid\" \$trusted_origin {
         ;;
 esac
 
+# --------------------------------------------------------------------------
+# Render /tmp/server.conf from the requested NGINX_SSL_MODE.
+# nginx.conf includes /tmp/server.conf to pick up the server block(s).
+# --------------------------------------------------------------------------
+
+NGINX_SSL_MODE="${NGINX_SSL_MODE:-off}"
+SERVER_OUT=/tmp/server.conf
+
+case "$NGINX_SSL_MODE" in
+    off)
+        # Plaintext-only port 80 server. Default for the AppGW/Front Door
+        # topology where TLS terminates upstream of this nginx.
+        cp /app/nginx.server.plaintext.conf "$SERVER_OUT"
+        ;;
+
+    on)
+        # nginx terminates TLS itself. The certs MUST be bind-mounted into
+        # /app/ssl as read-only before the container starts.
+        if [ ! -r /app/ssl/fullchain.pem ] || [ ! -r /app/ssl/privkey.pem ]; then
+            echo "FATAL: NGINX_SSL_MODE=on requires /app/ssl/fullchain.pem" >&2
+            echo "       and /app/ssl/privkey.pem to be bind-mounted into" >&2
+            echo "       the container. Mount your cert directory in compose:" >&2
+            echo "         volumes:" >&2
+            echo "           - /path/to/certs:/app/ssl:ro" >&2
+            exit 2
+        fi
+
+        NGINX_SERVER_NAMES="${NGINX_SERVER_NAMES:-_}"
+        export NGINX_SERVER_NAMES
+        # Strict allowlist: envsubst only expands ${NGINX_SERVER_NAMES};
+        # nginx's own $variables ($scheme, $remote_addr, etc.) pass through.
+        envsubst '${NGINX_SERVER_NAMES}' \
+            < /app/nginx.server.ssl.conf.template > "$SERVER_OUT"
+        ;;
+
+    *)
+        echo "FATAL: NGINX_SSL_MODE must be 'off' or 'on' (got: ${NGINX_SSL_MODE})" >&2
+        exit 2
+        ;;
+esac
+
 # Validate the assembled nginx config before we hand off to supervisord.
 # Failing fast here is far less painful than nginx half-starting under
 # supervisord and the eventlistener killing the container.
