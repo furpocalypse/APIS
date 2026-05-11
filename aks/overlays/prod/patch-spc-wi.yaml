@@ -1,0 +1,11 @@
+# Fill in the real Managed Identity client ID, tenant ID, and Key Vault
+# name for the production environment.
+- op: replace
+  path: /spec/parameters/clientID
+  value: "7eded7c4-d266-4f71-93e5-3462a0a0dda6"
+- op: replace
+  path: /spec/parameters/tenantId
+  value: "3eafa349-2c72-48b1-9823-cfc0edc23a76"
+- op: replace
+  path: /spec/parameters/keyvaultName
+  value: "apis-kv"

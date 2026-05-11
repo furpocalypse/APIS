@@ -1,0 +1,61 @@
+# ClusterIP services used by:
+#   - apis-app  : fronted by the Ingress (AGIC reads this Service)
+#   - postgres  : headless service used by the StatefulSet's DNS
+#   - redis     : headless service for the StatefulSet's DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: apis-app
+  namespace: apis
+  labels:
+    app.kubernetes.io/name: apis
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apis
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# Headless service so postgres-0.postgres.apis.svc.cluster.local resolves
+# directly to the pod IP. The app's DATABASE_HOST in configmap-app.yaml
+# uses the short form (postgres.apis.svc.cluster.local), which round-robins
+# across endpoints — fine for a 1-replica StatefulSet, still correct if you
+# ever scale to a read-replica setup.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: apis
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: apis
+  labels:
+    app.kubernetes.io/name: redis
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

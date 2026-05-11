@@ -1,0 +1,116 @@
+# Production overlay. Lives in namespace `apis`.
+#
+# Differences from base:
+#   * Image pinned to a specific tag (override `images.newTag` per release)
+#   * Larger resource asks
+#   * Real hostname + TLS secret on the Ingress
+#   * ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS set to the production FQDN
+#   * AppGW subnet CIDR in TRUSTED_PROXY_CIDRS (replace with your real one)
+#   * Workload Identity client IDs filled in
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apis
+
+resources:
+  - ../../base
+
+patches:
+  # --- Replicas + HPA bounds: 3 web, 2 worker baseline -----------------
+  - target:
+      kind: Deployment
+      name: apis-app
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  - target:
+      kind: Deployment
+      name: apis-worker
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: apis-app
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 12
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: apis-worker
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 8
+
+  # --- Resource asks ---------------------------------------------------
+  - target:
+      kind: Deployment
+      name: apis-app
+    path: patch-resources-app.yaml
+  - target:
+      kind: Deployment
+      name: apis-worker
+    path: patch-resources-worker.yaml
+  - target:
+      kind: StatefulSet
+      name: postgres
+    path: patch-resources-postgres.yaml
+  - target:
+      kind: StatefulSet
+      name: redis
+    path: patch-resources-redis.yaml
+
+  # --- Ingress (real FQDN + TLS secret) --------------------------------
+  - target:
+      kind: Ingress
+      name: apis
+    path: patch-ingress.yaml
+
+  # --- Workload Identity client ID + Key Vault binding ----------------
+  - target:
+      kind: ServiceAccount
+      name: apis-app
+    path: patch-sa-wi.yaml
+  - target:
+      kind: SecretProviderClass
+      name: apis-kv
+    path: patch-spc-wi.yaml
+
+configMapGenerator:
+  - name: apis-config
+    behavior: merge
+    literals:
+      - DJANGO_DEBUG=False
+      - ALLOWED_HOSTS=register.furpocalypse.org
+      - CSRF_TRUSTED_ORIGINS=https://register.furpocalypse.org
+      - SECURE_HSTS_SECONDS=31536000
+      - SECURE_HSTS_INCLUDE_SUBDOMAINS=True
+      # PLACEHOLDER: replace with your real AppGW subnet CIDR.
+      - TRUSTED_PROXY_CIDRS=10.224.0.0/16
+      - SQUARE_ENVIRONMENT=production
+      - PAYPAL_ENVIRONMENT=production
+      - ENVIRONMENT_NAME=Production
+      - ENVIRONMENT_COLOR=#cc0000
+      - SENTRY_ENVIRONMENT=production
+      - SENTRY_TRACES_SAMPLE_RATE=0.1
+      - APIS_METRICS_BACKEND=DummyReporter
+      - SENTRY_RELEASE=apis-0.3.1
+    options:
+      disableNameSuffixHash: true
+
+images:
+  - name: furpocalypse.azurecr.io/apis
+    # Update on each release. For CIS Docker 4.2 compliance also append
+    # @sha256:<digest> — replace this line with:
+    #   newTag: 0.3.1@sha256:<digest>
+    newTag: "0.3.1"

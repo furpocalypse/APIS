@@ -1,0 +1,184 @@
+# APIS web Deployment.
+#
+# One pod = nginx + gunicorn + supervisord, all inside the baked image
+# (matches docker-compose.prod.yaml). This is intentional: the unix-socket
+# nginx -> gunicorn handoff is what surfaces the real client IP to Django
+# via the SECURE_PROXY_SSL_HEADER + ALLAUTH_TRUSTED_CLIENT_IP_HEADER chain.
+# Splitting nginx and gunicorn into separate pods would break that chain.
+#
+# Security profile: CIS Docker 5.* + Pod Security "restricted":
+#   - runAsNonRoot, uid 1000 (the "apis" user baked into the image)
+#   - readOnlyRootFilesystem (all writable paths are explicit emptyDir mounts)
+#   - drop ALL capabilities
+#   - allowPrivilegeEscalation: false
+#   - seccompProfile: RuntimeDefault
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apis-app
+  namespace: apis
+  labels:
+    app.kubernetes.io/name: apis
+    app.kubernetes.io/component: web
+spec:
+  # Overlays override replicas. Base default is 2 so a single-node drain
+  # doesn't take the service down.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apis
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apis
+        app.kubernetes.io/component: web
+        # Required for the Workload Identity webhook to inject the
+        # projected service-account token.
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: apis-app
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Spread replicas across zones (when the AKS cluster is zonal).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: apis
+              app.kubernetes.io/component: web
+      containers:
+        - name: app
+          # Overlay patches the digest; never deploy `:latest`.
+          image: furpocalypse.azurecr.io/apis:0.3.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: metrics
+              containerPort: 81
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: apis-config
+            - secretRef:
+                # Materialised by the SecretProviderClass via its
+                # secretObjects clause. The pod must mount the SPC volume
+                # for the sync to happen (see volumeMounts below).
+                name: apis-secrets
+          # Probe targets /robots.txt per the Dockerfile HEALTHCHECK — it
+          # avoids the database, clears SECURE_SSL_REDIRECT via the proxy
+          # header, and clears the trusted-IP middleware via XFF.
+          startupProbe:
+            httpGet:
+              path: /robots.txt
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: X-Forwarded-For
+                  value: 127.0.0.1
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /robots.txt
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: X-Forwarded-For
+                  value: 127.0.0.1
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /robots.txt
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: X-Forwarded-For
+                  value: 127.0.0.1
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            # tmpfs-equivalents for every path the image must write to at
+            # runtime. These match docker-compose.prod.yaml's tmpfs list.
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-log
+              mountPath: /app/log/nginx
+            - name: gunicorn-ctl
+              mountPath: /app/.gunicorn
+            - name: nginx-cache
+              mountPath: /var/lib/nginx
+            - name: run
+              mountPath: /run
+            # Key Vault CSI mount. Mounting this volume is what triggers
+            # the projection into the apis-secrets k8s Secret consumed via
+            # envFrom above.
+            - name: kv-secrets
+              mountPath: /mnt/secrets-store
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: nginx-log
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+        - name: gunicorn-ctl
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Mi
+        - name: nginx-cache
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Mi
+        - name: kv-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: apis-kv

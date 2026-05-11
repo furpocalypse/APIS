@@ -1,0 +1,51 @@
+# AGIC (Application Gateway Ingress Controller) Ingress.
+#
+# AGIC reads the Ingress class `azure-application-gateway` and configures
+# a real Application Gateway with WAF v2 outside the cluster. TLS
+# terminates at AppGW; the cluster sees plaintext over the AppGW->AKS
+# private subnet. The pod's nginx is configured to trust XFF from
+# AppGW's subnet via TRUSTED_PROXY_CIDRS (overlay-supplied).
+#
+# AKS add-on for AGIC (one-time):
+#   az aks enable-addons -a ingress-appgw \
+#     --name <cluster> --resource-group <rg> \
+#     --appgw-id /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/applicationGateways/<gw>
+#
+# Hostname + TLS secret are env-specific — the overlay supplies both.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apis
+  namespace: apis
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    # Force HTTPS — AGIC will install an HTTP->HTTPS redirect at the
+    # gateway level.
+    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+    # Use the same backend hostname Django expects (matches ALLOWED_HOSTS).
+    # If you need SNI to flow through, set override-frontend-port too.
+    appgw.ingress.kubernetes.io/backend-protocol: "http"
+    appgw.ingress.kubernetes.io/health-probe-path: "/robots.txt"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200"
+    # Generous body cap for registration form + base64-encoded ID scans.
+    appgw.ingress.kubernetes.io/request-timeout: "60"
+    # WAF policy — provisioned outside k8s, attached by ID. Leave blank in
+    # the base; overlay sets the real policy ARM ID.
+    # appgw.ingress.kubernetes.io/waf-policy-for-path: "<arm-id>"
+spec:
+  ingressClassName: azure-application-gateway
+  tls:
+    - hosts:
+        - PLACEHOLDER.example.org    # overlay supplies the real FQDN
+      secretName: apis-tls           # cert stored as a k8s Secret (or KV-CSI synced)
+  rules:
+    - host: PLACEHOLDER.example.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: apis-app
+                port:
+                  number: 80
