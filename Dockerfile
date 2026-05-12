@@ -109,12 +109,16 @@ RUN DJANGO_SECRET_KEY=collectstatic DJANGO_DEBUG=True ./manage.py collectstatic 
 #   - X-Real-IP: 127.0.0.1 clears RequireClientIPMiddleware (the
 #     ALLAUTH_TRUSTED_CLIENT_IP_HEADER default; without it the probe
 #     would 403 with DEBUG=False because the loopback request bypasses
-#     apis-nginx, which is normally the writer of X-Real-IP).
+#     apis-nginx, which is normally the writer of X-Real-IP);
+#   - Host: healthcheck.internal clears Django's ALLOWED_HOSTS check
+#     without requiring the operator to put 127.0.0.1 in their prod
+#     ALLOWED_HOSTS. settings.py unconditionally allowlists that name;
+#     it's unreachable from outside the container so it's not a leak.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", \
 "import sys, urllib.request; \
 req = urllib.request.Request('http://127.0.0.1:8000/robots.txt', \
-                             headers={'X-Forwarded-Proto':'https','X-Forwarded-For':'127.0.0.1','X-Real-IP':'127.0.0.1'}); \
+                             headers={'Host':'healthcheck.internal','X-Forwarded-Proto':'https','X-Forwarded-For':'127.0.0.1','X-Real-IP':'127.0.0.1'}); \
 sys.exit(0 if urllib.request.urlopen(req, timeout=4).status == 200 else 1)"]
 
 ENTRYPOINT ["/app/start.sh"]

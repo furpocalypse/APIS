@@ -179,6 +179,16 @@ else:
             "CSRF_TRUSTED_ORIGINS must not contain wildcards in production."
         )
 
+# Always permit the in-container HEALTHCHECK probe. The probe runs as a
+# loopback urllib request inside the container and sets
+# `Host: healthcheck.internal`; this hostname is unreachable from outside
+# (DNS does not resolve it, Cloudflare / AGIC will not proxy it), so
+# adding it to ALLOWED_HOSTS does NOT expand the public attack surface.
+# Without this, the baked HEALTHCHECK 400s on every probe with
+# DisallowedHost and the container loops between starting and unhealthy.
+if "healthcheck.internal" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("healthcheck.internal")
+
 # --- Trusted-proxy / client-IP plumbing ---------------------------------
 # nginx (the in-container reverse proxy) is the trust boundary. It always
 # overwrites X-Real-IP and X-Forwarded-For with the real client IP after
