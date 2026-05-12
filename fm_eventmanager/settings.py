@@ -225,6 +225,13 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise serves /static/ from gunicorn. Position is documented:
+    # right after SecurityMiddleware so security headers apply to static
+    # responses, and before SessionMiddleware so static responses skip
+    # the per-request session lookup. apis-nginx (in compose) does NOT
+    # serve /static/ — Cloudflare caches whitenoise's immutable
+    # responses at the edge so the gunicorn hit is one-per-edge-PoP.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     # Fail closed if the trusted edge didn't supply a real client IP.
@@ -584,6 +591,18 @@ STORAGES = {
         "BACKEND": "fm_eventmanager.file_storage.SelectiveManifestStaticFilesStorage",
     },
 }
+
+# --- WhiteNoise -----------------------------------------------------------
+# 1 year default cache age for unhashed files (e.g. apple-touch-icon.png).
+# Hashed files (base.428a30193bdc.css) get `Cache-Control: ...immutable`
+# automatically — WhiteNoise reads the manifest to know which is which.
+WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365  # 1 year
+# Don't 500 if a template references a file missing from staticfiles
+# manifest — log and serve unhashed. Important during dev / hot reload
+# when a freshly added asset hasn't been collectstatic'd yet. In prod
+# images this is moot (collectstatic runs at build time, manifest is
+# complete) but keeps the dev compose tolerant.
+WHITENOISE_MANIFEST_STRICT = False
 
 # --- Cookie / transport hardening ---------------------------------------
 # OWASP A02 / A05, ASVS V3.4 / V9.1, OWASP "Secure Cookie Attribute" and

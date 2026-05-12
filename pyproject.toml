@@ -44,6 +44,11 @@ dependencies = [
     "squareup==44.0.1.20260122",
     "uvicorn>=0.40.0",
     "uvicorn-worker>=0.4.0",
+    # WhiteNoise serves /static/ from gunicorn. Necessary because nginx
+    # is now a separate image (it doesn't have access to /app/apis/static
+    # the way the bundled-nginx setup did). [brotli] adds br/gz pre-comp
+    # at collectstatic time so gunicorn doesn't compress per-request.
+    "whitenoise[brotli]>=6.7.0",
 ]
 
 [tool.uv.sources]

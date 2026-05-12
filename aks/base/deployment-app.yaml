@@ -62,7 +62,7 @@ spec:
       containers:
         - name: app
           # Overlay patches the digest; never deploy `:latest`.
-          image: furpocalypse.azurecr.io/apis:0.5.1
+          image: furpocalypse.azurecr.io/apis:0.5.2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -104,7 +104,7 @@ configMapGenerator:
       - SENTRY_ENVIRONMENT=production
       - SENTRY_TRACES_SAMPLE_RATE=0.1
       - APIS_METRICS_BACKEND=DummyReporter
-      - SENTRY_RELEASE=apis-0.5.1
+      - SENTRY_RELEASE=apis-0.5.2
     options:
       disableNameSuffixHash: true
 
@@ -112,5 +112,5 @@ images:
   - name: furpocalypse.azurecr.io/apis
     # Update on each release. For CIS Docker 4.2 compliance also append
     # @sha256:<digest> — replace this line with:
-    #   newTag: 0.5.1@sha256:<digest>
-    newTag: "0.5.1"
+    #   newTag: 0.5.2@sha256:<digest>
+    newTag: "0.5.2"
