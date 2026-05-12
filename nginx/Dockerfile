@@ -2,7 +2,7 @@
 # small entrypoint that renders the templated parts at boot.
 #
 # Image:  furpocalypse.azurecr.io/apis-nginx:x.x.x
-# Builds: docker build -t furpocalypse.azurecr.io/apis-nginx:0.5.0 ./nginx
+# Builds: docker build -t furpocalypse.azurecr.io/apis-nginx:0.5.1 ./nginx
 #
 # This image is used in the Docker / docker-compose topology only. In AKS
 # we DON'T deploy this — Application Gateway Ingress Controller terminates

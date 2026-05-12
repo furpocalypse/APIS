@@ -59,7 +59,7 @@ services:
   # CF-source-IP allowlist, proxies to the app on the docker network.
   # --------------------------------------------------------------------
   nginx:
-    image: furpocalypse.azurecr.io/apis-nginx:0.5.0
+    image: furpocalypse.azurecr.io/apis-nginx:0.5.1
     pull_policy: always
     restart: always
     ports:
@@ -85,6 +85,13 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    # Raise the open-file limit so nginx's worker_rlimit_nofile=8192 can
+    # actually take effect. Default container limit is 1024, which caps
+    # each worker at ~512 concurrent connections (each connection = 2 fds).
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 16384
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m
       - /var/cache/nginx:rw,nosuid,nodev,size=16m
