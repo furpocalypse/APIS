@@ -14,7 +14,7 @@ aks/
 │   ├── serviceaccount.yaml        # bound to Azure Workload Identity
 │   ├── secretproviderclass.yaml   # Key Vault CSI: which secrets to mount
 │   ├── configmap-app.yaml         # non-secret env
-│   ├── deployment-app.yaml        # nginx+gunicorn pod (web)
+│   ├── deployment-app.yaml        # gunicorn pod (web). AGIC terminates TLS; no nginx sidecar here.
 │   ├── deployment-worker.yaml     # celery worker
 │   ├── statefulset-postgres.yaml  # in-cluster Postgres
 │   ├── statefulset-redis.yaml     # in-cluster Redis
@@ -30,9 +30,9 @@ aks/
 
 ## Architecture decisions
 
-- **Single-container app pod.** The image bakes nginx + gunicorn + supervisord; splitting them across pods would break the real-client-IP chain (unix-socket handoff feeds `X-Real-IP` into Django via `ALLAUTH_TRUSTED_CLIENT_IP_HEADER`).
+- **gunicorn-only app pod.** The app image ships gunicorn as PID 1 on TCP :8000. nginx lives in a separate image (`apis-nginx`, see `nginx/`) used in the docker-compose topology — AKS doesn't need it because AGIC terminates TLS at the gateway and reaches gunicorn directly via the Service.
 - **In-cluster Postgres + Redis** as StatefulSets backed by `managed-csi-premium` (Azure Premium SSD v1). For real production, prefer **Azure Database for PostgreSQL Flexible Server** and **Azure Cache for Redis** — see the trade-offs documented in `docker-compose.prod.yaml`. To migrate, drop both StatefulSets and point `DATABASE_HOST` / `DJANGO_REDIS_URL` at the managed endpoints.
-- **AGIC for ingress.** TLS terminates at Application Gateway (WAF v2). The pod's nginx is in `TRUSTED_PROXY_MODE=proxy` with the AppGW subnet CIDR pinned in `TRUSTED_PROXY_CIDRS`. No Front Door in this topology — add it as a second trusted hop if needed.
+- **AGIC for ingress.** TLS terminates at Application Gateway (WAF v2); AGIC forwards plaintext to the apis-app Service on :8000. The pod sets `TRUSTED_PROXY_MODE=proxy` with the AppGW subnet CIDR pinned in `TRUSTED_PROXY_CIDRS`. No Front Door in this topology — add it as a second trusted hop if needed.
 - **Workload Identity** for the pod → ACR pull and pod → Key Vault read paths. No service-principal secrets in the cluster.
 - **Key Vault Provider for Secrets Store CSI Driver** delivers credentials. Pod mounts the SPC volume; secrets are also projected into the `apis-secrets` Kubernetes Secret so the Deployment can use `envFrom`. No secrets in YAML.
 - **No celery beat.** A grep of `registration/tasks.py` shows only `@shared_task` decorators — every task is dispatched by a web request. Add a beat Deployment only if scheduled work is introduced.

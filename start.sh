@@ -1,142 +1,32 @@
 #!/bin/sh
+# APIS app container entrypoint.
+#
+# Runs migrations, then execs either gunicorn (web) or celery (worker).
+# nginx is no longer in this image — it lives in apis-nginx (see
+# nginx/Dockerfile) and fronts this container in the docker-compose
+# topology. AKS uses AGIC, hitting gunicorn on :8000 directly.
+#
+# gunicorn binds TCP :8000 so:
+#   - the apis-nginx sidecar can reach it on the docker-compose network
+#   - AGIC / a Service / kubectl port-forward can reach it in AKS
+#   - tests / `docker run -p 8000:8000` work without compose
 set -eu
-
-# --------------------------------------------------------------------------
-# Render /app/realip.conf from the requested TRUSTED_PROXY_MODE.
-# nginx.conf includes /app/realip.conf to pick up real-client-IP plumbing
-# and the optional Front Door origin lock. See CLAUDE.md for the security
-# contract this enforces.
-# --------------------------------------------------------------------------
-
-TRUSTED_PROXY_MODE="${TRUSTED_PROXY_MODE:-none}"
-# Render the realip include into /tmp (which is the tmpfs the orchestrator
-# mounts — see docker-compose.yaml or docker-compose.prod.yaml). /app is read-only at runtime
-# under CIS Docker 5.12. nginx.conf `include`s this file by absolute path.
-REALIP_OUT=/tmp/realip.conf
-
-case "$TRUSTED_PROXY_MODE" in
-    none)
-        cp /app/nginx.realip.none.conf "$REALIP_OUT"
-        ;;
-
-    proxy)
-        if [ -z "${TRUSTED_PROXY_CIDRS:-}" ]; then
-            echo "FATAL: TRUSTED_PROXY_MODE=proxy requires TRUSTED_PROXY_CIDRS" >&2
-            echo "       (comma-separated list of upstream proxy CIDRs)" >&2
-            exit 2
-        fi
-
-        CLIENT_IP_HEADER="${CLIENT_IP_HEADER:-X-Forwarded-For}"
-        REAL_IP_RECURSIVE="${REAL_IP_RECURSIVE:-on}"
-
-        # Build set_real_ip_from directives from the comma-separated CIDR list.
-        TRUSTED_PROXY_CIDRS_DIRECTIVES=""
-        OLD_IFS="$IFS"
-        IFS=','
-        for cidr in $TRUSTED_PROXY_CIDRS; do
-            # Strip whitespace.
-            cidr=$(echo "$cidr" | tr -d ' \t')
-            if [ -n "$cidr" ]; then
-                TRUSTED_PROXY_CIDRS_DIRECTIVES="${TRUSTED_PROXY_CIDRS_DIRECTIVES}set_real_ip_from ${cidr};
-"
-            fi
-        done
-        IFS="$OLD_IFS"
-
-        # Build the FDID enforcement block. When FRONT_DOOR_ID is set, requests
-        # must arrive from a trusted proxy IP AND carry a matching X-Azure-FDID.
-        # When unset, $trusted_origin is unconditionally 1.
-        if [ -n "${FRONT_DOOR_ID:-}" ]; then
-            FDID_BLOCK="geo \$remote_addr \$trusted_origin_ip {
-    default 0;
-"
-            OLD_IFS="$IFS"
-            IFS=','
-            for cidr in $TRUSTED_PROXY_CIDRS; do
-                cidr=$(echo "$cidr" | tr -d ' \t')
-                if [ -n "$cidr" ]; then
-                    FDID_BLOCK="${FDID_BLOCK}    ${cidr} 1;
-"
-                fi
-            done
-            IFS="$OLD_IFS"
-            FDID_BLOCK="${FDID_BLOCK}}
-
-map \"\$trusted_origin_ip:\$http_x_azure_fdid\" \$trusted_origin {
-    default                       0;
-    \"1:${FRONT_DOOR_ID}\"        1;
-}"
-        else
-            FDID_BLOCK="geo \$trusted_origin { default 1; }"
-        fi
-
-        export TRUSTED_PROXY_CIDRS_DIRECTIVES CLIENT_IP_HEADER REAL_IP_RECURSIVE FDID_BLOCK
-        # Strict allowlist: envsubst only expands these four tokens. nginx's
-        # own $variables (\$scheme, \$remote_addr, etc.) pass through.
-        envsubst '${TRUSTED_PROXY_CIDRS_DIRECTIVES} ${CLIENT_IP_HEADER} ${REAL_IP_RECURSIVE} ${FDID_BLOCK}' \
-            < /app/nginx.realip.proxy.conf.template > "$REALIP_OUT"
-        ;;
-
-    *)
-        echo "FATAL: TRUSTED_PROXY_MODE must be 'none' or 'proxy' (got: ${TRUSTED_PROXY_MODE})" >&2
-        exit 2
-        ;;
-esac
-
-# --------------------------------------------------------------------------
-# Render /tmp/server.conf from the requested NGINX_SSL_MODE.
-# nginx.conf includes /tmp/server.conf to pick up the server block(s).
-# --------------------------------------------------------------------------
-
-NGINX_SSL_MODE="${NGINX_SSL_MODE:-off}"
-SERVER_OUT=/tmp/server.conf
-
-case "$NGINX_SSL_MODE" in
-    off)
-        # Plaintext-only port 80 server. Default for the AppGW/Front Door
-        # topology where TLS terminates upstream of this nginx.
-        cp /app/nginx.server.plaintext.conf "$SERVER_OUT"
-        ;;
-
-    on)
-        # nginx terminates TLS itself. The certs MUST be bind-mounted into
-        # /app/ssl as read-only before the container starts.
-        if [ ! -r /app/ssl/fullchain.pem ] || [ ! -r /app/ssl/privkey.pem ]; then
-            echo "FATAL: NGINX_SSL_MODE=on requires /app/ssl/fullchain.pem" >&2
-            echo "       and /app/ssl/privkey.pem to be bind-mounted into" >&2
-            echo "       the container. Mount your cert directory in compose:" >&2
-            echo "         volumes:" >&2
-            echo "           - /path/to/certs:/app/ssl:ro" >&2
-            exit 2
-        fi
-
-        NGINX_SERVER_NAMES="${NGINX_SERVER_NAMES:-_}"
-        export NGINX_SERVER_NAMES
-        # Strict allowlist: envsubst only expands ${NGINX_SERVER_NAMES};
-        # nginx's own $variables ($scheme, $remote_addr, etc.) pass through.
-        envsubst '${NGINX_SERVER_NAMES}' \
-            < /app/nginx.server.ssl.conf.template > "$SERVER_OUT"
-        ;;
-
-    *)
-        echo "FATAL: NGINX_SSL_MODE must be 'off' or 'on' (got: ${NGINX_SSL_MODE})" >&2
-        exit 2
-        ;;
-esac
-
-# Validate the assembled nginx config before we hand off to supervisord.
-# Failing fast here is far less painful than nginx half-starting under
-# supervisord and the eventlistener killing the container.
-nginx -t -c /app/nginx.conf
 
 ./manage.py migrate
 
 case ${1:-} in
     worker)
-        celery -A fm_eventmanager worker --loglevel=info
+        exec celery -A fm_eventmanager worker --loglevel=info
         ;;
 
     *)
-        exec /usr/bin/supervisord -c /app/supervisord.conf
+        # --forwarded-allow-ips=* is safe because the only writer of the
+        # X-Forwarded-* headers we trust is whatever sits in front of this
+        # listener (apis-nginx, AGIC, a test harness). Real-IP scrubbing
+        # at that hop is the security boundary. See ASVS V13.1.4.
+        exec gunicorn fm_eventmanager.asgi:application \
+            -k fm_eventmanager.worker.ApisWorker \
+            --bind 0.0.0.0:8000 \
+            --forwarded-allow-ips=*
         ;;
 esac

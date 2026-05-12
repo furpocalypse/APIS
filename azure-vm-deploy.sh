@@ -227,7 +227,7 @@ $(bold "Done.") The stack is up and healthy.
 Next:
   1. Smoke-test from the VM itself:
        curl -fsS -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-For: 127.0.0.1' \\
-            http://localhost:8080/robots.txt
+            https://localhost/robots.txt -k
 
   2. ${bold "Scrub the bootstrap password from ${COMPOSE_DIR}/.env"} now that the
      admin exists. The bootstrap command unsets BOOTSTRAP_ADMIN_PASSWORD
@@ -237,7 +237,7 @@ Next:
      refuses to elevate further once a superuser exists).
 
   3. Log in at:
-       http://<vm-public-ip>:8080/accounts/login/
+       https://<vm-public-ip>/accounts/login/  (or via the Cloudflare hostname)
        (or via your AppGW / Front Door once that's wired)
 
   4. To inspect or follow logs:

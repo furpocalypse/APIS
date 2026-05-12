@@ -32,7 +32,9 @@ services:
     image: apis:dev
     restart: unless-stopped
     ports:
-      - "8080:80"
+      # gunicorn is exposed directly in dev — no nginx sidecar. Skip the
+      # nginx layer locally; it adds nothing for hot-reload iteration.
+      # The prod compose runs apis-nginx in front (TLS + Cloudflare gate).
       - "8000:8000"
     volumes:
       # Hot-mount source so edits don't require a rebuild. Strictly dev-only;

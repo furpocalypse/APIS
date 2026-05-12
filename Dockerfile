@@ -40,7 +40,11 @@ LABEL org.opencontainers.image.source="https://github.com/furthemore/APIS"
 ARG SENTRY_RELEASE=local
 ENV SENTRY_RELEASE=${SENTRY_RELEASE}
 ENV PATH="/app/.venv/bin:$PATH"
-EXPOSE 80 81
+# 8000: gunicorn (TCP). 81: prometheus /metrics. nginx is no longer baked
+# into this image — it lives in furpocalypse.azurecr.io/apis-nginx and
+# fronts this container in the docker-compose topology. AKS uses AGIC
+# (ingress controller) instead, hitting 8000 directly.
+EXPOSE 8000 81
 
 RUN useradd --shell /bin/bash --create-home --home /app --uid 1000 apis
 
@@ -63,10 +67,7 @@ WORKDIR /app
 RUN set -eux; \
     apt-get update; \
     apt-get install --no-install-recommends -y \
-        git \
-        nginx \
-        supervisor \
-        gettext-base; \
+        git; \
     apt-get autoremove --purge -y; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* /var/tmp/*; \
@@ -74,9 +75,6 @@ RUN set -eux; \
         -exec chmod -s {} + 2>/dev/null || true; \
     # /var/mail is created by useradd's MAIL_DIR default and is unused
     rm -rf /var/mail /var/spool/mail
-
-RUN mkdir -p /var/lib/nginx /app/log/nginx /app/ssl && \
-    chown -R apis /var/lib/nginx /app/log/nginx /app/ssl
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.29 /uv /uvx /bin/
 
@@ -104,16 +102,15 @@ RUN DJANGO_SECRET_KEY=collectstatic DJANGO_DEBUG=True ./manage.py collectstatic 
 # CIS Docker Benchmark 4.6 — declare a HEALTHCHECK so orchestrators can
 # distinguish "container running" from "app actually responding". Uses
 # Python (already present in the image) instead of pulling curl into the
-# runtime layer. The probe targets /robots.txt because:
+# runtime layer. Targets gunicorn directly on :8000 (nginx is in a
+# separate container now). /robots.txt because:
 #   - it doesn't touch the database (so a DB blip doesn't kill the pod);
 #   - X-Forwarded-Proto: https clears SECURE_SSL_REDIRECT;
 #   - X-Forwarded-For: 127.0.0.1 clears RequireClientIPMiddleware.
-# --start-period gives the container 30s to migrate + boot supervisord
-# before failures start counting.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", \
 "import sys, urllib.request; \
-req = urllib.request.Request('http://127.0.0.1/robots.txt', \
+req = urllib.request.Request('http://127.0.0.1:8000/robots.txt', \
                              headers={'X-Forwarded-Proto':'https','X-Forwarded-For':'127.0.0.1'}); \
 sys.exit(0 if urllib.request.urlopen(req, timeout=4).status == 200 else 1)"]
 

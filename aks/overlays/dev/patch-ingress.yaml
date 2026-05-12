@@ -19,4 +19,4 @@
               service:
                 name: apis-app
                 port:
-                  number: 80
+                  number: 8000

@@ -63,7 +63,7 @@ docker compose up -d
 docker compose exec app /app/manage.py bootstrap_admin
 ```
 
-Then open <http://localhost:8080/registration/> in a browser.
+Then open <http://localhost:8000/registration/> in a browser. Dev exposes gunicorn directly on 8000 — no nginx sidecar in the dev compose. Production has `apis-nginx` in front (TLS + Cloudflare gate); see [`docker-compose.prod.yaml`](docker-compose.prod.yaml) and [`nginx/README.md`](nginx/README.md).
 
 ### Production deploy (Azure VM)
 

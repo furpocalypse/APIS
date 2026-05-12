@@ -2,8 +2,8 @@
 #
 # Same image as the web pod but launched with the `worker` arg, which
 # start.sh interprets as `celery -A fm_eventmanager worker --loglevel=info`
-# (skipping nginx + gunicorn + migrate). No HTTP probes — Celery's
-# liveness signal is `inspect ping` on the worker control channel.
+# (no gunicorn, no migrate). No HTTP probes — Celery's liveness signal
+# is `inspect ping` on the worker control channel.
 #
 # Beat scheduler is NOT deployed: a grep of the codebase shows only
 # @shared_task decorators, no @periodic_task / beat_schedule / crontab.
