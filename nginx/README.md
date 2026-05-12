@@ -54,8 +54,8 @@ start.sh refuses to start in `cloudflare` mode if either file is missing.
 ## Building
 
 ```bash
-docker build -t furpocalypse.azurecr.io/apis-nginx:0.5.1 ./nginx
-docker push furpocalypse.azurecr.io/apis-nginx:0.5.1
+docker build -t furpocalypse.azurecr.io/apis-nginx:0.5.2 ./nginx
+docker push furpocalypse.azurecr.io/apis-nginx:0.5.2
 ```
 
 ## Refreshing the Cloudflare IP list

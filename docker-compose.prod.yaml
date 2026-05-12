@@ -59,7 +59,7 @@ services:
   # CF-source-IP allowlist, proxies to the app on the docker network.
   # --------------------------------------------------------------------
   nginx:
-    image: furpocalypse.azurecr.io/apis-nginx:0.5.1
+    image: furpocalypse.azurecr.io/apis-nginx:0.5.2
     pull_policy: always
     restart: always
     ports:
