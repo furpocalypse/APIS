@@ -106,10 +106,10 @@ services:
   app:
     # Pinned to a specific tag. For the strongest reproducibility (and
     # CIS Docker 4.2), append the SHA256 digest:
-    #   image: furpocalypse.azurecr.io/apis:0.5.0@sha256:<digest>
+    #   image: furpocalypse.azurecr.io/apis:0.5.1@sha256:<digest>
     # Resolve via:
-    #   az acr repository show --name furpocalypse --image apis:0.5.0 --query 'digest'
-    image: furpocalypse.azurecr.io/apis:0.5.0
+    #   az acr repository show --name furpocalypse --image apis:0.5.1 --query 'digest'
+    image: furpocalypse.azurecr.io/apis:0.5.1
     pull_policy: always
     restart: always
     expose:
@@ -136,7 +136,7 @@ services:
     # Healthcheck is baked into the image (hits :8000/robots.txt).
 
   worker:
-    image: furpocalypse.azurecr.io/apis:0.5.0
+    image: furpocalypse.azurecr.io/apis:0.5.1
     pull_policy: always
     command: worker
     restart: always

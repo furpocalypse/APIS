@@ -102,16 +102,19 @@ RUN DJANGO_SECRET_KEY=collectstatic DJANGO_DEBUG=True ./manage.py collectstatic 
 # CIS Docker Benchmark 4.6 — declare a HEALTHCHECK so orchestrators can
 # distinguish "container running" from "app actually responding". Uses
 # Python (already present in the image) instead of pulling curl into the
-# runtime layer. Targets gunicorn directly on :8000 (nginx is in a
+# runtime layer. Targets gunicorn directly on :8000 (apis-nginx is in a
 # separate container now). /robots.txt because:
 #   - it doesn't touch the database (so a DB blip doesn't kill the pod);
 #   - X-Forwarded-Proto: https clears SECURE_SSL_REDIRECT;
-#   - X-Forwarded-For: 127.0.0.1 clears RequireClientIPMiddleware.
+#   - X-Real-IP: 127.0.0.1 clears RequireClientIPMiddleware (the
+#     ALLAUTH_TRUSTED_CLIENT_IP_HEADER default; without it the probe
+#     would 403 with DEBUG=False because the loopback request bypasses
+#     apis-nginx, which is normally the writer of X-Real-IP).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", \
 "import sys, urllib.request; \
 req = urllib.request.Request('http://127.0.0.1:8000/robots.txt', \
-                             headers={'X-Forwarded-Proto':'https','X-Forwarded-For':'127.0.0.1'}); \
+                             headers={'X-Forwarded-Proto':'https','X-Forwarded-For':'127.0.0.1','X-Real-IP':'127.0.0.1'}); \
 sys.exit(0 if urllib.request.urlopen(req, timeout=4).status == 200 else 1)"]
 
 ENTRYPOINT ["/app/start.sh"]

@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: worker
-          image: furpocalypse.azurecr.io/apis:0.3.1
+          image: furpocalypse.azurecr.io/apis:0.5.1
           imagePullPolicy: IfNotPresent
           args: ["worker"]
           envFrom:
