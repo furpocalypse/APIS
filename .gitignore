@@ -12,6 +12,7 @@ db.sqlite3
 test-db.sqlite3
 test-db.sqlite3-journal
 registration/resources/nametag/apis/tmp*.html
+ssl/
 
 # IDE
 .idea/
@@ -41,6 +42,9 @@ localhost.key
 .env.dev
 database.env
 .tmp_*
+# Local cert experiments (not the apis-nginx mount path — that's /opt/apis/certs
+# on the VM, never inside the repo).
+ssl/
 build/
 .DS_Store
 pgdb/
