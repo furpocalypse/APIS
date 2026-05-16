@@ -59,6 +59,7 @@ services:
   # CF-source-IP allowlist, proxies to the app on the docker network.
   # --------------------------------------------------------------------
   nginx:
+    profiles: ["app","fullstack"]
     image: furpocalypse.azurecr.io/apis-nginx:0.5.2
     pull_policy: always
     restart: always
@@ -111,6 +112,7 @@ services:
   # and the worker can reach it over the docker network.
   # --------------------------------------------------------------------
   app:
+    profiles: ["app","fullstack"]
     # Pinned to a specific tag. For the strongest reproducibility (and
     # CIS Docker 4.2), append the SHA256 digest:
     #   image: furpocalypse.azurecr.io/apis:0.5.3@sha256:<digest>
@@ -143,6 +145,7 @@ services:
     # Healthcheck is baked into the image (hits :8000/robots.txt).
 
   worker:
+    profiles: ["app","fullstack"]
     image: furpocalypse.azurecr.io/apis:0.5.3
     pull_policy: always
     command: worker
@@ -175,6 +178,7 @@ services:
         condition: service_healthy
 
   postgres:
+    profiles: ["db","fullstack"]
     image: postgres:16
     restart: always
     env_file:
@@ -193,6 +197,7 @@ services:
       start_period: 60s
 
   redis:
+    profiles: ["db","fullstack"]
     image: redis:8
     restart: always
     command: >
@@ -215,6 +220,6 @@ services:
   gotenberg:
     # PDF rendering. Behind a profile so it's only started when needed.
     # If used, set GOTENBERG_HOST=http://gotenberg:3000 in .env.
-    profiles: [gotenberg]
+    profiles: ["gotenberg"]
     image: gotenberg/gotenberg:8
     restart: unless-stopped
