@@ -1,0 +1,63 @@
+name: SCA
+
+# S33 HIGH-6 + CLAUDE.md item 6 (OWASP A06 / Dependency-Check discipline):
+# CodeQL scans source, not dependencies. Gate every PR on software-
+# composition analysis and re-scan weekly so a new CVE in an
+# already-locked dependency surfaces even without a code change.
+
+on:
+  push:
+    branches: [production, stage]
+  pull_request:
+    branches: [production, stage]
+  schedule:
+    # Mondays 07:17 UTC — surfaces new CVEs in pinned deps with no code change.
+    - cron: "17 7 * * 1"
+
+# CodeQL actions/missing-workflow-permissions: least privilege.
+permissions:
+  contents: read
+
+jobs:
+  python-deps:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Lockfile is in sync (immutable in CI)
+        run: uv lock --check
+      - name: pip-audit (Python deps; fail on any known vuln)
+        run: |
+          uv export --frozen --no-hashes --no-emit-project > /tmp/requirements.txt
+          uvx pip-audit -r /tmp/requirements.txt --strict --progress-spinner=off
+
+  npm-deps:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: npm audit (frontend prod deps; fail on high/critical)
+        working-directory: registration/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+
+  trivy-fs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan (deps + config)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          # Block only on FIXABLE High/Critical (CLAUDE.md: "no new
+          # dependency with a known *unfixed* High or Critical CVE" — an
+          # upstream-unfixed advisory must not wedge every merge).
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
