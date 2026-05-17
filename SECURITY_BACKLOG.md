@@ -12,23 +12,26 @@ picks them up with full context rather than rediscovering the issue.
 
 ## P1 #5 — Webhook order-completion race (Order.status writers + capacity counters)
 
-**Status:** P1 race CLOSED in-band (S24, commit `ebb766e`). The fused
-compare-and-set primitive `registration.payments.transition_order_status`
-now exists; the documented race (duplicate `PAYMENT.CAPTURE.COMPLETED`
-→ duplicate registration email + capacity double-decrement) is fixed and
-proven by `test_concurrency.py::TestWebhookOrderCompletionRace` (CI). The
+**Status:** RESOLVED in-band (S24; commits `ebb766e`, `e93998e`). The
+fused compare-and-set primitive
+`registration.payments.transition_order_status` exists; the documented P1
+race (duplicate `PAYMENT.CAPTURE.COMPLETED` → duplicate registration
+email + capacity double-decrement) is fixed and proven by
+`test_concurrency.py::TestWebhookOrderCompletionRace` (CI). The
 synchronous-checkout finalization path was migrated; the auto-expiry job
-was confirmed already race-safe (Pattern A). **Residual sweep (tracked,
-non-P1):** the secondary Square webhook refund/dispute processors
-(`payments.process_webhook_*`) and the synchronous PayPal/Square
-capture+refresh writers still set status directly — these are lower
-severity (refund/dispute double-application, partly idempotent via the
-existing `refund_exists` skip + the durable `PaymentWebhookNotification
-(integration, event_id)` ingestion dedup). They migrate through the
-now-available primitive (Pattern A row-lock for the async processors;
-`expected`/`exclude` CAS for the synchronous ones) as bounded follow-up
-work; the enabling primitive + the security-load-bearing P1 fix are
-landed. Audited 2026-05-10; primitive landed 2026-05-17.
+was confirmed already race-safe (Pattern A). **Every async webhook
+status writer is now serialized:** all four Square `process_webhook_*`
+processors and all seven PayPal refund/dispute/denied handlers re-fetch
+under `select_for_update()` inside `transaction.atomic()` (Pattern A;
+PayPal via the shared `_commit_order_mutation` helper, Square inline,
+with the `refund.created` duplicate check moved inside the lock and
+chargeback email moved to `transaction.on_commit`). The only direct
+status writes that remain are the **synchronous single-request**
+capture/refresh paths (`paypal_payments`, `payments.charge_payment`):
+these are not a duplicate-delivery race surface (one checkout request,
+external API in-path, no concurrent twin) — the primitive is available
+if a future change makes them concurrent. No open race remains. Audited
+2026-05-10; closed 2026-05-17.
 
 **Original assessment (retained for context):**
 
