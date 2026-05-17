@@ -92,6 +92,29 @@ def _request_proves_terminal(request, terminal: Firebase) -> bool:
     return data.get("terminal") == terminal.name
 
 
+def _audit_cash_action(
+    request, action, *, amount=None, terminal=None, outcome="success", reference=None
+):
+    """LOW-4 (S33-j / ASVS V7.1 / Logging cheat sheet): who/what/when/
+    where/outcome for every money-handling admin action.
+
+    Emitted on the dedicated ``fm_eventmanager.security`` logger (S35:
+    own handler, ``propagate=False``, pinned WARNING) so it survives a
+    production root-level tightening and ships to centralized,
+    append-only aggregation — the tamper-evident sink. Carries the
+    actor identity by design (accountability); no attendee PII.
+    """
+    _security_logger.warning(
+        "cash-drawer audit: user=%s action=%s amount=%s terminal=%s reference=%s outcome=%s",
+        getattr(request.user, "username", "?"),
+        action,
+        "-" if amount is None else amount,
+        terminal.name if terminal is not None else "unbound",
+        reference or "-",
+        outcome,
+    )
+
+
 @require_safe
 @staff_member_required
 def onsite_admin(request):
@@ -652,6 +675,7 @@ def no_sale(request):
     else:
         _security_logger.warning("no-sale receipt not pushed: no proven terminal bound to session")
 
+    _audit_cash_action(request, "no_sale", terminal=position)
     return JsonResponse({"success": True})
 
 
@@ -691,6 +715,7 @@ def cash_audit_action(request, action):
     cash_ledger = Cashdrawer(action=action, total=amount, user=request.user, position=position)
     cash_ledger.save()
     cash_ledger.refresh_from_db()
+    _audit_cash_action(request, action, amount=amount, terminal=position)
     print_audit_receipt(request, action, cash_ledger, cashdraw)
 
     return JsonResponse({"success": True})
@@ -813,6 +838,14 @@ def complete_cash_transaction(request):
         and active_terminal is not None
         and order.opened_at_terminal_id != active_terminal.id
     ):
+        _audit_cash_action(
+            request,
+            "cash_sale",
+            amount=total,
+            terminal=active_terminal,
+            reference=reference,
+            outcome="rejected_terminal_mismatch",
+        )
         return JsonResponse({"success": False, "reason": "Not found"}, status=404)
 
     order.billingType = Order.CASH
@@ -820,6 +853,13 @@ def complete_cash_transaction(request):
     order.settledDate = timezone.now()
     order.notes = json.dumps({"type": "cash", "tendered": tendered})
     order.save()
+    _audit_cash_action(
+        request,
+        "cash_sale",
+        amount=total,
+        terminal=active_terminal,
+        reference=reference,
+    )
 
     txn = Cashdrawer(
         action=Cashdrawer.TRANSACTION, total=total, tendered=tendered, user=request.user

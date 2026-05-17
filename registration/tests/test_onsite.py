@@ -725,3 +725,20 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
         self.assertTrue(response.json()["success"])
         order.refresh_from_db()
         self.assertEqual(order.status, Order.COMPLETED)
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_low4_cash_sale_is_audited(self, mock_mqtt):
+        """LOW-4 (S33-j): a completed cash sale emits a who/what/where/
+        outcome audit line on fm_eventmanager.security."""
+        order = self._make_order("CASH-AUD", opened_at=self.terminal)
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
+        args = {"reference": "CASH-AUD", "total": order.total, "tendered": order.total}
+        with self.assertLogs("fm_eventmanager.security", level="WARNING") as cm:
+            self.client.post(
+                reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+            )
+        audit = [m for m in cm.output if "cash-drawer audit" in m]
+        self.assertTrue(audit, "no cash-drawer audit line emitted")
+        self.assertIn("action=cash_sale", audit[-1])
+        self.assertIn("reference=CASH-AUD", audit[-1])
+        self.assertIn("outcome=success", audit[-1])
