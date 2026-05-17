@@ -28,7 +28,6 @@ from registration.models import (
 from registration.payments import (
     charge_payment,
     transition_order_status,
-    update_capacity_for_status_change,
 )
 from registration.paypal_payments import (
     capture_paypal_payment,
@@ -193,7 +192,11 @@ def do_checkout(
                 return False, error, None
             for level, count in levels:
                 level.reserve_slots(count)
-            order.status = Order.PENDING
+            # Initial Order creation to PENDING inside the reservation
+            # atomic block — a row insert, not a race-prone state
+            # transition (no prior status to CAS from; capacity is the
+            # reserve_slots() above).
+            order.status = Order.PENDING  # status-writer-ok: initial create
             order.save()
             _save_order_items(order, cartItems, orderItems)
 
@@ -219,29 +222,20 @@ def do_checkout(
                 {"errors": [{"code": f"Unknown processor: {processor}"}]},
             )
 
-        # Normalize order.status and persist. Payment handlers usually
-        # save themselves, but some mocks only mutate the in-memory
-        # object, and a few PayPal early-return branches (Missing-id /
-        # ApiException / JSON-decode) return without saving at all. We
-        # always save so the DB reflects the terminal state, and we coerce
-        # PENDING into a concrete terminal before the capacity call so
-        # update_capacity_for_status_change doesn't see old==new==PENDING.
-        # Persist any in-memory fields the payment handler set (some mocks
-        # / early-return branches only mutate the instance).
-        order.save()
-
-        # S24 (SECURITY_BACKLOG P1 #5): finalize PENDING→terminal as an
-        # atomic compare-and-set so a PayPal/Square webhook delivery that
-        # already finalized this order in parallel is NOT clobbered back.
-        # The primitive runs the capacity transition itself; refresh=False
-        # keeps the in-memory fields just saved above.
-        if order.status == Order.PENDING:
-            target = Order.COMPLETED if status else Order.FAILED
-            transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
-        else:
-            # Handler already moved it off PENDING (and saved); mirror the
-            # original uniform PENDING→<final> capacity call.
-            update_capacity_for_status_change(order, Order.PENDING, order.status)
+        # S24 + peer-review BLOCK-1: charge_payment / capture_paypal_payment
+        # now fuse the PENDING→terminal status write WITH the capacity
+        # transition in a single atomic compare-and-set
+        # (transition_order_status, expected=PENDING). There is no longer a
+        # raw, unguarded update_capacity_for_status_change here — that was
+        # the double-decrement defect (a concurrent webhook winning the CAS
+        # then this path also adjusting capacity). The only post-handler
+        # work is finalizing PayPal early-return paths (Missing-id /
+        # JSON-decode) that return without transitioning: this CAS fails
+        # those still-PENDING orders exactly once; if a handler or a
+        # concurrent webhook already moved the order off PENDING it
+        # no-ops (no double capacity, no clobber of the winner).
+        target = Order.COMPLETED if status else Order.FAILED
+        transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
 
         if status:
             if discount:

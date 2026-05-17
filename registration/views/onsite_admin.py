@@ -44,6 +44,7 @@ from registration.models import (
     generate_discount_code,
     get_random_token,
 )
+from registration.payments_sanitize import sanitize_api_data
 from registration.views.attendee import get_attendee_age
 from registration.views.ordering import (
     get_discount_total,
@@ -594,22 +595,33 @@ def complete_square_transaction(request):
     if order.opened_at_terminal_id and order.opened_at_terminal_id != terminal.id:
         return JsonResponse({"success": False, "reason": "Not found"}, status=404)
 
-    order.billingType = Order.CREDIT
-
     # Lookup the payment(s?) associated with this order:
     if paymentId:
         store_api_data["payment"] = {"id": paymentId}
-        order.status = Order.COMPLETED
-        order.settledDate = timezone.now()
     else:
-        order.status = Order.CAPTURED
         order.notes = "No paymentId."
 
-    order.status = Order.COMPLETED
+    order.billingType = Order.CREDIT
     order.settledDate = timezone.now()
+    order.apiData = sanitize_api_data(json.dumps(store_api_data))  # MED-8
 
-    order.apiData = json.dumps(store_api_data)
-    order.save()
+    # Peer-review BLOCK-3 / S24: route the onsite-credit completion
+    # through the fused CAS primitive (status+capacity, atomic,
+    # idempotent vs a concurrent Square webhook) instead of a raw
+    # status flip + save that skipped capacity and could clobber a
+    # parallel webhook winner.
+    payments.transition_order_status(
+        order,
+        Order.COMPLETED,
+        expected=[Order.PENDING, Order.CAPTURED],
+        extra_fields={
+            "billingType": Order.CREDIT,
+            "settledDate": order.settledDate,
+            "notes": order.notes,
+            "apiData": order.apiData,
+        },
+        refresh=False,
+    )
 
     if paymentId:
         status, errors = payments.refresh_payment(order, store_api_data)
@@ -848,11 +860,25 @@ def complete_cash_transaction(request):
         )
         return JsonResponse({"success": False, "reason": "Not found"}, status=404)
 
+    # Peer-review BLOCK-3 / S24: a raw status flip + save here skipped the
+    # capacity transition entirely (a cash sale of a capped price level
+    # never consumed a slot) and could clobber a concurrent webhook. Route
+    # through the fused CAS primitive: status + capacity, atomic,
+    # idempotent (a duplicate cash submit no-ops instead of double-selling).
     order.billingType = Order.CASH
-    order.status = Order.COMPLETED
     order.settledDate = timezone.now()
     order.notes = json.dumps({"type": "cash", "tendered": tendered})
-    order.save()
+    payments.transition_order_status(
+        order,
+        Order.COMPLETED,
+        expected=[Order.PENDING, Order.CAPTURED],
+        extra_fields={
+            "billingType": Order.CASH,
+            "settledDate": order.settledDate,
+            "notes": order.notes,
+        },
+        refresh=False,
+    )
     _audit_cash_action(
         request,
         "cash_sale",

@@ -438,7 +438,22 @@ lint-env-sweep:
 		echo "$$hits"; \
 	else echo "S20: no module-level env reads in registration/ — clean"; fi
 
-lint-all: lint typecheck lint-pylint lint-vulture lint-shell lint-docker lint-actions lint-yaml lint-env-sweep
+# S24 / plan 721-723 (BLOCKING): no raw Order.status transition write in
+# the request/view layer — every status transition must route through
+# registration.payments.transition_order_status (or the documented
+# Pattern-A helpers in payments.py/paypal_webhook_handlers.py). A genuine
+# initial-create or audited exception carries an inline
+# `status-writer-ok:` justification. Exits non-zero on a violation.
+lint-status-writers:
+	@hits=$$(grep -rnE '\.status = (Order|ApisOrder)\.|\.update\(status=' \
+		registration/views/ --include=*.py 2>/dev/null \
+		| grep -v '/tests/' | grep -v 'status-writer-ok' || true); \
+	if [ -n "$$hits" ]; then \
+		echo "BLOCK: raw Order.status writer in registration/views/ — route via transition_order_status:"; \
+		echo "$$hits"; exit 1; \
+	else echo "status-writers: views route status transitions through the primitive — clean"; fi
+
+lint-all: lint typecheck lint-pylint lint-vulture lint-shell lint-docker lint-actions lint-yaml lint-env-sweep lint-status-writers
 
 # MED-9 (CIS Docker 4.2 / OWASP A08): resolve the current digest for
 # every secondary container image so a refresh is a deliberate, reviewed
@@ -468,4 +483,4 @@ refresh-digests:
         dev-makemigrations dev-migrate dev-createsuperuser \
         lint lint-fix typecheck lint-pylint lint-vulture lint-all \
         lint-shell lint-docker lint-actions lint-yaml lint-env-sweep \
-        refresh-digests
+        lint-status-writers refresh-digests

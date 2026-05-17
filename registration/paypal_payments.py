@@ -39,7 +39,11 @@ from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 from prometheus_client import Histogram
 
 from .models import Order as ApisOrder
-from .payments import refund_cash_payment, update_capacity_for_status_change
+from .payments import (
+    refund_cash_payment,
+    transition_order_status,
+    update_capacity_for_status_change,
+)
 from .payments_sanitize import sanitize_api_data
 from .types import TranslatedCartItem
 
@@ -234,8 +238,11 @@ def capture_paypal_payment(
     if api_response.is_error():
         logger.debug("---- Transaction Failed ----")
         errors = format_errors(api_response)
-        apis_order.status = ApisOrder.FAILED
-        apis_order.save()
+        # Peer-review BLOCK-1: fuse status+capacity via the CAS primitive
+        # (expected=PENDING) — race-safe vs a concurrent webhook.
+        transition_order_status(
+            apis_order, ApisOrder.FAILED, expected=[ApisOrder.PENDING], refresh=False
+        )
         return False, {"errors": errors}
 
     try:
@@ -251,9 +258,18 @@ def capture_paypal_payment(
     if hasattr(order_data, "payment_source") and hasattr(order_data.payment_source, "card"):
         apis_order.lastFour = order_data.payment_source.card.last_digits
 
-    apis_order.status = ApisOrder.COMPLETED
     apis_order.notes = "PayPal: #" + order_data.id[:4]
-    apis_order.save()
+    transition_order_status(
+        apis_order,
+        ApisOrder.COMPLETED,
+        expected=[ApisOrder.PENDING],
+        extra_fields={
+            "apiData": apis_order.apiData,
+            "notes": apis_order.notes,
+            "lastFour": apis_order.lastFour,
+        },
+        refresh=False,
+    )
 
     logger.debug("---- End Transaction ----")
 

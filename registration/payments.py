@@ -159,8 +159,14 @@ def transition_order_status(
         ``True`` iff this caller performed the transition; ``False`` on a
         no-op (already transitioned / lost the race / not in ``expected``).
     """
-    old_status = order.status
     with transaction.atomic():
+        # Lock the row and read the AUTHORITATIVE prior status from the
+        # DB (peer-review BLOCK-2): the caller's in-memory order.status
+        # may be stale, and the fused capacity transition must be
+        # computed from the state the UPDATE actually transitions FROM,
+        # consistent with _commit_order_mutation's Pattern-A lock.
+        locked = Order.objects.select_for_update().get(pk=order.pk)
+        old_status = locked.status
         qs = Order.objects.filter(pk=order.pk)
         if expected is not None:
             qs = qs.filter(status__in=list(expected))
@@ -170,7 +176,7 @@ def transition_order_status(
         if not won:
             return False
         if update_capacity:
-            update_capacity_for_status_change(order, old_status, new_status)
+            update_capacity_for_status_change(locked, old_status, new_status)
         if on_committed is not None:
             transaction.on_commit(on_committed)
     # Reflect the winning state on the in-memory instance for callers that
@@ -259,9 +265,19 @@ def charge_payment(
     except ApiError as e:
         logger.debug(e.errors)
         logger.debug("---- Transaction Failed ----")
-        order.status = Order.FAILED
+        # Peer-review BLOCK-1/3: fuse status+capacity in one atomic CAS
+        # (expected=PENDING) instead of a raw status write + a later
+        # unguarded capacity call in do_checkout. Idempotent against a
+        # concurrent webhook: whoever wins PENDING→terminal runs capacity
+        # exactly once; the loser no-ops.
         order.apiData = sanitize_api_data(e.body)  # MED-8
-        order.save()
+        transition_order_status(
+            order,
+            Order.FAILED,
+            expected=[Order.PENDING],
+            extra_fields={"apiData": order.apiData},
+            refresh=False,
+        )
         return False, e.body
 
     logger.debug("---- Charge Submitted ----")
@@ -270,19 +286,34 @@ def charge_payment(
     order.apiData = sanitize_api_data(api_response.model_dump())  # MED-8
 
     if api_response.payment and api_response.payment.id and api_response.payment.status != "FAILED":
+        _fields = {
+            "apiData": order.apiData,
+            "notes": "Square: #" + api_response.payment.id[:4],
+        }
         if api_response.payment.card_details and api_response.payment.card_details.card:
             order.lastFour = str(api_response.payment.card_details.card.last4)
+            _fields["lastFour"] = order.lastFour
+        order.notes = _fields["notes"]
 
         logger.debug("---- End Transaction ----")
-        order.status = Order.COMPLETED
-        order.notes = "Square: #" + api_response.payment.id[:4]
-        order.save()
+        transition_order_status(
+            order,
+            Order.COMPLETED,
+            expected=[Order.PENDING],
+            extra_fields=_fields,
+            refresh=False,
+        )
         return True, None
     else:
         logger.debug(api_response.errors)
         logger.debug("---- Transaction Failed ----")
-        order.status = Order.FAILED
-        order.save()
+        transition_order_status(
+            order,
+            Order.FAILED,
+            expected=[Order.PENDING],
+            extra_fields={"apiData": order.apiData},
+            refresh=False,
+        )
         return False, {"errors": [e.model_dump() for e in api_response.errors or []]}
 
 
