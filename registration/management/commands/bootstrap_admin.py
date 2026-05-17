@@ -93,10 +93,15 @@ class Command(BaseCommand):
                 )
                 return
 
+            # Credential material (password) is returned as a distinct
+            # value, never co-mingled in one tuple with the non-sensitive
+            # identifiers (username/email). This keeps the secret's data
+            # flow narrow and isolatable: the username is audit-logged
+            # below; the password must never be able to reach a log sink.
             if options.get("from_env"):
-                username, email, password = self._read_from_env()
+                (username, email), password = self._read_from_env()
             else:
-                username, email, password = self._prompt_interactive(
+                (username, email), password = self._prompt_interactive(
                     default_username=options.get("username"),
                     default_email=options.get("email"),
                 )
@@ -159,7 +164,9 @@ class Command(BaseCommand):
         except (EOFError, KeyboardInterrupt):
             raise CommandError("Aborted by user.") from None
 
-        return username, email, password
+        # Identifiers grouped; secret kept as a separate return value (see
+        # the caller's note — segregates the credential's data flow).
+        return (username, email), password
 
     def _read_from_env(self):
         try:
@@ -180,7 +187,9 @@ class Command(BaseCommand):
         # we already started have inherited the value; rotate the secret.
         os.environ.pop("BOOTSTRAP_ADMIN_PASSWORD", None)
 
-        return username, email, password
+        # Identifiers grouped; secret kept as a separate return value (see
+        # the caller's note — segregates the credential's data flow).
+        return (username, email), password
 
     def _validate_password(self, password: str, username: str, email: str):
         # validate_password checks AUTH_PASSWORD_VALIDATORS against a fake

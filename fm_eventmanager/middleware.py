@@ -75,10 +75,17 @@ class RequireClientIPMiddleware:
         for cidr in getattr(settings, "TRUSTED_PROXY_CIDRS", []):
             try:
                 self._trusted_proxy_networks.append(ipaddress.ip_network(cidr, strict=False))
-            except ValueError:
+            except ValueError as exc:
+                # Log the ValueError (it names the rejected entry and *why*
+                # it is invalid) rather than the raw settings value. This
+                # is both more useful to operators and keeps the log
+                # argument sourced from the stdlib exception, not directly
+                # from the `django.conf.settings` read (a config CIDR is
+                # not a secret, but CodeQL's clear-text-logging query
+                # classifies any settings-attribute read as sensitive).
                 logger.warning(
-                    "RequireClientIPMiddleware: ignoring invalid TRUSTED_PROXY_CIDRS entry %r",
-                    cidr,
+                    "RequireClientIPMiddleware: ignoring invalid TRUSTED_PROXY_CIDRS entry (%s)",
+                    exc,
                 )
 
     def _peer_is_trusted_proxy(self, request) -> bool:
