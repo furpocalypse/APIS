@@ -375,9 +375,7 @@ CELERY_TASK_SEND_SENT_EVENT = eval_bool(os.getenv("CELERY_TASK_SEND_SENT_EVENT",
 # before the HTTP response. Prod uses the real broker (default False). The
 # test/CI/e2e .env.* set CELERY_TASK_ALWAYS_EAGER=true.
 CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "False"))
-CELERY_TASK_EAGER_PROPAGATES = eval_bool(
-    os.getenv("CELERY_TASK_EAGER_PROPAGATES", "False")
-)
+CELERY_TASK_EAGER_PROPAGATES = eval_bool(os.getenv("CELERY_TASK_EAGER_PROPAGATES", "False"))
 
 
 # Prometheus metrics
