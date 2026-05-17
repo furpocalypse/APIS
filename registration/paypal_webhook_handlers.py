@@ -26,6 +26,8 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 
+from django.db import transaction
+
 from registration import tasks
 from registration.models import (
     BanList,
@@ -41,6 +43,28 @@ from registration.payments import (
 from registration.payments_sanitize import sanitize_api_data
 
 logger = logging.getLogger(__name__)
+
+
+def _commit_order_mutation(order, mutate, *, on_committed=None):
+    """S24 (SECURITY_BACKLOG P1 #5) — Pattern A.
+
+    Re-fetch the order under ``select_for_update()`` and run ``mutate`` on
+    the *locked* instance so concurrent PayPal webhook deliveries for the
+    same order serialize their status/total/apiData read-modify-write
+    instead of losing an update. Runs the capacity transition + save in
+    the same atomic block; ``on_committed`` (if given) fires via
+    ``transaction.on_commit`` so a rollback never dispatches the Celery
+    side effect.
+    """
+    with transaction.atomic():
+        locked = Order.objects.select_for_update().get(pk=order.pk)
+        old_status = locked.status
+        mutate(locked)
+        update_capacity_for_status_change(locked, old_status, locked.status)
+        locked.save()
+        if on_committed is not None:
+            transaction.on_commit(on_committed)
+    return locked
 
 
 # Refund status values that reduce Order.total. COMPLETED funds have moved;
@@ -302,10 +326,7 @@ def handle_capture_refunded(notification: PaymentWebhookNotification) -> bool:
             resource.get("id"),
         )
         return False
-    old_status = order.status
-    _apply_v2_refund(order, resource, reversal=False)
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+    _commit_order_mutation(order, lambda o: _apply_v2_refund(o, resource, reversal=False))
     return True
 
 
@@ -327,10 +348,7 @@ def handle_capture_reversed(notification: PaymentWebhookNotification) -> bool:
             resource.get("id"),
         )
         return False
-    old_status = order.status
-    _apply_v2_refund(order, resource, reversal=True)
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+    _commit_order_mutation(order, lambda o: _apply_v2_refund(o, resource, reversal=True))
     return True
 
 
@@ -354,7 +372,6 @@ def handle_sale_refunded_v1(notification: PaymentWebhookNotification) -> bool:
             resource.get("id"),
         )
         return False
-    old_status = order.status
 
     v1_amount = resource.get("amount") or {}
     normalized = {
@@ -370,9 +387,7 @@ def handle_sale_refunded_v1(notification: PaymentWebhookNotification) -> bool:
         "update_time": resource.get("update_time"),
         "_source": "v1_sale_refund",
     }
-    _apply_v2_refund(order, normalized, reversal=False)
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+    _commit_order_mutation(order, lambda o: _apply_v2_refund(o, normalized, reversal=False))
     return True
 
 
@@ -483,11 +498,11 @@ def handle_capture_denied(notification: PaymentWebhookNotification) -> bool:
             resource.get("id"),
         )
         return False
-    old_status = order.status
-    if order.status != Order.FAILED:
-        order.status = Order.FAILED
-        order.save()
-    update_capacity_for_status_change(order, old_status, order.status)
+
+    def _mutate(o):
+        o.status = Order.FAILED
+
+    _commit_order_mutation(order, _mutate)
     return True
 
 
@@ -523,21 +538,24 @@ def handle_dispute_created(notification: PaymentWebhookNotification) -> bool:
             resource.get("dispute_id"),
         )
         return False
-    old_status = order.status
-    if not isinstance(order.apiData, dict):
-        order.apiData = {}
-    order.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
-    order.status = Order.DISPUTE_EVIDENCE_REQUIRED
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
-    _add_attendees_to_banlist_and_hold(order)
-    try:
-        tasks.send_chargeback_notice_email_task.delay(order.id)
-    except Exception:
-        # Queue backend may be down at webhook-receive time. The dispute
-        # state is already persisted to the Order; log and continue so the
-        # webhook is marked processed. Ops can re-trigger the email later.
-        logger.exception("Failed to queue chargeback notice email for order %s", order.id)
+
+    def _mutate(o):
+        if not isinstance(o.apiData, dict):
+            o.apiData = {}
+        o.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
+        o.status = Order.DISPUTE_EVIDENCE_REQUIRED
+        _add_attendees_to_banlist_and_hold(o)
+
+    def _email():
+        try:
+            tasks.send_chargeback_notice_email_task.delay(order.id)
+        except Exception:
+            # Queue backend may be down at webhook-receive time. The
+            # dispute state is already persisted; log and continue so the
+            # webhook is marked processed. Ops can re-trigger later.
+            logger.exception("Failed to queue chargeback notice email for order %s", order.id)
+
+    _commit_order_mutation(order, _mutate, on_committed=_email)
     return True
 
 
@@ -556,23 +574,24 @@ def handle_dispute_updated(notification: PaymentWebhookNotification) -> bool:
             resource.get("dispute_id"),
         )
         return False
-    old_status = order.status
-    if not isinstance(order.apiData, dict):
-        order.apiData = {}
-    order.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
-    # Only flip to DISPUTE_PROCESSING when dispute is actively being worked on
-    # by PayPal (buyer awaiting response, under review); preserve terminal
-    # statuses set by the RESOLVED handler.
-    if order.status not in (
-        Order.DISPUTE_WON,
-        Order.DISPUTE_LOST,
-        Order.DISPUTE_ACCEPTED,
-    ):
-        status_value = (resource.get("status") or "").upper()
-        if status_value in ("UNDER_REVIEW", "WAITING_FOR_BUYER_RESPONSE"):
-            order.status = Order.DISPUTE_PROCESSING
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+
+    def _mutate(o):
+        if not isinstance(o.apiData, dict):
+            o.apiData = {}
+        o.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
+        # Only flip to DISPUTE_PROCESSING when the dispute is actively
+        # being worked on by PayPal; preserve terminal statuses set by
+        # the RESOLVED handler.
+        if o.status not in (
+            Order.DISPUTE_WON,
+            Order.DISPUTE_LOST,
+            Order.DISPUTE_ACCEPTED,
+        ):
+            status_value = (resource.get("status") or "").upper()
+            if status_value in ("UNDER_REVIEW", "WAITING_FOR_BUYER_RESPONSE"):
+                o.status = Order.DISPUTE_PROCESSING
+
+    _commit_order_mutation(order, _mutate)
     return True
 
 
@@ -592,22 +611,23 @@ def handle_dispute_resolved(notification: PaymentWebhookNotification) -> bool:
             resource.get("dispute_id"),
         )
         return False
-    old_status = order.status
-    if not isinstance(order.apiData, dict):
-        order.apiData = {}
-    order.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
-    outcome = (resource.get("dispute_outcome") or {}).get("outcome_code") or ""
-    order.status = _DISPUTE_OUTCOME_TO_ORDER_STATUS.get(outcome, Order.DISPUTE_PROCESSING)
-    if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
-        order.orgDonation > 0 or order.charityDonation > 0
-    ):
-        order.notes = (order.notes or "") + (
-            f"\n\nOriginal charity donation of ${order.charityDonation} and "
-            f"organization donation of ${order.orgDonation} were reset due to "
-            "lost or accepted dispute state."
-        )
-        order.orgDonation = Decimal("0")
-        order.charityDonation = Decimal("0")
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+
+    def _mutate(o):
+        if not isinstance(o.apiData, dict):
+            o.apiData = {}
+        o.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
+        outcome = (resource.get("dispute_outcome") or {}).get("outcome_code") or ""
+        o.status = _DISPUTE_OUTCOME_TO_ORDER_STATUS.get(outcome, Order.DISPUTE_PROCESSING)
+        if o.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
+            o.orgDonation > 0 or o.charityDonation > 0
+        ):
+            o.notes = (o.notes or "") + (
+                f"\n\nOriginal charity donation of ${o.charityDonation} and "
+                f"organization donation of ${o.orgDonation} were reset due to "
+                "lost or accepted dispute state."
+            )
+            o.orgDonation = Decimal("0")
+            o.charityDonation = Decimal("0")
+
+    _commit_order_mutation(order, _mutate)
     return True

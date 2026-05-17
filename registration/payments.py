@@ -600,21 +600,26 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
 
     webhook_refund = notification.body["data"]["object"]["refund"]
 
-    old_status = order.status
-    output = []
-    refunds_list = order.apiData.get("refunds", [])
-    for refund in refunds_list:
-        if refund["id"] == refund_id:
-            output.append(webhook_refund)
-        else:
-            output.append(refund)
+    # S24 (SECURITY_BACKLOG P1 #5): Pattern A — serialize concurrent
+    # webhook deliveries for this order on its row so the apiData/status
+    # read-modify-write can't lose an update.
+    with transaction.atomic():
+        order = Order.objects.select_for_update().get(pk=order.pk)
+        old_status = order.status
+        output = []
+        refunds_list = order.apiData.get("refunds", [])
+        for refund in refunds_list:
+            if refund["id"] == refund_id:
+                output.append(webhook_refund)
+            else:
+                output.append(refund)
 
-    if webhook_refund["status"] == "COMPLETED":
-        order.status = Order.REFUNDED
+        if webhook_refund["status"] == "COMPLETED":
+            order.status = Order.REFUNDED
 
-    order.apiData["refunds"] = output
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+        order.apiData["refunds"] = output
+        update_capacity_for_status_change(order, old_status, order.status)
+        order.save()
     return True
 
 
@@ -628,13 +633,16 @@ def process_webhook_payment_updated(notification: PaymentWebhookNotification) ->
         )
         return False
 
-    # Store order update in api data
-    old_status = order.status
-    payment = Payment.model_validate(notification.body["data"]["object"]["payment"])
-    order.apiData["payment"] = sanitize_api_data(payment.model_dump())  # MED-8
-    update_order_payment_data(order, 0, payment)
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+    # S24 (SECURITY_BACKLOG P1 #5): Pattern A row-lock so concurrent
+    # deliveries for this order serialize on the read-modify-write.
+    with transaction.atomic():
+        order = Order.objects.select_for_update().get(pk=order.pk)
+        old_status = order.status
+        payment = Payment.model_validate(notification.body["data"]["object"]["payment"])
+        order.apiData["payment"] = sanitize_api_data(payment.model_dump())  # MED-8
+        update_order_payment_data(order, 0, payment)
+        update_capacity_for_status_change(order, old_status, order.status)
+        order.save()
     return True
 
 
@@ -651,43 +659,49 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
         )
         return False
 
-    # Skip processing if we already have this refund id stored:
-    refund_exists = Order.objects.filter(apiData__refunds__contains=[{"id": refund_id}])
-    if len(refund_exists) > 0:
-        logger.info(f"Refund {refund_id} already exists, skipping processing...")
-        return True
+    # S24 (SECURITY_BACKLOG P1 #5): Pattern A — take the order row lock
+    # BEFORE the duplicate-refund check so two concurrent refund.created
+    # deliveries for the same refund can't both pass it and double-apply.
+    with transaction.atomic():
+        order = Order.objects.select_for_update().get(pk=order.pk)
 
-    # Store refund in api data
-    old_status = order.status
-    refunds = order.apiData.get("refunds", [])
-    refunds.append(webhook_refund)
-    order.apiData["refunds"] = refunds
+        # Skip processing if we already have this refund id stored:
+        refund_exists = Order.objects.filter(apiData__refunds__contains=[{"id": refund_id}])
+        if len(refund_exists) > 0:
+            logger.info(f"Refund {refund_id} already exists, skipping processing...")
+            return True
 
-    status = webhook_refund["status"]
-    if status == "COMPLETED":
-        order.status = Order.REFUNDED
-    if status == "PENDING":
-        order.status = Order.REFUND_PENDING
+        # Store refund in api data
+        old_status = order.status
+        refunds = order.apiData.get("refunds", [])
+        refunds.append(webhook_refund)
+        order.apiData["refunds"] = refunds
 
-    if status in ("COMPLETED", "PENDING"):
-        order.total -= Decimal(webhook_refund["amount_money"]["amount"]) / 100
-        # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
-            order.orgDonation = 0
-            order.charityDonation = order.total
-            logger.warning(
-                "Refunded order has caused charity and organization donation amounts to reset."
-            )
-            order.notes += (
-                "\nWarning: Refunded order has caused charity and organization "
-                "donation amounts to reset.\n"
-            )
+        status = webhook_refund["status"]
+        if status == "COMPLETED":
+            order.status = Order.REFUNDED
+        if status == "PENDING":
+            order.status = Order.REFUND_PENDING
 
-    if status in ("REJECTED", "FAILED"):
-        order.status = Order.COMPLETED
+        if status in ("COMPLETED", "PENDING"):
+            order.total -= Decimal(webhook_refund["amount_money"]["amount"]) / 100
+            # Reset org & charity donations if the remaining total isn't enough:
+            if order.orgDonation + order.charityDonation > order.total:
+                order.orgDonation = 0
+                order.charityDonation = order.total
+                logger.warning(
+                    "Refunded order has caused charity and organization donation amounts to reset."
+                )
+                order.notes += (
+                    "\nWarning: Refunded order has caused charity and organization "
+                    "donation amounts to reset.\n"
+                )
 
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+        if status in ("REJECTED", "FAILED"):
+            order.status = Order.COMPLETED
+
+        update_capacity_for_status_change(order, old_status, order.status)
+        order.save()
     return True
 
 
@@ -704,22 +718,27 @@ def process_webhook_dispute_created_or_updated(
         )
         return False
 
-    # Add the dispute API data to the order:
-    old_status = order.status
-    order.apiData["dispute"] = sanitize_api_data(webhook_dispute)  # MED-8
-    order.status = Order.DISPUTE_STATUS_MAP[webhook_dispute["state"]]
-    if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
-        order.orgDonation > 0 or order.charityDonation > 0
-    ):
-        # If we've lost or accepted the dispute, reset charitable donation earmarks:
-        order.notes += (
-            f"\n\nOriginal charity donation of ${order.charityDonation} and organization donation "
-            + f"of ${order.orgDonation} were reset due to lost or accepted dispute state."
-        )
-        order.orgDonation = 0
-        order.charityDonation = 0
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+    # S24 (SECURITY_BACKLOG P1 #5): Pattern A row-lock so concurrent
+    # dispute deliveries for this order serialize the status/apiData/
+    # donation read-modify-write.
+    with transaction.atomic():
+        order = Order.objects.select_for_update().get(pk=order.pk)
+        old_status = order.status
+        order.apiData["dispute"] = sanitize_api_data(webhook_dispute)  # MED-8
+        order.status = Order.DISPUTE_STATUS_MAP[webhook_dispute["state"]]
+        if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
+            order.orgDonation > 0 or order.charityDonation > 0
+        ):
+            # Lost/accepted dispute → reset charitable donation earmarks:
+            order.notes += (
+                f"\n\nOriginal charity donation of ${order.charityDonation} and "
+                f"organization donation of ${order.orgDonation} were reset due "
+                f"to lost or accepted dispute state."
+            )
+            order.orgDonation = 0
+            order.charityDonation = 0
+        update_capacity_for_status_change(order, old_status, order.status)
+        order.save()
 
     # Place a hold on all new disputed orders, and add attendee to the ban list.
     # Should only do this once, when the dispute is created (with state EVIDENCE_REQUIRED).
