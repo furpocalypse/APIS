@@ -7,7 +7,7 @@
 # This image is used in the Docker / docker-compose topology only. In AKS
 # we DON'T deploy this — Application Gateway Ingress Controller terminates
 # TLS at the gateway and forwards plaintext to the app service.
-FROM nginx:1.27-alpine
+FROM mirror.gcr.io/library/nginx:1.27-alpine
 
 # envsubst for templated boot-time rendering of server_name + upstream.
 RUN apk add --no-cache gettext

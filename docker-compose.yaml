@@ -67,7 +67,7 @@ services:
         condition: service_healthy
 
   postgres:
-    image: postgres:16
+    image: mirror.gcr.io/library/postgres:16
     restart: unless-stopped
     env_file:
       - database.env
@@ -81,7 +81,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:8
+    image: mirror.gcr.io/library/redis:8
     restart: unless-stopped
     command: >
       redis-server
@@ -99,7 +99,7 @@ services:
 
   gotenberg:
     profiles: [gotenberg]
-    image: gotenberg/gotenberg:8
+    image: mirror.gcr.io/gotenberg/gotenberg:8
     restart: unless-stopped
 
 volumes:

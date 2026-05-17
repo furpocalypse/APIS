@@ -16,7 +16,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres
+        image: mirror.gcr.io/library/postgres
         env:
           POSTGRES_PASSWORD: secret
           POSTGRES_USER: apis
@@ -29,7 +29,7 @@ jobs:
         ports:
           - 5432:5432
       redis:
-        image: redis:7
+        image: mirror.gcr.io/library/redis:7
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -38,7 +38,7 @@ jobs:
         ports:
           - 6379:6379
       gotenberg:
-        image: gotenberg/gotenberg:8
+        image: mirror.gcr.io/gotenberg/gotenberg:8
         options: >-
           --health-cmd "curl --fail http://localhost:3000/health"
           --health-interval 10s

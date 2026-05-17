@@ -11,7 +11,7 @@
 # are copied across via `COPY --from=assets`.
 #   Resolved version at pin time: Node 24.15.0 (current `lts` channel,
 #   slim variant on Debian trixie).
-FROM node:lts-slim@sha256:24dc26ef1e3c3690f27ebc4136c9c186c3133b25563ae4d7f0692e4d1fe5db0e AS assets
+FROM mirror.gcr.io/library/node:lts-slim@sha256:24dc26ef1e3c3690f27ebc4136c9c186c3133b25563ae4d7f0692e4d1fe5db0e AS assets
 
 ENV NODE_ENVIRONMENT=production
 
@@ -33,7 +33,7 @@ RUN npm run build
 # the loop. `slim-trixie` is Debian 13 (trixie) slim; this is the base
 # Docker offered as `python:3.14-slim` at pin time.
 #   Resolved version at pin time: Python 3.14.4.
-FROM python:3.14-slim-trixie@sha256:1697e8e8d39bf168e177ac6b5fdab6df86d81cfc24dae17dfb96cfc3ef76b4dd
+FROM mirror.gcr.io/library/python:3.14-slim-trixie@sha256:1697e8e8d39bf168e177ac6b5fdab6df86d81cfc24dae17dfb96cfc3ef76b4dd
 
 LABEL org.opencontainers.image.source="https://github.com/furthemore/APIS"
 
