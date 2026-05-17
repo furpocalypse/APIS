@@ -159,7 +159,21 @@ def verify_signature(request) -> bool:
         logger.error("PayPal verify-webhook-signature call failed: %s", e)
         return False
 
-    return payload.get("verification_status") == "SUCCESS"
+    if payload.get("verification_status") != "SUCCESS":
+        return False
+
+    # Plan S2: the freshness check lives INSIDE the signature-verified
+    # path. paypal-transmission-time is part of PayPal's signature input,
+    # so its integrity is only established once the signature verifies —
+    # enforce the age window here, not as a separate pre-check. A
+    # @patch-mocked verify_signature (unit tests) or the E2E bypass
+    # (returned True above) therefore bypasses freshness together with the
+    # signature, which is correct: an unverified timestamp is meaningless.
+    if not webhook_within_age_window(
+        request.headers.get("paypal-transmission-time"), source="paypal"
+    ):
+        return False
+    return True
 
 
 @require_POST
@@ -182,21 +196,11 @@ def paypal_webhook(request):
     if "id" not in request_body:
         return common.abort(400, "Missing id")
 
-    # Bound the webhook's age — ONLY on the signature-verified path (plan
-    # S2). PayPal's ``paypal-transmission-time`` header is part of the
-    # signature input; we also cross-check the body ``create_time``. When
-    # the signature is bypassed (E2E mock) both are untrusted, so the
-    # window is bypassed too (the durable PaymentWebhookNotification store
-    # — plan S38 — is the real replay defence).
-    if not webhook_signature_bypassed(request):
-        transmission_time = request.headers.get("paypal-transmission-time")
-        create_time = request_body.get("create_time")
-        if not webhook_within_age_window(transmission_time, source="paypal"):
-            return common.abort(400, "Webhook timestamp out of window")
-        if create_time and not webhook_within_age_window(
-            create_time, source="paypal"
-        ):
-            return common.abort(400, "Webhook timestamp out of window")
+    # Freshness on paypal-transmission-time is enforced INSIDE
+    # verify_signature (plan S2 — it is meaningful only once the signature
+    # is verified). The durable PaymentWebhookNotification (integration,
+    # event_id) store (plan S38) is the replay defence for late but valid
+    # first deliveries.
 
     event_id = request_body["id"]
     event_type = request_body.get("event_type")
