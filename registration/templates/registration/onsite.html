@@ -513,7 +513,8 @@
                   window.location = "{% url 'registration:onsite_cart' %}";
               },
               "error": function (result, status) {
-                  alert("An error has occurred. Please contact {{ event.registrationEmail }} and we will correct the problem.")
+                  {# S33 HIGH-3: |escapejs makes the admin-set email safe inside this JS string literal (Django auto-escapes HTML, not JS). #}
+                  alert("An error has occurred. Please contact {{ event.registrationEmail|escapejs }} and we will correct the problem.")
                   $("#register").one('click', register_click);
               }
           });
