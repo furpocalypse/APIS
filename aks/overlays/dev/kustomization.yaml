@@ -98,6 +98,13 @@ configMapGenerator:
   - name: apis-config
     behavior: merge
     literals:
+      # LOW-6: DJANGO_DEBUG=True is acceptable ONLY because this overlay
+      # targets a dev cluster reachable solely from a private VNet (no
+      # public ingress, no production PII/payments). DEBUG leaks stack
+      # traces + settings; never promote this overlay to a
+      # public-reachable or data-bearing cluster. The settings.py
+      # _IS_PROD guard additionally hard-fails if APIS_ENV=production is
+      # ever combined with DEBUG.
       - DJANGO_DEBUG=True
       - DJANGO_LOGLEVEL=debug
       - ALLOWED_HOSTS=apis-dev.example.org

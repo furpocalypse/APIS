@@ -52,6 +52,38 @@ patches:
         path: /spec/maxReplicas
         value: 8
 
+  # --- MED-11: force a fresh pull in prod ------------------------------
+  # Base keeps IfNotPresent (fine for digest-pinned/dev overlays). In
+  # prod the app image is a mutable tag until MED-9's digest pin lands,
+  # so a node must never reuse a stale/compromised cached layer across
+  # pod replacements. (CIS Kubernetes Benchmark.)
+  - target:
+      kind: Deployment
+      name: apis-app
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+  - target:
+      kind: Deployment
+      name: apis-worker
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+
+  # --- LOW-5: PDB tracks HPA min in prod -------------------------------
+  # Prod scales web to minReplicas=3; keep minAvailable = minReplicas-1
+  # so a single-node drain can still evict one pod without violating the
+  # budget (base default is 1 for the 2-replica baseline).
+  - target:
+      kind: PodDisruptionBudget
+      name: apis-app
+    patch: |
+      - op: replace
+        path: /spec/minAvailable
+        value: 2
+
   # --- Resource asks ---------------------------------------------------
   - target:
       kind: Deployment
