@@ -445,7 +445,7 @@ lint-env-sweep:
 # initial-create or audited exception carries an inline
 # `status-writer-ok:` justification. Exits non-zero on a violation.
 lint-status-writers:
-	@hits=$$(grep -rnE '\.status = (Order|ApisOrder)\.|\.update\(status=' \
+	@hits=$$(grep -rnE '\.status = (Order|ApisOrder)\.|\.status = ["'"'"']|\.update\(status=' \
 		registration/views/ --include=*.py 2>/dev/null \
 		| grep -v '/tests/' | grep -v 'status-writer-ok' || true); \
 	if [ -n "$$hits" ]; then \

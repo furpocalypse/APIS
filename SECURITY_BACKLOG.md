@@ -26,12 +26,31 @@ under `select_for_update()` inside `transaction.atomic()` (Pattern A;
 PayPal via the shared `_commit_order_mutation` helper, Square inline,
 with the `refund.created` duplicate check moved inside the lock and
 chargeback email moved to `transaction.on_commit`). The only direct
-status writes that remain are the **synchronous single-request**
-capture/refresh paths (`paypal_payments`, `payments.charge_payment`):
-these are not a duplicate-delivery race surface (one checkout request,
-external API in-path, no concurrent twin) — the primitive is available
-if a future change makes them concurrent. No open race remains. Audited
-2026-05-10; closed 2026-05-17.
+status writes that remain are **synchronous single-request,
+non-duplicate-delivery** paths: the PayPal/Square capture+refresh helpers
+(`paypal_payments`, `payments.charge_payment` — themselves now routed
+through the fused CAS), the onsite credit/cash views (routed through the
+CAS in `onsite_admin.py`), and a permission-failure status *revert* in a
+staff `@admin.action` (`registration/admin.py` `process_refund`,
+`obj.status = status`). The admin path is a single staff request, not a
+provider duplicate-delivery surface; it is the documented residual, not
+an open webhook race.
+
+**Accurate scope (peer-review R2):** the **webhook order-completion
+race** (the P1 this item names — duplicate Square/PayPal deliveries
+double-completing + double-decrementing capacity + double-emailing) is
+CLOSED and CI-gated (`transition_order_status` CAS + Pattern-A row locks
++ `make lint-status-writers` enforced in `.github/workflows/lint.yml`).
+It is NOT claimed that *every* `Order.status` writer in the codebase
+goes through the primitive — the synchronous/admin writers above are
+intentionally out of the P1 race scope and tracked here.
+
+**CI-status note (peer-review honesty):** the locking tests
+(`test_concurrency.py`, `test_onsite.py`, …) are DB-backed and have NOT
+been executed in CI for the post-`ead14e6` commits on this branch (no
+local Postgres; CI runs on the user's PR-sync). Treat the closure as
+**locally-gated, CI-verification-pending** until the synced PR run is
+green. Audited 2026-05-10; remediated 2026-05-17 (CI-pending).
 
 **Original assessment (retained for context):**
 

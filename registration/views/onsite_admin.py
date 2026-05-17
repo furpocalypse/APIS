@@ -613,7 +613,7 @@ def complete_square_transaction(request):
     # idempotent vs a concurrent Square webhook) instead of a raw
     # status flip + save that skipped capacity and could clobber a
     # parallel webhook winner.
-    payments.transition_order_status(
+    won = payments.transition_order_status(
         order,
         Order.COMPLETED,
         expected=[Order.PENDING, Order.CAPTURED],
@@ -625,9 +625,21 @@ def complete_square_transaction(request):
         },
         refresh=False,
     )
+    # Peer-review R2 (Adversarial): the CAS owns the status+capacity
+    # transition. Sync the in-memory status so refresh_payment's
+    # internal old/new is consistent, and tell it NOT to re-apply
+    # capacity — otherwise a CAS loss (a parallel Square webhook already
+    # completed + confirmed capacity) followed by this unconditional
+    # refresh_payment double-decremented the tier (reintroduced BLOCK-3).
+    if won:
+        # In-memory mirror of the CAS we just won (no DB write here);
+        # refresh_payment(update_capacity=False) follows.
+        order.status = Order.COMPLETED  # status-writer-ok: in-memory CAS mirror
+    else:
+        order.refresh_from_db()
 
     if paymentId:
-        status, errors = payments.refresh_payment(order, store_api_data)
+        status, errors = payments.refresh_payment(order, store_api_data, update_capacity=False)
         if not status:
             return JsonResponse({"success": False, "error": errors}, status=210)
 

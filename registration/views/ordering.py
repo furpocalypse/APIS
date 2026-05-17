@@ -631,7 +631,13 @@ def checkout(request):
             charityDonation=pcharity,
             billingType=Order.UNPAID,
         )
-        order.status = "Onsite Pending"
+        # Initial creation of a fresh onsite Order (a row insert, not a
+        # race-prone transition — it is later moved to a terminal status
+        # by complete_square/complete_cash via the CAS primitive). The
+        # legacy "Onsite Pending" sentinel string is preserved as-is;
+        # changing it is a separate semantic question out of peer-review
+        # scope.
+        order.status = "Onsite Pending"  # status-writer-ok: initial create
         order.save()
 
         if cart_items:

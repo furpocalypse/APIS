@@ -330,7 +330,9 @@ def format_errors(errors: list[Error]) -> str:
     return error_string
 
 
-def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None]:
+def refresh_payment(
+    order: Order, store_api_data=None, *, update_capacity: bool = True
+) -> tuple[bool, str | None]:
     """
     Queries the payment gateway to update payment information on an order.
 
@@ -424,11 +426,17 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
         message = "Refunded order has caused charity and organization donation amounts to reset."
         logger.warning(message)
         order.notes += f"\n{timezone.now()}: {message}"
-        update_capacity_for_status_change(order, old_status, order.status)
+        # Peer-review R2: when the caller already owns the status+capacity
+        # transition (complete_square_transaction's fused CAS), the
+        # capacity move must NOT be re-applied here — that double-
+        # decremented the tier on the CAS-loser/webhook-won path.
+        if update_capacity:
+            update_capacity_for_status_change(order, old_status, order.status)
         order.save()
         return False, message
 
-    update_capacity_for_status_change(order, old_status, order.status)
+    if update_capacity:
+        update_capacity_for_status_change(order, old_status, order.status)
     order.save()
     return True, None
 

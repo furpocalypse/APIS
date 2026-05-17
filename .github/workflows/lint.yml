@@ -25,6 +25,13 @@ jobs:
         run: uv run ruff check --output-format=github .
       - name: ruff format --check
         run: uv run ruff format --check .
+      # Peer-review R2 (Radical-Doubt CLAIM-1): the S24 / plan-721-723
+      # status-writer invariant must be ENFORCED in CI, not just
+      # available via `make lint-all`. Blocking.
+      - name: status-writer gate (no raw Order.status in views)
+        run: make lint-status-writers
+      - name: S20 module-level env-read sweep
+        run: make lint-env-sweep
 
   # Non-blocking (Phase B): surfaces the backlog without gating merges.
   # Phase C flips these to blocking once the backlog is triaged.
