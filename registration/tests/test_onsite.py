@@ -93,12 +93,17 @@ class OnsiteBaseTestCase(TestCase):
 
     def bind_terminal(self, terminal):
         """Set the signed terminal-token cookie proving possession of
-        ``terminal`` (mirrors registration.views.onsite_admin)."""
-        from django.core.signing import TimestampSigner
+        ``terminal`` using the *canonical* issuer.
 
-        self.client.cookies["terminal-token"] = TimestampSigner().sign_object(
-            {"terminal": terminal.name}
-        )
+        Decision #10 peer-review ATTACK-1/2 moved the terminal-token to a
+        salted, id+rotation-epoch-bound context (registration.signing);
+        the old plain-``TimestampSigner({"terminal": name})`` blob is now
+        rejected by the strict shape/salt check in ``resolve_terminal_token``.
+        Mint via the exact production issuer ``mint_terminal_token`` so the
+        test's issuer and the view's verifier stay paired."""
+        from registration.signing import mint_terminal_token
+
+        self.client.cookies["terminal-token"] = mint_terminal_token(terminal)
 
     def add_to_cart(self, level, options):
         form_data = {
