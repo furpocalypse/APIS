@@ -12,7 +12,25 @@ picks them up with full context rather than rediscovering the issue.
 
 ## P1 #5 — Webhook order-completion race (Order.status writers + capacity counters)
 
-**Status:** planned — deferred to a focused PR. Audited 2026-05-10.
+**Status:** P1 race CLOSED in-band (S24, commit `ebb766e`). The fused
+compare-and-set primitive `registration.payments.transition_order_status`
+now exists; the documented race (duplicate `PAYMENT.CAPTURE.COMPLETED`
+→ duplicate registration email + capacity double-decrement) is fixed and
+proven by `test_concurrency.py::TestWebhookOrderCompletionRace` (CI). The
+synchronous-checkout finalization path was migrated; the auto-expiry job
+was confirmed already race-safe (Pattern A). **Residual sweep (tracked,
+non-P1):** the secondary Square webhook refund/dispute processors
+(`payments.process_webhook_*`) and the synchronous PayPal/Square
+capture+refresh writers still set status directly — these are lower
+severity (refund/dispute double-application, partly idempotent via the
+existing `refund_exists` skip + the durable `PaymentWebhookNotification
+(integration, event_id)` ingestion dedup). They migrate through the
+now-available primitive (Pattern A row-lock for the async processors;
+`expected`/`exclude` CAS for the synchronous ones) as bounded follow-up
+work; the enabling primitive + the security-load-bearing P1 fix are
+landed. Audited 2026-05-10; primitive landed 2026-05-17.
+
+**Original assessment (retained for context):**
 
 **Risk:** Two webhook deliveries for the same order arriving on different
 gunicorn workers within milliseconds can both pass the read-time
