@@ -84,6 +84,21 @@ def content_file_name(instance, filename):
     return "/".join(["priceleveloption", str(instance.pk), filename])
 
 
+def default_registration_email():
+    """S32: Event email-field default.
+
+    Using ``default=settings.APIS_DEFAULT_EMAIL`` (evaluated at model-class
+    definition time) made ``makemigrations`` env-dependent: whenever
+    ``APIS_DEFAULT_EMAIL`` differed from the value baked into migration
+    0121, ``makemigrations --check`` reported a spurious Event
+    ``AlterField`` (the long-standing S32 noise). Django serializes a
+    *callable* default by its import path, not its resolved value, so the
+    migration graph is now stable regardless of the env var while new
+    Event rows still pick up the configured address at creation time.
+    """
+    return settings.APIS_DEFAULT_EMAIL
+
+
 class PriceLevelOption(models.Model):
     optionName = models.CharField(max_length=200)
     optionPrice = models.DecimalField(max_digits=6, decimal_places=2)
@@ -518,21 +533,21 @@ class Event(LookupTable):
         verbose_name="Registration Email",
         help_text="Email to display on error messages for attendee registration",
         blank=True,
-        default=settings.APIS_DEFAULT_EMAIL,
+        default=default_registration_email,
     )
     staffEmail = models.CharField(
         max_length=200,
         verbose_name="Staff Email",
         help_text="Email to display on error messages for staff registration",
         blank=True,
-        default=settings.APIS_DEFAULT_EMAIL,
+        default=default_registration_email,
     )
     dealerEmail = models.CharField(
         max_length=200,
         verbose_name="Dealer Email",
         help_text="Email to display on error messages for dealer registration",
         blank=True,
-        default=settings.APIS_DEFAULT_EMAIL,
+        default=default_registration_email,
     )
     badgeTheme = models.CharField(
         max_length=200,
