@@ -443,7 +443,12 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         order.refresh_from_db()
         self.assertEqual(order.billingType, Order.CREDIT)
         self.assertEqual(order.status, Order.COMPLETED)
-        mock_refresh_payment.assert_called_once()
+        # Peer-review R3 (Test-Coverage): the CAS owns capacity on this
+        # path — refresh_payment MUST be invoked with update_capacity=
+        # False, else the BLOCK-3 double-decrement silently returns.
+        mock_refresh_payment.assert_called_once_with(
+            order, {"payment": {"id": "JUNK"}}, update_capacity=False
+        )
 
 
 @override_settings(

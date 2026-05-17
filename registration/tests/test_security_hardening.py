@@ -144,9 +144,24 @@ class TestPIIRedaction(SimpleTestCase):
 
     def test_filter_keeps_ip_masks_pan_same_line(self):
         record = self._record(
-            "peer 10.1.2.3 sent card 4111 1111 1111 1111",
+            "peer 198.51.100.234 sent card 4111 1111 1111 1111",
         )
         self.filter.filter(record)
         msg = record.getMessage()
-        self.assertIn("10.1.2.3", msg)
+        # 198.51.100.234 has a 12-digit run that _PHONE_RE would have
+        # eaten pre-FIX-C — non-vacuous IP-survival assertion.
+        self.assertIn("198.51.100.234", msg)
         self.assertIn("[redacted-pan]", msg)
+
+    def test_ip_literal_email_domain_still_redacted(self):
+        # Blue Team F4: an email whose domain is an IPv4 literal must NOT
+        # escape redaction just because the IPv4-span carve-out protects
+        # bare audit IPs. Email is redacted over the full text first.
+        for addr in ("admin@192.168.1.1", "joe@10.0.0.5", "x@127.0.0.1"):
+            out = redact(f"login from {addr} failed")
+            self.assertNotIn(addr, out, f"{addr} leaked")
+            self.assertIn("[redacted-email]", out)
+        # A bare (non-email) audit IP is still preserved alongside.
+        out = redact("peer 203.0.113.45 user bob@example.com")
+        self.assertIn("203.0.113.45", out)
+        self.assertNotIn("bob@example.com", out)

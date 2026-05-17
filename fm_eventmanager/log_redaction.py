@@ -34,8 +34,13 @@ _PAN_RE = re.compile(r"\b(?:\d[ -]?){13,19}\b")
 # E.164 and common national formats without devouring short numerics.
 _PHONE_RE = re.compile(r"(?<!\w)\+?\d(?:[\d ().-]{7,15})\d(?!\w)")
 
+# Only PAN/phone need the IP/timestamp carve-out (a dotted-quad / ISO
+# digit-run false-matches them). Email is NEVER an audit where/when
+# field, so it is redacted over the FULL text up-front — otherwise an
+# IP-literal email domain (admin@192.168.1.1) would have its domain
+# protected as an "IPv4 span" and the email would escape redaction
+# (peer-review Blue Team F4 regression).
 _SUBSTITUTIONS = (
-    (_EMAIL_RE, "[redacted-email]"),
     (_PAN_RE, "[redacted-pan]"),
     (_PHONE_RE, "[redacted-phone]"),
 )
@@ -56,9 +61,12 @@ _ISO_DT_RE = re.compile(
 def redact(text: str) -> str:
     """Mask email / PAN / phone substrings, leaving client IPs and
     ISO-8601 timestamps (audit "where"/"when") intact."""
-    # Collect protected spans (IPv4 / ISO datetime) and only redact the
-    # text between them, so an attacker source IP or reject timestamp in
-    # a security log line is never collapsed into [redacted-phone].
+    # Email first, over the WHOLE string (incl. any IP-literal domain) —
+    # email is not an audit where/when value, so it gets no IP/timestamp
+    # carve-out (Blue Team F4).
+    text = _EMAIL_RE.sub("[redacted-email]", text)
+    # Then PAN/phone, protecting IPv4 / ISO-datetime spans so an attacker
+    # source IP or reject timestamp is never collapsed into a redaction.
     protected = sorted(
         (m.start(), m.end()) for rx in (_IPV4_RE, _ISO_DT_RE) for m in rx.finditer(text)
     )

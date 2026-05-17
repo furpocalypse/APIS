@@ -625,23 +625,23 @@ def complete_square_transaction(request):
         },
         refresh=False,
     )
-    # Peer-review R2 (Adversarial): the CAS owns the status+capacity
-    # transition. Sync the in-memory status so refresh_payment's
-    # internal old/new is consistent, and tell it NOT to re-apply
-    # capacity — otherwise a CAS loss (a parallel Square webhook already
-    # completed + confirmed capacity) followed by this unconditional
-    # refresh_payment double-decremented the tier (reintroduced BLOCK-3).
+    # Peer-review R2/R3 (Adversarial / Blue Team F5): the CAS owns the
+    # status+capacity transition. Only the WINNER reconciles with Square
+    # via refresh_payment. On a CAS LOSS a parallel Square webhook
+    # already finalized this order (status + capacity + apiData), so
+    # re-running refresh_payment here would be a non-CAS full-row write
+    # racing/clobbering that winner on apiData/total for no benefit —
+    # skip it and report success (the order IS completed). On a WIN,
+    # refresh_payment runs with update_capacity=False (the CAS already
+    # moved capacity exactly once — re-applying it was the BLOCK-3
+    # double-decrement).
     if won:
-        # In-memory mirror of the CAS we just won (no DB write here);
-        # refresh_payment(update_capacity=False) follows.
+        # In-memory mirror of the CAS we just won (no DB write here).
         order.status = Order.COMPLETED  # status-writer-ok: in-memory CAS mirror
-    else:
-        order.refresh_from_db()
-
-    if paymentId:
-        status, errors = payments.refresh_payment(order, store_api_data, update_capacity=False)
-        if not status:
-            return JsonResponse({"success": False, "error": errors}, status=210)
+        if paymentId:
+            status, errors = payments.refresh_payment(order, store_api_data, update_capacity=False)
+            if not status:
+                return JsonResponse({"success": False, "error": errors}, status=210)
 
     admin_push_cart_refresh(request)
 
