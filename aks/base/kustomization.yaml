@@ -22,6 +22,7 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - secretproviderclass.yaml
+  - job-migrate.yaml
   - deployment-app.yaml
   - deployment-worker.yaml
   - statefulset-postgres.yaml

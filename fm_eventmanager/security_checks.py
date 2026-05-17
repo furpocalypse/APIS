@@ -36,3 +36,30 @@ def assert_strong_mqtt_secret(secret: str | None) -> None:
             "(the HMAC-SHA256 key floor) when APIS_ENV=production; "
             "configure a stronger secret."
         )
+
+
+# The documented copy-the-example placeholder for TRUSTED_PROXY_CIDRS
+# (.env.production.example / aks overlay). Shipping it unchanged silently
+# disables/​mis-scopes MED-13's peer-CIDR anti-spoof check.
+TRUSTED_PROXY_PLACEHOLDER = "10.224.0.0/16"
+
+
+def assert_no_placeholder_proxy_cidrs(cidrs) -> None:
+    """Peer-review (General Opinion / Adversarial): fail loud if the
+    documented TRUSTED_PROXY_CIDRS placeholder was shipped unchanged.
+
+    An EMPTY list is intentionally allowed — it is the legitimate T1
+    (Cloudflare→nginx origin-lock) production posture. Only the unmodified
+    placeholder is a definite misconfiguration.
+
+    Raises:
+        RuntimeError: if ``TRUSTED_PROXY_PLACEHOLDER`` is in ``cidrs``.
+    """
+    if TRUSTED_PROXY_PLACEHOLDER in (cidrs or []):
+        raise RuntimeError(
+            "TRUSTED_PROXY_CIDRS still contains the documented placeholder "
+            f"{TRUSTED_PROXY_PLACEHOLDER!r}. Set the real upstream proxy "
+            "CIDR (docs/deploy-preflight.md MED-12/MED-13) or, for the T1 "
+            "nginx-origin-lock topology, set TRUSTED_PROXY_CIDRS empty "
+            "deliberately."
+        )

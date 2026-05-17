@@ -14,7 +14,10 @@ import os
 
 from idempotency_key import status
 
-from fm_eventmanager.security_checks import assert_strong_mqtt_secret
+from fm_eventmanager.security_checks import (
+    assert_no_placeholder_proxy_cidrs,
+    assert_strong_mqtt_secret,
+)
 
 
 def eval_bool(x):
@@ -905,6 +908,17 @@ if _IS_PROD and not ALLAUTH_TRUSTED_CLIENT_IP_HEADER:
 # unit-testable without importing this module.
 if _IS_PROD:
     assert_strong_mqtt_secret(MQTT_JWT_SECRET)
+
+# Peer-review (General Opinion / Adversarial non-block-1): MED-13's
+# RequireClientIPMiddleware peer-CIDR check silently no-ops when
+# TRUSTED_PROXY_CIDRS is empty. An empty list is a LEGITIMATE production
+# choice for the T1 (Cloudflare→nginx) topology, where nginx does its own
+# realip origin-lock — so we do NOT hard-fail on empty. But shipping the
+# documented copy-the-example PLACEHOLDER unchanged is unambiguously a
+# misconfiguration (the operator never set their real AppGW/LB CIDR), so
+# that fails loud at boot instead of silently disabling the control.
+if _IS_PROD:
+    assert_no_placeholder_proxy_cidrs(TRUSTED_PROXY_CIDRS)
 
 # S35: security-logging observability contract. Named loggers with pinned
 # WARNING levels so the detection signals this remediation adds

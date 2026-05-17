@@ -101,14 +101,23 @@ done
 
 ## Per-deploy workflow
 
+**Single-locus migration (S34 / peer-review):** app + worker pods do
+NOT run `migrate` (`APIS_RUN_MIGRATIONS=0` in `apis-config.env`; with
+`replicas: 2` they would otherwise race a destructive migration). The
+dedicated `apis-migrate` **Job** is the one locus. A `Job` is immutable
+on spec, so each deploy must delete-then-recreate it BEFORE rolling the
+Deployments:
+
 ```bash
 # Validate without applying
 kubectl kustomize aks/overlays/prod | kubectl apply --dry-run=client -f -
 
-# Apply
-kubectl apply -k aks/overlays/prod
+# 1. Run migrations exactly once (delete the prior immutable Job first)
+kubectl -n apis delete job apis-migrate --ignore-not-found
+kubectl apply -k aks/overlays/prod          # recreates the Job + all manifests
+kubectl -n apis wait --for=condition=complete job/apis-migrate --timeout=600s
 
-# Watch the rollout
+# 2. Roll the app/worker Deployments only AFTER migrations completed
 kubectl -n apis rollout status deploy/apis-app
 kubectl -n apis rollout status deploy/apis-worker
 kubectl -n apis get pods,svc,ingress

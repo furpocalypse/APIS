@@ -13,6 +13,8 @@ from django.test import SimpleTestCase
 from fm_eventmanager.log_redaction import PIIRedactingFilter, redact
 from fm_eventmanager.security_checks import (
     MQTT_MIN_KEY_BYTES,
+    TRUSTED_PROXY_PLACEHOLDER,
+    assert_no_placeholder_proxy_cidrs,
     assert_strong_mqtt_secret,
 )
 
@@ -47,6 +49,26 @@ class TestMqttSecretStrength(SimpleTestCase):
         strong = base64.b64encode(b"x" * MQTT_MIN_KEY_BYTES).decode()
         # Must not raise.
         assert_strong_mqtt_secret(strong)
+
+
+class TestProxyCidrPlaceholderGuard(SimpleTestCase):
+    """Peer-review: prod must fail loud on the unmodified placeholder,
+    but an intentionally-empty list (T1 nginx origin-lock) is allowed."""
+
+    def test_placeholder_rejected(self):
+        with self.assertRaises(RuntimeError):
+            assert_no_placeholder_proxy_cidrs([TRUSTED_PROXY_PLACEHOLDER])
+
+    def test_placeholder_among_others_rejected(self):
+        with self.assertRaises(RuntimeError):
+            assert_no_placeholder_proxy_cidrs(["10.1.2.0/24", TRUSTED_PROXY_PLACEHOLDER])
+
+    def test_empty_allowed(self):
+        assert_no_placeholder_proxy_cidrs([])  # legitimate T1 posture
+        assert_no_placeholder_proxy_cidrs(None)
+
+    def test_real_cidr_allowed(self):
+        assert_no_placeholder_proxy_cidrs(["10.10.0.0/24", "172.16.4.0/22"])
 
 
 class TestPIIRedaction(SimpleTestCase):

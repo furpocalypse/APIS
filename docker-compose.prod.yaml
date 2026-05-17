@@ -69,8 +69,21 @@ services:
       # http-01 if you ever need it) and host:443 -> container:443.
       - "80:80"
       - "443:443"
+    env_file:
+      # Single source of truth (Decision #11 / S30): the sidecar reads
+      # TRUSTED_PROXY_CIDRS / CLIENT_IP_HEADER from the SAME .env.production
+      # the app uses, so proxy-mode config can't drift between the two.
+      # The explicit `environment:` below still wins for nginx-only keys.
+      - .env.production
     environment:
-      TRUSTED_PROXY_MODE: cloudflare
+      # S13 decision-table case (c) + peer-review reconciliation: the
+      # safe default is `proxy` (trust ONLY the confirmed upstream CIDR,
+      # no Cloudflare-edge 403) until the real Azure-LB TCP peer is
+      # empirically established. This now matches .env.production.example
+      # (TRUSTED_PROXY_MODE=proxy) — the two artifacts no longer
+      # contradict. Switch to `cloudflare` ONLY with the documented
+      # $realip_remote_addr capture (see nginx/README.md / S13).
+      TRUSTED_PROXY_MODE: proxy
       # Replace with the FQDN(s) your Cloudflare Origin Certificate covers.
       NGINX_SERVER_NAMES: registration.furpocalypse.org www.registration.furpocalypse.org
       NGINX_UPSTREAM: app:8000
