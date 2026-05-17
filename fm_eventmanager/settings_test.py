@@ -37,3 +37,29 @@ CELERY_TASK_EAGER_PROPAGATES = True
 # PaymentWebhookNotification dedup, plan S38). Keep a real future-skew.
 WEBHOOK_MAX_AGE_SECONDS = int(os.getenv("WEBHOOK_MAX_AGE_SECONDS", str(60 * 60 * 24 * 365 * 100)))
 WEBHOOK_FUTURE_SKEW_SECONDS = int(os.getenv("WEBHOOK_FUTURE_SKEW_SECONDS", "300"))
+
+# --- django-axes: test-runner posture (S3 / S6 / S10) --------------------
+# PR #41 added "axes.backends.AxesStandaloneBackend" as the FIRST entry of
+# AUTHENTICATION_BACKENDS (settings_base). Django's test client
+# `Client.login()` (django/test/client.py: `authenticate(**credentials)`)
+# calls authenticate() WITHOUT a request by design. django-axes 8.3.1 wraps
+# `AxesStandaloneBackend.authenticate` with `@toggleable` (axes/helpers.py:
+# `inner` -> "if settings.AXES_ENABLED: return func(...)"); with AXES_ENABLED
+# False the backend never runs and authenticate() falls through to
+# ModelBackend — exactly the pre-PR-#41 behaviour. With it True and no
+# request, axes/backends.py:46 raises AxesBackendRequestParameterRequired,
+# which is why all ~40 admin/onsite/printing tests that use
+# `self.client.login()` (a session-establishment scaffold, not an auth test)
+# ERROR. This flag is defined ONLY in this test module — it is never read by
+# settings_base, so production (untracked settings.py -> settings_base, axes
+# default True, APIS_ENV=production guards) is unaffected: the S3 BLOCKING
+# non-regression acceptance (no prod AXES_FAILURE_LIMIT change, no
+# RequireClientIP/CSRF change) holds by construction (grep-verifiable: this
+# name appears only here). Real axes lockout behaviour at the configured
+# limit is positively proven by registration.tests.test_middleware
+# .TestAxesLockoutAtConfiguredLimit, which @override_settings(AXES_ENABLED=
+# True) and exercises the real /accounts/login/ endpoint (S3 test (a) / S10 /
+# S6-shared). The e2e/playwright "controls active" posture (S3 test (c)) is
+# owned by S3: the e2e harness exports APIS_TEST_AXES_ENABLED=1 so the
+# Playwright run keeps axes active while the unit runner defaults it off.
+AXES_ENABLED = eval_bool(os.getenv("APIS_TEST_AXES_ENABLED", "false"))  # noqa: F405
