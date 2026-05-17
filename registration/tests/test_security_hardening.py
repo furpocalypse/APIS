@@ -94,3 +94,37 @@ class TestPIIRedaction(SimpleTestCase):
         # unredacted rather than the filter throwing.
         record = self._record("bad %d format", "not-an-int")
         self.assertTrue(self.filter.filter(record))
+
+    # Peer-review Blue Team F1/F2/F3: the client IP ("where") and event
+    # timestamp ("when") of a security audit line must survive redaction
+    # while co-located true PII is still masked.
+    def test_ipv4_preserved_in_med13_reject_line(self):
+        line = (
+            "RequireClientIPMiddleware: rejecting request whose peer is not "
+            "in TRUSTED_PROXY_CIDRS. path=/x host=h remote_addr='203.0.113.45' "
+            "xff='198.51.100.23, evil@example.com'"
+        )
+        out = redact(line)
+        self.assertIn("203.0.113.45", out)
+        self.assertIn("198.51.100.23", out)
+        self.assertIn("[redacted-email]", out)  # co-located PII still masked
+        self.assertNotIn("evil@example.com", out)
+
+    def test_iso_timestamp_preserved_in_webhook_age_line(self):
+        line = (
+            "PayPal webhook timestamp 2026-05-17T00:00:00.123456+00:00 is "
+            "4500s old; contact billing@example.org"
+        )
+        out = redact(line)
+        self.assertIn("2026-05-17T00:00:00.123456+00:00", out)
+        self.assertIn("[redacted-email]", out)
+        self.assertNotIn("billing@example.org", out)
+
+    def test_filter_keeps_ip_masks_pan_same_line(self):
+        record = self._record(
+            "peer 10.1.2.3 sent card 4111 1111 1111 1111",
+        )
+        self.filter.filter(record)
+        msg = record.getMessage()
+        self.assertIn("10.1.2.3", msg)
+        self.assertIn("[redacted-pan]", msg)

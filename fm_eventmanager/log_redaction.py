@@ -40,12 +40,44 @@ _SUBSTITUTIONS = (
     (_PHONE_RE, "[redacted-phone]"),
 )
 
+# Peer-review (Blue Team F1/F2): a client IP and an event timestamp are
+# the "where"/"when" of a security audit line — NOT PII this redactor is
+# chartered to remove. But a bare IPv4 dotted-quad matches _PHONE_RE and
+# an ISO-8601 timestamp's digit runs match _PHONE_RE/_PAN_RE, so naive
+# redaction destroyed the forensic value of the MED-13 / unresolvable-IP
+# / webhook-age reject lines. Spans matching these are protected:
+# substitutions are applied only OUTSIDE them. (IPv6 already survived.)
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_ISO_DT_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+
 
 def redact(text: str) -> str:
-    """Return ``text`` with email / PAN / phone substrings masked."""
+    """Mask email / PAN / phone substrings, leaving client IPs and
+    ISO-8601 timestamps (audit "where"/"when") intact."""
+    # Collect protected spans (IPv4 / ISO datetime) and only redact the
+    # text between them, so an attacker source IP or reject timestamp in
+    # a security log line is never collapsed into [redacted-phone].
+    protected = sorted(
+        (m.start(), m.end()) for rx in (_IPV4_RE, _ISO_DT_RE) for m in rx.finditer(text)
+    )
+    out = []
+    cursor = 0
+    for start, end in protected:
+        if start < cursor:  # overlapping span already covered
+            continue
+        segment = text[cursor:start]
+        for pattern, replacement in _SUBSTITUTIONS:
+            segment = pattern.sub(replacement, segment)
+        out.append(segment)
+        out.append(text[start:end])  # protected, verbatim
+        cursor = end
+    tail = text[cursor:]
     for pattern, replacement in _SUBSTITUTIONS:
-        text = pattern.sub(replacement, text)
-    return text
+        tail = pattern.sub(replacement, tail)
+    out.append(tail)
+    return "".join(out)
 
 
 class PIIRedactingFilter(logging.Filter):
