@@ -25,9 +25,11 @@ def check_state(data: dict, country_field: str, state_field: str):
 class FirebaseForm(ModelForm):
     class Meta:
         model = Firebase
+        # Decision #8: no plaintext `token` field exists on the model (it
+        # is stored hash-only); the bearer token is minted server-side at
+        # create/rotation and shown once — never an editable form field.
         fields = (
             "name",
-            "token",
             "cashdrawer",
             "payment_type",
             "square_terminal_id",

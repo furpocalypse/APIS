@@ -90,32 +90,61 @@ class FirebaseAdmin(admin.ModelAdmin):
         return my_urls + urls
 
     def save_model(self, request, obj, form, change):
-        obj.save()
-
-        registration.views.onsite_admin.send_mqtt_message_to_terminal(
-            obj, "payment/update/config", self.get_provisioning(obj)
-        )
+        if not change:
+            # New terminal: mint its bearer token now (in memory only),
+            # persist ONLY the hash, push the full provisioning (with the
+            # token) to the device, and surface the plaintext to the
+            # operator exactly once — it is never recoverable afterwards
+            # (Decision #8 / Round-4, ASVS V2.10.4).
+            plaintext = obj.mint_token()
+            obj.save()
+            registration.views.onsite_admin.send_mqtt_message_to_terminal(
+                obj,
+                "payment/update/config",
+                self.get_provisioning(obj, token=plaintext),
+            )
+            messages.warning(
+                request,
+                "Terminal bearer token (shown once — copy it now, it "
+                "cannot be retrieved later): %s" % plaintext,
+            )
+        else:
+            # Routine edit (rename/close/theme/…): push the config update
+            # WITHOUT a token. Round-4: a non-rotation edit must never
+            # carry an empty/absent token that would brick a live device.
+            # Rotation is the explicit action on the provisioning page.
+            obj.save()
+            registration.views.onsite_admin.send_mqtt_message_to_terminal(
+                obj, "payment/update/config", self.get_provisioning(obj)
+            )
 
     @staticmethod
-    def get_provisioning(firebase):
+    def get_provisioning(firebase, *, token=None):
         current_site = Site.objects.get_current()
         endpoint = "https://{0}".format(current_site.domain)
-        token = mqtt.get_payment_token(firebase)
+        mqtt_token = mqtt.get_payment_token(firebase)
 
-        return {
+        provisioning = {
             "terminalName": firebase.name,
             "endpoint": endpoint,
-            "token": firebase.token,
             "webViewUrl": firebase.webview,
             "themeColor": firebase.background_color,
             "mqttHost": settings.MQTT_EXTERNAL_BROKER,
             "mqttPort": 443,
-            "mqttUsername": token["user"],
-            "mqttPassword": token["token"],
-            "mqttPrefix": token["root_topic"],
+            "mqttUsername": mqtt_token["user"],
+            "mqttPassword": mqtt_token["token"],
+            "mqttPrefix": mqtt_token["root_topic"],
             "squareApplicationId": settings.SQUARE_APPLICATION_ID,
             "squareLocationId": settings.REGISTER_SQUARE_LOCATION,
         }
+        # Decision #8 / Round-4: include the bearer token ONLY when a
+        # freshly-minted plaintext is supplied in THIS request (create or
+        # explicit rotation). The server stores only the hash, so a
+        # routine display/edit has no token to emit — the key is omitted
+        # entirely rather than pushed empty.
+        if token is not None:
+            provisioning["token"] = token
+        return provisioning
 
     @staticmethod
     def get_qrcode(data):
@@ -126,14 +155,31 @@ class FirebaseAdmin(admin.ModelAdmin):
 
     def provision_view(self, request, pk):
         obj = Firebase.objects.get(id=pk)
-        provisioning = json.dumps(self.get_provisioning(obj))
 
         receipt_token = mqtt.get_receipt_token(obj)
         station_token = mqtt.get_station_token(obj)
         state_token = mqtt.get_state_token(obj)
 
+        qr_svg = None
+        rotated = False
+        if request.method == "POST" and request.user.is_superuser:
+            # Explicit rotation only (never on GET): mint a new token,
+            # which invalidates the previous one because only the new
+            # hash remains; persist; re-push the full config over the
+            # existing MQTT path; render the pairing QR exactly once.
+            plaintext = obj.mint_token()
+            obj.save()
+            provisioning = self.get_provisioning(obj, token=plaintext)
+            registration.views.onsite_admin.send_mqtt_message_to_terminal(
+                obj, "payment/update/config", provisioning
+            )
+            qr_svg = self.get_qrcode(json.dumps(provisioning)).decode("utf-8")
+            rotated = True
+
         context = {
-            "qr_svg": self.get_qrcode(provisioning).decode("utf-8"),
+            "qr_svg": qr_svg,
+            "rotated": rotated,
+            "terminal": obj,
             "receipt_token": receipt_token,
             "station_token": station_token,
             "state_token": state_token,

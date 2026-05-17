@@ -4,6 +4,7 @@
 # e2e/playwright/scripts/up.sh, .github/workflows). Inherits the base's
 # binding invariants (S2b E2E_MODE, D-IP header, S35 logging) — those are
 # keyed off APIS_ENV=production, never set in CI, so they no-op here.
+import base64
 import os
 
 from .settings_base import *  # noqa: F401,F403
@@ -23,6 +24,19 @@ STATIC_ROOT = os.getenv("STATIC_ROOT", "/tmp/apis-test-static")
 SQUARE_ENVIRONMENT = os.getenv("SQUARE_ENVIRONMENT", "sandbox")
 PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "sandbox")
 PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
+
+# mqtt.get_token() does base64.b64decode(settings.MQTT_JWT_SECRET) then
+# jwt.encode(...). The base reads MQTT_JWT_SECRET from the environment
+# (a real secret in prod); neither the Makefile TEST_ENV nor the CI
+# django.yml env sets it, so without a test-only default any test that
+# reaches get_token (terminal provisioning/QR — S17/S21) raises
+# `TypeError: ... not 'NoneType'` in b64decode. Provide a deterministic,
+# valid-base64 HS256 key for the suite (env-overridable). Test-only:
+# settings_base never assigns this, so prod is unaffected.
+MQTT_JWT_SECRET = os.getenv(
+    "MQTT_JWT_SECRET",
+    base64.b64encode(b"apis-test-only-mqtt-jwt-hs256-secret-key").decode(),
+)
 
 # Celery executes eagerly so .delay() side effects (mail.outbox, mocked
 # tasks) resolve before the HTTP response. Base already defaults eager;

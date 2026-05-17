@@ -21,8 +21,12 @@ class OnsiteBaseTestCase(TestCase):
         self.normal_user.staff_member = False
         self.normal_user.save()
 
-        # Create some test terminals to push notifications to
-        self.terminal = Firebase.objects.create(token="test", name="Terminal 1")
+        # Create some test terminals to push notifications to. Decision #8:
+        # the bearer token is stored hash-only; mint it and keep the
+        # plaintext for Bearer-auth assertions in this suite.
+        self.terminal = Firebase(name="Terminal 1")
+        self.terminal_token = self.terminal.mint_token()
+        self.terminal.save()
 
         # At least one event always mandatory
         self.event = Event.objects.create(**DEFAULT_EVENT_ARGS)
@@ -220,7 +224,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         response = self.client.get(reverse("registration:onsite_admin"))
         self.assertEqual(response.status_code, 200)
 
-        self.terminal = Firebase(token="test", name="Terminal 1")
+        self.terminal = Firebase(name="Terminal 1")
+        self.terminal_token = self.terminal.mint_token()
         self.terminal.save()
 
         response = self.client.get(
@@ -405,7 +410,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             reverse("registration:complete_square_transaction"),
             json.dumps(args),
             content_type="application/json",
-            headers={"authorization": f"Bearer {self.terminal.token}"},
+            headers={"authorization": f"Bearer {self.terminal_token}"},
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()

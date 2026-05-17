@@ -487,9 +487,11 @@ def complete_square_transaction(request):
             {"success": False, "reason": "Invalid authorization"}, status=401
         )
 
-    # P1.9: lookup via SHA-256 hash + constant-time compare. Plaintext
-    # tokens are never matched against the DB column directly — that path
-    # is timing-attackable and stores a bearer in the clear.
+    # Decision #8 / RT-B1: tokens are stored hash-only (no plaintext
+    # column). find_by_token hashes the presented bearer and does an
+    # indexed lookup; a miss returns the generic 401 below — no
+    # token-existence oracle. This is NOT a constant-time comparison and
+    # makes no such claim; hashed-at-rest + generic 401 is the control.
     terminal = Firebase.find_by_token(token)
     if terminal is None:
         return JsonResponse(
@@ -1217,7 +1219,7 @@ def attendee_details(request):
 def terminal_square_token(request):
     key = request.headers.get("authorization").removeprefix("Bearer ")
 
-    # P1.9: see complete_square_transaction comment.
+    # Decision #8 / RT-B1: see complete_square_transaction comment.
     terminal = Firebase.find_by_token(key)
     if terminal is None:
         return JsonResponse(

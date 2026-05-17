@@ -1,5 +1,7 @@
+import hashlib
 import logging
 import random
+import secrets
 import string
 import uuid
 from datetime import datetime
@@ -1223,15 +1225,13 @@ class Firebase(models.Model):
         (MQTT_REGISTER_APP, "iPad"),
         (SQUARE_TERMINAL, "Square Terminal"),
     )
-    # P1.9: token plaintext is kept transitionally so existing provisioned
-    # terminals continue to authenticate. New code MUST look up Firebase
-    # rows via :meth:`find_by_token` (constant-time compare against the
-    # SHA-256 hash). A future cleanup will null this field out and drop it
-    # entirely once admin-side rotation has been completed for every
-    # terminal. ASVS V2.10.4: no plaintext bearer tokens at rest.
-    token = models.CharField(max_length=500, default=uuid.uuid4)
-    # SHA-256 hex of the plaintext token. Indexed for fast lookup; the
-    # constant-time comparison happens on the resolved row.
+    # Decision #8 / RT-B1: the bearer token is stored HASH-ONLY. There is
+    # NO plaintext column (migration 0122 drops it). The SHA-256 hex of the
+    # token is the sole at-rest representation, indexed for an O(1) lookup
+    # in find_by_token(). The plaintext is generated in memory at
+    # provisioning/rotation (mint_token), shown to the operator exactly
+    # once, and is never recoverable from the DB afterwards.
+    # ASVS V2.10.4: no plaintext bearer tokens at rest.
     token_hash = models.CharField(max_length=64, db_index=True, default="", blank=True)
     name = models.CharField(max_length=100)
     closed = models.BooleanField(default=False)
@@ -1274,40 +1274,46 @@ class Firebase(models.Model):
 
     @staticmethod
     def hash_token(plaintext):
-        """SHA-256 of the plaintext token. Stable across processes."""
+        """SHA-256 hex of the plaintext token. Stable across processes.
+
+        Returns ``""`` for a falsy input so an unprovisioned row (empty
+        ``token_hash``) can never be matched by an empty presented token.
+        """
         if not plaintext:
             return ""
-        import hashlib
-
         return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
 
-    def save(self, *args, **kwargs):
-        # Keep token_hash in sync with token while both columns exist.
-        # Once token plaintext is removed (P2 follow-up), this becomes a
-        # one-way set during creation only.
-        if self.token:
-            self.token_hash = self.hash_token(self.token)
-        super().save(*args, **kwargs)
+    def mint_token(self):
+        """Generate a fresh high-entropy bearer token, store ONLY its
+        SHA-256 hash on this instance, and return the plaintext.
+
+        The plaintext exists only in memory in the calling request: the
+        caller MUST ``save()`` this instance and surface the returned
+        value to the operator exactly once (it is unrecoverable from the
+        DB afterwards — Decision #8 / RT-B1, ASVS V2.10.4). ``token_urlsafe(
+        32)`` is 256 bits of CSPRNG entropy. Used at create and at an
+        explicit rotation; rotation invalidates the previous token because
+        only the new hash remains.
+        """
+        plaintext = secrets.token_urlsafe(32)
+        self.token_hash = self.hash_token(plaintext)
+        return plaintext
 
     @classmethod
     def find_by_token(cls, plaintext):
-        """Constant-time lookup by plaintext token. Indexes the SHA-256
-        hash, then ``secrets.compare_digest``s to defeat timing leaks if
-        an attacker ever finds a hash collision (defense in depth).
+        """Resolve a terminal by its presented bearer token, or ``None``.
 
-        Returns the Firebase row or ``None``. Use this — never
-        ``Firebase.objects.get(token=...)`` — when authenticating a
-        terminal request. ASVS V2.10.4 / V2.7.4.
+        The token is stored hash-only; this hashes the presented value and
+        does an indexed equality lookup on ``token_hash``. This is NOT a
+        constant-time comparison and makes no constant-time claim — the
+        honest control (Decision #8 / RT-B1) is *hashed-at-rest* plus a
+        *generic 401* on miss so there is no token-existence/timing oracle.
+        Callers MUST return an indistinguishable 401 when this is ``None``
+        and never reveal whether the token existed. ASVS V2.10.4 / V2.7.4.
         """
         if not plaintext:
             return None
-        import secrets
-
-        candidate_hash = cls.hash_token(plaintext)
-        for f in cls.objects.filter(token_hash=candidate_hash):
-            if secrets.compare_digest(f.token_hash, candidate_hash):
-                return f
-        return None
+        return cls.objects.filter(token_hash=cls.hash_token(plaintext)).first()
 
     class Meta:
         verbose_name = "Terminal"
