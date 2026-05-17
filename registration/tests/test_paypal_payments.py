@@ -1421,12 +1421,16 @@ class TestPayPalRefunds(OrdersTestCase):
         mock_refund_captured_payment.return_value = create_api_response(
             self.part_refund_10_body, Refund, 201
         )
-        # Reload so order.total is the DecimalField's real Decimal value
-        # (the in-memory fixture holds a float from PriceLevel.basePrice).
-        # Production always reads order.total from the DB (Decimal); this
-        # makes the test reflect that, matching the Decimal `amount`
-        # contract. Sibling refund tests refresh_from_db() likewise.
+        # The shared fixture builds PriceLevel/Order in-memory with float
+        # money literals (e.g. basePrice=45.00); `.save()` does not coerce
+        # the in-memory instance, so .basePrice / .total stay Python
+        # floats. Production ALWAYS reads these back from the DB as the
+        # DecimalField's Decimal. Reload both so every money value in this
+        # test is the realistic Decimal — matching the Decimal `amount`
+        # contract of refund_card_payment (sibling refund tests
+        # refresh_from_db() likewise).
         self.order_no_refund.refresh_from_db()
+        self.price_45.refresh_from_db()
         result, message = refund_card_payment(self.order_no_refund, Decimal(10), "some reason")
 
         mock_refund_captured_payment.assert_called_once()
