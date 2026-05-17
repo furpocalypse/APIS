@@ -1,0 +1,8 @@
+# Template for the untracked fm_eventmanager/settings.py (Decision #1/#7).
+#
+# Copy to fm_eventmanager/settings.py for local development, or simply set
+# DJANGO_SETTINGS_MODULE — selection is env-driven, there is no generation
+# step. All configuration is read from the environment by the tracked
+# settings_base.py; see .env.dev.example / .env.prod.example for the full
+# variable list (required vars fail loud under APIS_ENV=production).
+from .settings_base import *  # noqa: F401,F403

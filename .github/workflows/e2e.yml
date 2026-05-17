@@ -78,8 +78,11 @@ jobs:
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium firefox
 
-      - name: Prepare Django settings
-        run: # settings_test.py is the canonical test settings — no copy needed.
+      # S4: the PR's comment-only `run:` is an empty script (actionlint /
+      # yamllint violation, can fail the job) — step deleted entirely.
+      # settings selection is solely via DJANGO_SETTINGS_MODULE, which
+      # e2e/playwright/scripts/up.sh exports; it is also pinned in the
+      # Run Playwright suite env below for explicitness.
 
       - name: Build frontend
         working-directory: registration/frontend
@@ -89,6 +92,7 @@ jobs:
 
       - name: Run Playwright suite
         env:
+          DJANGO_SETTINGS_MODULE: fm_eventmanager.settings_test
           TEST_DATABASE_HOST: 127.0.0.1
           TEST_DATABASE_PORT: 5432
           TEST_DATABASE_USER: apis

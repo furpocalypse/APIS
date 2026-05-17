@@ -788,3 +788,76 @@ GOTENBERG_HOST = os.getenv("GOTENBERG_HOST", None)
 DJANGO_VITE_STATIC_URL_PREFIX = "bundler"
 
 VALIDATE_TEMPLATES_IGNORE_APPS = ["allauth"]
+
+
+# ===================================================================
+# Binding plan invariants (PR #41 remediation — see plan Decisions
+# #8/RT-B2, D-IP, S35). settings_base.py is the single tracked
+# env-driven source; settings.py / settings_test.py / settings.py.example
+# are thin `from .settings_base import *` specializations.
+# ===================================================================
+
+# A positive production signal, independent of DEBUG. RT-B2: an operator
+# who runs DJANGO_SETTINGS_MODULE=...settings_test in prod has DEBUG=True,
+# so a DEBUG-keyed guard never fires — key the hard guards off this.
+APIS_ENV = os.getenv("APIS_ENV", "")
+_IS_PROD = APIS_ENV == "production"
+
+# S2b / Decision #8: E2E_MODE bypasses webhook signature + age-window
+# verification. It MUST be impossible in production. Force False whenever
+# not explicitly DEBUG, and hard-fail if anything tries to enable it in a
+# production-signalled process — closes every getattr(settings,"E2E_MODE")
+# reader (paypal_webhooks, paypal_payments stub, urls e2e routes,
+# views/e2e) at the single source.
+_E2E_ENV = eval_bool(os.getenv("E2E_MODE", "False"))
+if _IS_PROD and _E2E_ENV:
+    raise RuntimeError(
+        "E2E_MODE must never be truthy when APIS_ENV=production "
+        "(webhook signature/age bypass)."
+    )
+E2E_MODE = bool(DEBUG) and _E2E_ENV
+
+# RT-B2: in a production-signalled process the active settings module must
+# not be the test module (which sets DEBUG/E2E posture and would re-open
+# the bypass).
+if _IS_PROD and "settings_test" in os.getenv("DJANGO_SETTINGS_MODULE", ""):
+    raise RuntimeError(
+        "DJANGO_SETTINGS_MODULE points at settings_test while "
+        "APIS_ENV=production — refusing to start."
+    )
+
+# D-IP: allauth's get_client_ip falls back to REMOTE_ADDR only when
+# ALLAUTH_TRUSTED_CLIENT_IP_HEADER is empty. For the trust model to hold
+# (axes / allauth / audit key off the edge-set header, not a spoofable
+# REMOTE_ADDR), the header MUST be non-empty in production. Tests/dev
+# deliberately set it empty (REMOTE_ADDR fallback) and do NOT set
+# APIS_ENV, so this only fires for a real production deploy.
+if _IS_PROD and not ALLAUTH_TRUSTED_CLIENT_IP_HEADER:
+    raise RuntimeError(
+        "ALLAUTH_TRUSTED_CLIENT_IP_HEADER must be non-empty when "
+        "APIS_ENV=production (TRUSTED_CLIENT_IP_HEADER env var)."
+    )
+
+# S35: security-logging observability contract. Named loggers with pinned
+# WARNING levels so the detection signals this remediation adds
+# (RequireClientIPMiddleware rejects, webhook age-window rejects, axes
+# lockouts, oauth_square state mismatch, BOLA-attempt lines, cash-drawer
+# audit) survive a production root-level tightening. fm_eventmanager.security
+# gets its own handler and does NOT propagate (no double-emit).
+LOGGING.setdefault("handlers", {})["security"] = {
+    "level": "WARNING",
+    "class": "logging.StreamHandler",
+    "formatter": "verbose",
+}
+LOGGING.setdefault("loggers", {})
+LOGGING["loggers"]["fm_eventmanager.security"] = {
+    "handlers": ["security"],
+    "level": "WARNING",
+    "propagate": False,
+}
+for _seclog in ("axes", "allauth", "registration.views"):
+    LOGGING["loggers"][_seclog] = {
+        "handlers": ["console"],
+        "level": "WARNING",
+        "propagate": False,
+    }

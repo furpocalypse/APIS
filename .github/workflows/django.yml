@@ -49,8 +49,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Login to Docker Hub (read-only)
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+      - name: Docker Hub login (conditional, read-only)
+        uses: ./.github/actions/registry-login
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -74,7 +74,33 @@ jobs:
           # it explicitly below.
           uv run python ./manage.py collectstatic --noinput
           uv run coverage run ./manage.py test registration
+          uv run coverage report --fail-under=${COVERAGE_FAIL_UNDER}
         env:
+          # S1(c): the PR removed the `cp settings.py.ci settings.py` line but
+          # never set DJANGO_SETTINGS_MODULE, so collectstatic/test would
+          # ImproperlyConfigured (manage.py defaults to the now-untracked
+          # fm_eventmanager.settings). settings_test is canonical for CI.
+          DJANGO_SETTINGS_MODULE: fm_eventmanager.settings_test
+          # D-COV: enforce the measured baseline (recorded in plan Findings;
+          # captured from the first green run, then pinned > 0).
+          COVERAGE_FAIL_UNDER: "0"
+          # Ergonomic test posture (matches the retired settings.py.ci:
+          # DEBUG=True) so settings_base's DEBUG-gated defaults apply and the
+          # !DEBUG SSL-redirect/secure-cookie block does not break the test
+          # client. Strict prod assertions stay keyed off APIS_ENV (unset).
+          DJANGO_DEBUG: "True"
+          DJANGO_SECRET_KEY: ci-test-secret
+          ALLOWED_HOSTS: "testserver,localhost,127.0.0.1"
+          CSRF_TRUSTED_ORIGINS: "http://testserver,http://localhost,http://127.0.0.1"
+          TRUSTED_CLIENT_IP_HEADER: ""
+          DATABASE_HOST: localhost
+          DATABASE_PORT: "5432"
+          DATABASE_USER: postgres
+          DATABASE_PASS: postgres
+          DATABASE_NAME: postgres
+          DJANGO_DATABASE_POOL: "False"
+          STATIC_ROOT: /tmp/apis-ci-static
+          GOTENBERG_HOST: http://localhost:3000
           SQUARE_APPLICATION_ID: ${{ secrets.SQUARE_APPLICATION_ID }}
           SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}
           SQUARE_LOCATION_ID: ${{ secrets.SQUARE_LOCATION_ID }}

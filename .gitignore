@@ -44,7 +44,6 @@ database.env
 .tmp_*
 # Local cert experiments (not the apis-nginx mount path — that's /opt/apis/certs
 # on the VM, never inside the repo).
-ssl/
 build/
 .DS_Store
 pgdb/
@@ -69,3 +68,4 @@ docker-compose.override.yaml
 /registration/static/django_extensions/
 /registration/static/import_export/
 /registration/static/mfa/
+fm_eventmanager/settings.py
