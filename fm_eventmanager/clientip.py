@@ -33,6 +33,24 @@ import-purity test asserts this closure stays model-free.
 
 from __future__ import annotations
 
-from allauth.core.internal.httpkit import get_client_ip
+from allauth.core.internal.httpkit import get_client_ip as _allauth_get_client_ip
 
 __all__ = ["get_client_ip"]
+
+
+def get_client_ip(request):
+    """The one resolver: allauth's, with its documented contract enforced.
+
+    allauth's resolver does ``request.META["REMOTE_ADDR"]`` (subscript) in
+    its empty-trusted-header fallback branch, which raises ``KeyError`` on
+    requests that lack ``REMOTE_ADDR`` (axes login/logout signal requests,
+    synthetic/test requests). The resolver's contract — and everything
+    keying off it (the fail-closed middleware, axes, audit) — expects
+    ``None`` when the IP is unresolvable, not a crash. We do NOT
+    re-implement allauth's algorithm (single source of truth, parity
+    contract test); we only convert the unresolvable case to the
+    contracted ``None``. Import-pure (stdlib + allauth only)."""
+    try:
+        return _allauth_get_client_ip(request)
+    except KeyError:
+        return None
