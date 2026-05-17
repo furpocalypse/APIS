@@ -1224,7 +1224,12 @@ class TestPaypalWebhookStubs(PayPalOrdersTestCase):
         _, body = generate_paypal_notification_example(
             PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
         )
-        response = self._post(body)
+        # S24: the chargeback email is dispatched via transaction.on_commit
+        # (only for the CAS winner), so a rollback can never send it. In a
+        # TestCase the wrapping transaction is rolled back, so on_commit
+        # callbacks must be explicitly executed to observe the side effect.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._post(body)
 
         self.assertEqual(response.status_code, 200)
         self.order.refresh_from_db()
@@ -2091,7 +2096,14 @@ class TestPaypalHandlerMiscCoverageGaps(PayPalOrdersTestCase):
             PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
         )
         body["id"] = "WH-DISPUTE-BROKER-DOWN"
-        with self.assertLogs("registration.paypal_webhook_handlers", level="ERROR") as captured:
+        # S24: the email enqueue (and its failure-handling ERROR log) runs
+        # inside a transaction.on_commit callback. captureOnCommitCallbacks
+        # is nested *inside* assertLogs so the callback — and thus the
+        # logged error — fires while the log capture is still active.
+        with (
+            self.assertLogs("registration.paypal_webhook_handlers", level="ERROR") as captured,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
             response = self.client.post(
                 reverse("registration:paypal_webhook"),
                 json.dumps(body),
@@ -2179,12 +2191,16 @@ class TestPaypalCaptureWebhooks(TestCase):
         mock_verify.return_value = True
         body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
 
-        response = self.client.post(
-            reverse("registration:paypal_webhook"),
-            json.dumps(body),
-            content_type="application/json",
-            headers={"content-type": "application/json"},
-        )
+        # S24: registration email is queued via transaction.on_commit only
+        # for the CAS winner; execute on_commit callbacks so the TestCase
+        # (rolled-back transaction) can observe the enqueue.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
         self.assertEqual(response.status_code, 200)
 
         self.order.refresh_from_db()
