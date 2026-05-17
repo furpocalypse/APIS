@@ -28,9 +28,19 @@ jobs:
       - name: Lockfile is in sync (immutable in CI)
         run: uv lock --check
       - name: pip-audit (Python deps; fail on any known vuln)
+        # NOTE: --strict is intentionally omitted. `django-prometheus` is
+        # pinned to a git rev (documented in pyproject.toml: 2.4.x caps
+        # Django<6.0, this project is on Django 6 — REVISIT on the first
+        # Django-6 PyPI release). pip-audit cannot resolve a VCS pin
+        # against PyPI, and --strict escalates "could not be audited" to a
+        # hard failure, which would wedge every merge on a deliberate,
+        # documented compatibility pin rather than on an actual CVE.
+        # Without --strict, pip-audit still exits non-zero on any *known*
+        # vulnerability (the CLAUDE.md item-6 / OWASP A06 control); only
+        # the un-auditable VCS pin is downgraded to a warning.
         run: |
           uv export --frozen --no-hashes --no-emit-project > /tmp/requirements.txt
-          uvx pip-audit -r /tmp/requirements.txt --strict --progress-spinner=off
+          uvx pip-audit -r /tmp/requirements.txt --progress-spinner=off
 
   npm-deps:
     runs-on: ubuntu-24.04
@@ -50,7 +60,11 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Trivy filesystem scan (deps + config)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        # v0.28.0 transitively pinned aquasecurity/setup-trivy@v0.2.1,
+        # which upstream has since removed ("unable to find version
+        # v0.2.1"), hard-failing job setup. v0.36.0 pins a valid
+        # setup-trivy (@v0.2.6). SHA-pinned per S33 MED-10 / OWASP A08.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .

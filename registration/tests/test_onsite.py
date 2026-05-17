@@ -650,7 +650,7 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     @patch("registration.payments.refresh_payment")
-    def _complete_square(self, reference, token, mock_refresh, mock_mqtt):
+    def _complete_square(self, reference, token, mock_refresh, _mock_mqtt):
         mock_refresh.return_value = (True, None)
         return self.client.post(
             reverse("registration:complete_square_transaction"),
@@ -684,7 +684,7 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
     # ---- HIGH-2: cash (session-terminal) binding ----
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_cash_mismatch_rejected_when_both_known(self, mock_mqtt):
+    def test_cash_mismatch_rejected_when_both_known(self, _mock_mqtt):
         order = self._make_order("CASH-MM", opened_at=self.terminal)
         # Active session terminal = terminal_b (prove it via its cookie),
         # order bound to terminal A.
@@ -700,7 +700,7 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
         self.assertEqual(order.status, Order.PENDING)
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_med2_url_param_without_proof_does_not_bind(self, mock_mqtt):
+    def test_med2_url_param_without_proof_does_not_bind(self, _mock_mqtt):
         """MED-2: ?terminal= alone (cookie proves a different terminal)
         must NOT bind terminal_b. The order is opened@terminal_a, so with
         no proven terminal_b the cross-terminal guard cannot engage and
@@ -719,7 +719,7 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
         self.assertEqual(order.status, Order.COMPLETED)
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_cash_match_completes(self, mock_mqtt):
+    def test_cash_match_completes(self, _mock_mqtt):
         order = self._make_order("CASH-OK", opened_at=self.terminal)
         self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
         args = {"reference": "CASH-OK", "total": order.total, "tendered": order.total}
@@ -732,7 +732,7 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
         self.assertEqual(order.status, Order.COMPLETED)
 
     @patch("registration.mqtt.send_mqtt_message")
-    def test_low4_cash_sale_is_audited(self, mock_mqtt):
+    def test_low4_cash_sale_is_audited(self, _mock_mqtt):
         """LOW-4 (S33-j): a completed cash sale emits a who/what/where/
         outcome audit line on fm_eventmanager.security."""
         order = self._make_order("CASH-AUD", opened_at=self.terminal)

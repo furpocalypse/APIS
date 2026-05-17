@@ -33,7 +33,7 @@ if SENTRY_ENABLED:
     # process. CLAUDE.md forbids PII / payment / webhook bodies in logs.
     # Sentry's default scrubber redacts known-secret keys but does not drop
     # raw POST bodies or cookies; do both here.
-    def _sentry_before_send(event, hint):
+    def _sentry_before_send(event, _hint):
         request = (event or {}).get("request") or {}
         # Webhook handlers (Square, PayPal) re-read request.body; Sentry's
         # capture would otherwise serialize it. Drop the body and any cookies
