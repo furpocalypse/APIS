@@ -35,6 +35,7 @@ from registration.models import (
     get_hold_type,
 )
 from registration.payments import update_capacity_for_status_change
+from registration.payments_sanitize import sanitize_api_data
 
 logger = logging.getLogger(__name__)
 
@@ -503,7 +504,7 @@ def handle_dispute_created(notification: PaymentWebhookNotification) -> bool:
     old_status = order.status
     if not isinstance(order.apiData, dict):
         order.apiData = {}
-    order.apiData["dispute"] = resource
+    order.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
     order.status = Order.DISPUTE_EVIDENCE_REQUIRED
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
@@ -536,7 +537,7 @@ def handle_dispute_updated(notification: PaymentWebhookNotification) -> bool:
     old_status = order.status
     if not isinstance(order.apiData, dict):
         order.apiData = {}
-    order.apiData["dispute"] = resource
+    order.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
     # Only flip to DISPUTE_PROCESSING when dispute is actively being worked on
     # by PayPal (buyer awaiting response, under review); preserve terminal
     # statuses set by the RESOLVED handler.
@@ -572,7 +573,7 @@ def handle_dispute_resolved(notification: PaymentWebhookNotification) -> bool:
     old_status = order.status
     if not isinstance(order.apiData, dict):
         order.apiData = {}
-    order.apiData["dispute"] = resource
+    order.apiData["dispute"] = sanitize_api_data(resource)  # MED-8
     outcome = (resource.get("dispute_outcome") or {}).get("outcome_code") or ""
     order.status = _DISPUTE_OUTCOME_TO_ORDER_STATUS.get(outcome, Order.DISPUTE_PROCESSING)
     if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (

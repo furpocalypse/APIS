@@ -40,6 +40,7 @@ from prometheus_client import Histogram
 
 from .models import Order as ApisOrder
 from .payments import refund_cash_payment, update_capacity_for_status_change
+from .payments_sanitize import sanitize_api_data
 from .types import TranslatedCartItem
 
 PAYPAL_REQUESTS = Histogram("paypal_requests", "HTTP requests to Paypal API", ["endpoint"])
@@ -238,7 +239,7 @@ def capture_paypal_payment(
         return False, {"errors": errors}
 
     try:
-        apis_order.apiData = json.loads(api_response.text)
+        apis_order.apiData = sanitize_api_data(json.loads(api_response.text))  # MED-8
     except (ValueError, json.JSONDecodeError) as e:
         logger.exception(e)
         message = "Unable to decode response from PayPal in capture_paypal_payment"
@@ -320,7 +321,7 @@ def refresh_payment(
         order.total = order_total
         message = update_order_refund_data(order, fresh_order.purchase_units[0].payments.refunds)
 
-    order.apiData = APIHelper.to_dictionary(fresh_order)
+    order.apiData = sanitize_api_data(APIHelper.to_dictionary(fresh_order))  # MED-8
     order.total = order_total
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
@@ -509,7 +510,7 @@ def refund_card_payment(
     stored_refunds: list[Refund] = getattr(api_data.purchase_units[0].payments, "refunds", [])
     stored_refunds.append(refund)
     api_data.purchase_units[0].payments.refunds = stored_refunds
-    order.apiData = APIHelper.to_dictionary(api_data)
+    order.apiData = sanitize_api_data(APIHelper.to_dictionary(api_data))  # MED-8
 
     if status == RefundStatus.COMPLETED:
         order.status = ApisOrder.REFUNDED

@@ -46,6 +46,7 @@ from .models import (
     get_hold_type,
     timezone,
 )
+from .payments_sanitize import sanitize_api_data
 from .types import BillingData
 
 SQUARE_REQUESTS = Histogram("square_requests", "HTTP requests to Square API", ["endpoint"])
@@ -180,14 +181,14 @@ def charge_payment(
         logger.debug(e.errors)
         logger.debug("---- Transaction Failed ----")
         order.status = Order.FAILED
-        order.apiData = e.body
+        order.apiData = sanitize_api_data(e.body)  # MED-8
         order.save()
         return False, e.body
 
     logger.debug("---- Charge Submitted ----")
 
     # Square still returns data for failed payments
-    order.apiData = api_response.model_dump()
+    order.apiData = sanitize_api_data(api_response.model_dump())  # MED-8
 
     if api_response.payment and api_response.payment.id and api_response.payment.status != "FAILED":
         if api_response.payment.card_details and api_response.payment.card_details.card:
@@ -304,7 +305,7 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
     if refund_errors:
         return False, "; ".join(refund_errors)
 
-    order.apiData = api_data
+    order.apiData = sanitize_api_data(api_data)  # MED-8
     order.total = Decimal(order_total) / 100
 
     if order.orgDonation + order.charityDonation > order.total:
@@ -466,7 +467,7 @@ def refund_card_payment(
     status = api_response.refund.status
     stored_refunds.append(api_response.refund.model_dump())
     api_data["refunds"] = stored_refunds
-    order.apiData = api_data
+    order.apiData = sanitize_api_data(api_data)  # MED-8
 
     if status == "COMPLETED":
         order.status = Order.REFUNDED
@@ -551,7 +552,7 @@ def process_webhook_payment_updated(notification: PaymentWebhookNotification) ->
     # Store order update in api data
     old_status = order.status
     payment = Payment.model_validate(notification.body["data"]["object"]["payment"])
-    order.apiData["payment"] = payment.model_dump()
+    order.apiData["payment"] = sanitize_api_data(payment.model_dump())  # MED-8
     update_order_payment_data(order, 0, payment)
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
@@ -626,7 +627,7 @@ def process_webhook_dispute_created_or_updated(
 
     # Add the dispute API data to the order:
     old_status = order.status
-    order.apiData["dispute"] = webhook_dispute
+    order.apiData["dispute"] = sanitize_api_data(webhook_dispute)  # MED-8
     order.status = Order.DISPUTE_STATUS_MAP[webhook_dispute["state"]]
     if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
         order.orgDonation > 0 or order.charityDonation > 0
