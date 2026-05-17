@@ -48,7 +48,6 @@ PII_SCALAR_KEYS = frozenset(
         "family_name",
         "surname",
         "full_name",
-        "name",
         "cardholder_name",
         "address_line_1",
         "address_line_2",
@@ -61,7 +60,18 @@ PII_SCALAR_KEYS = frozenset(
         "administrative_district_level_2",
         "admin_area_1",
         "admin_area_2",
-        "country_code",
+        # Peer-review non-block-3 / Red Team ATTACK-5: ``name`` and
+        # ``country_code`` were intentionally REMOVED from the global
+        # scalar deny-list. They collide with operational provider data
+        # (e.g. PayPal ``purchase_units[].items[].name`` = SKU/product
+        # name, card issuing ``country_code`` used for fraud rules),
+        # which the module's contract promises to preserve. The PII
+        # instances of these keys live inside the PII *container* keys
+        # below (``payer.name``, ``shipping.address.country_code`` …),
+        # which collapse to ``{}`` wholesale — so personal names/countries
+        # are still removed, without corrupting operational fields. The
+        # specific personal-name scalars (given/family/surname/full_name/
+        # cardholder_name) remain denied.
     }
 )
 

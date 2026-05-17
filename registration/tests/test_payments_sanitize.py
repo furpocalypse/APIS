@@ -105,3 +105,27 @@ class TestSanitizeApiData(SimpleTestCase):
         out = sanitize_api_data({"payer": {"email_address": "a@b.c"}})
         self.assertIsInstance(out, dict)
         self.assertEqual(out.get("payer"), {})
+
+    def test_operational_name_country_preserved_pii_still_removed(self):
+        # Peer-review non-block-3 / ATTACK-5: operational `name` /
+        # `country_code` OUTSIDE a PII container are preserved (line-item
+        # SKU, card issuing country), while personal names inside the
+        # collapsed PII containers are still removed.
+        out = sanitize_api_data(
+            {
+                "purchase_units": [
+                    {
+                        "items": [{"name": "Sponsor Badge", "quantity": "1"}],
+                        "shipping": {"name": {"full_name": "Jane Doe"}},
+                    }
+                ],
+                "payment_source": {"card": {"country_code": "US", "last_digits": "1111"}},
+                "payer": {"name": {"given_name": "Jane"}},
+            }
+        )
+        pu = out["purchase_units"][0]
+        self.assertEqual(pu["items"][0]["name"], "Sponsor Badge")  # operational kept
+        self.assertEqual(out["payment_source"]["card"]["country_code"], "US")
+        self.assertEqual(out["payment_source"]["card"]["last_digits"], "1111")
+        self.assertEqual(pu["shipping"], {})  # PII container collapsed
+        self.assertEqual(out["payer"], {})  # PII container collapsed
