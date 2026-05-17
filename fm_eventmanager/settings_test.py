@@ -29,3 +29,11 @@ PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
 # pin it here so the test contract is explicit and reload-safe.
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
+
+# Existing webhook unit-test fixtures embed fixed historical timestamps
+# (2022-2025). The age-window bound is exercised precisely by the
+# freezegun TestWebhookAgeWindow; for the rest of the suite widen the past
+# bound so static fixtures aren't rejected (replay defence in tests is the
+# PaymentWebhookNotification dedup, plan S38). Keep a real future-skew.
+WEBHOOK_MAX_AGE_SECONDS = int(os.getenv("WEBHOOK_MAX_AGE_SECONDS", str(60 * 60 * 24 * 365 * 100)))
+WEBHOOK_FUTURE_SKEW_SECONDS = int(os.getenv("WEBHOOK_FUTURE_SKEW_SECONDS", "300"))

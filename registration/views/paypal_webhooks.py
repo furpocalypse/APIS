@@ -12,6 +12,10 @@ from django.views.decorators.http import require_POST
 from registration import paypal_webhook_handlers as pph
 from registration.models import PaymentWebhookNotification
 from registration.views import common
+from registration.views.webhook_age import (
+    webhook_signature_bypassed,
+    webhook_within_age_window,
+)
 
 try:
     import sentry_sdk
@@ -87,10 +91,7 @@ def verify_signature(request) -> bool:
     Any missing config, parse error, or transport failure returns False
     (fail-closed).
     """
-    if (
-        getattr(settings, "E2E_MODE", False)
-        and request.headers.get("X-E2E-Mock-Signature") == "1"
-    ):
+    if webhook_signature_bypassed(request):
         return True
 
     required_headers = (
@@ -181,18 +182,21 @@ def paypal_webhook(request):
     if "id" not in request_body:
         return common.abort(400, "Missing id")
 
-    # Bound the webhook's age (see webhooks.webhook_within_age_window
-    # rationale). PayPal's ``paypal-transmission-time`` header is already
-    # part of the signature input, so its integrity is validated. We also
-    # cross-check ``create_time`` from the body — both must be in window.
-    from registration.views.webhooks import webhook_within_age_window
-
-    transmission_time = request.headers.get("paypal-transmission-time")
-    create_time = request_body.get("create_time")
-    if not webhook_within_age_window(transmission_time, source="paypal"):
-        return common.abort(400, "Webhook timestamp out of window")
-    if create_time and not webhook_within_age_window(create_time, source="paypal"):
-        return common.abort(400, "Webhook timestamp out of window")
+    # Bound the webhook's age — ONLY on the signature-verified path (plan
+    # S2). PayPal's ``paypal-transmission-time`` header is part of the
+    # signature input; we also cross-check the body ``create_time``. When
+    # the signature is bypassed (E2E mock) both are untrusted, so the
+    # window is bypassed too (the durable PaymentWebhookNotification store
+    # — plan S38 — is the real replay defence).
+    if not webhook_signature_bypassed(request):
+        transmission_time = request.headers.get("paypal-transmission-time")
+        create_time = request_body.get("create_time")
+        if not webhook_within_age_window(transmission_time, source="paypal"):
+            return common.abort(400, "Webhook timestamp out of window")
+        if create_time and not webhook_within_age_window(
+            create_time, source="paypal"
+        ):
+            return common.abort(400, "Webhook timestamp out of window")
 
     event_id = request_body["id"]
     event_type = request_body.get("event_type")

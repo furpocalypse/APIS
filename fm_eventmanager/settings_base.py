@@ -861,3 +861,11 @@ for _seclog in ("axes", "allauth", "registration.views"):
         "level": "WARNING",
         "propagate": False,
     }
+
+# S19/S2(d): webhook freshness window — single source, read at call time by
+# registration.views.webhook_age. Sized to cover provider retry horizons
+# (Square ~72h, PayPal ~3 days) so a legitimate *first* delivery is never
+# silently dropped; the durable PaymentWebhookNotification (integration,
+# event_id) store (plan S38) is the actual replay defence.
+WEBHOOK_MAX_AGE_SECONDS = int(os.getenv("WEBHOOK_MAX_AGE_SECONDS", str(60 * 60 * 24 * 3)))
+WEBHOOK_FUTURE_SKEW_SECONDS = int(os.getenv("WEBHOOK_FUTURE_SKEW_SECONDS", "300"))

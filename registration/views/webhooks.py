@@ -1,7 +1,5 @@
 import json
 import logging
-import os
-from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.db import IntegrityError
@@ -13,78 +11,16 @@ from registration import payments
 from registration.models import PaymentWebhookNotification
 from registration.views import common
 
+# Plan S2/S18/S19: age-window + signature-bypass primitives live in the
+# neutral webhook_age module (settings-driven, sibling import — no
+# cross-view edge, no cycle). Re-exported so existing importers keep
+# working.
+from registration.views.webhook_age import (  # noqa: F401
+    webhook_signature_bypassed,
+    webhook_within_age_window,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# Webhook age-window defaults. Past tolerance bounds capture-replay attacks
-# where an attacker resurrects a months-old signed webhook after the
-# event_id replay record has been purged. Future tolerance allows for
-# clock skew between provider and us. Both env-overridable so ops can
-# widen if a provider's retry semantics demand it.
-#   WEBHOOK_MAX_AGE_SECONDS   (default 3600  / 1h)
-#   WEBHOOK_FUTURE_SKEW_SECONDS (default  300 / 5m)
-WEBHOOK_MAX_AGE_SECONDS = int(os.getenv("WEBHOOK_MAX_AGE_SECONDS", "3600"))
-WEBHOOK_FUTURE_SKEW_SECONDS = int(os.getenv("WEBHOOK_FUTURE_SKEW_SECONDS", "300"))
-
-
-def _parse_iso8601_utc(value):
-    """Parse an ISO 8601 timestamp (with optional trailing Z) into a tz-aware
-    UTC datetime. Returns None if the value can't be parsed.
-    """
-    if not value:
-        return None
-    try:
-        # ``datetime.fromisoformat`` accepts "+00:00" but historically not
-        # the trailing "Z". Normalize.
-        normalized = value.rstrip("Z") + "+00:00" if value.endswith("Z") else value
-        dt = datetime.fromisoformat(normalized)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except (ValueError, TypeError):
-        return None
-
-
-def webhook_within_age_window(timestamp_iso, *, source):
-    """Return True if *timestamp_iso* (ISO 8601 string) is within the
-    configured webhook age window. Logs a WARNING and returns False on any
-    parse error or out-of-window timestamp. *source* is a short label
-    ('square', 'paypal') used in the log line for triage.
-
-    OWASP A02 (Cryptographic Failures) / Webhook Security Cheat Sheet:
-    bound the validity period of a signed payload so capture-replay
-    attempts surface even when the event_id replay record has been
-    purged or never observed.
-    """
-    ts = _parse_iso8601_utc(timestamp_iso)
-    if ts is None:
-        logger.warning(
-            "webhook[%s]: missing or unparseable timestamp %r; rejecting",
-            source,
-            timestamp_iso,
-        )
-        return False
-    now = datetime.now(timezone.utc)
-    age = (now - ts).total_seconds()
-    if age > WEBHOOK_MAX_AGE_SECONDS:
-        logger.warning(
-            "webhook[%s]: timestamp %s is %.0fs old (> %ds max); rejecting",
-            source,
-            ts.isoformat(),
-            age,
-            WEBHOOK_MAX_AGE_SECONDS,
-        )
-        return False
-    if age < -WEBHOOK_FUTURE_SKEW_SECONDS:
-        logger.warning(
-            "webhook[%s]: timestamp %s is %.0fs in the future (> %ds skew); rejecting",
-            source,
-            ts.isoformat(),
-            -age,
-            WEBHOOK_FUTURE_SKEW_SECONDS,
-        )
-        return False
-    return True
 
 
 @require_POST
@@ -112,10 +48,13 @@ def square_webhook(request):
     if "event_id" not in request_body:
         return common.abort(400, "Missing event_id")
 
-    # Bound the webhook's age. Square embeds an ISO 8601 timestamp in
-    # ``created_at`` at the top of the body. See webhook_within_age_window
-    # for the rationale.
-    if not webhook_within_age_window(request_body.get("created_at"), source="square"):
+    # Bound the webhook's age — ONLY on the signature-verified path (plan
+    # S2). Square embeds an ISO 8601 ``created_at`` at the body top. When
+    # the signature is bypassed (E2E mock) the timestamp is untrusted
+    # anyway, so the window is bypassed too.
+    if not webhook_signature_bypassed(request) and not webhook_within_age_window(
+        request_body.get("created_at"), source="square"
+    ):
         return common.abort(400, "Webhook timestamp out of window")
 
     event_id = request_body["event_id"]
