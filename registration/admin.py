@@ -10,7 +10,6 @@ from django import forms
 from django.contrib import admin, auth, messages
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
-from django.core.signing import TimestampSigner
 from django.db import transaction
 from django.db.models import Max, QuerySet
 from django.forms import NumberInput, widgets
@@ -65,6 +64,7 @@ from registration.models import (
     settings,
 )
 from registration.services import CreateAttendeeOptions
+from registration.signing import print_capability_signer
 from registration.views import webhooks
 
 logger = logging.getLogger(__name__)
@@ -959,8 +959,9 @@ def get_attendee_age(attendee):
 
 @admin.action(description="Print Badges")
 def print_badges(modeladmin, request, queryset):
-    signer = TimestampSigner()
-    data = signer.sign_object(
+    # Peer-review ATTACK-1: salt-namespaced print-capability context
+    # (cannot be replayed as a terminal-token).
+    data = print_capability_signer().sign_object(
         {
             "badge_ids": [badge.id for badge in queryset],
             "source": PrintHistory.ADMIN,

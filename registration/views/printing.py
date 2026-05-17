@@ -3,7 +3,6 @@ import logging
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.core.signing import TimestampSigner
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.template import Context, Template
@@ -18,6 +17,7 @@ from gotenberg_client.options import (
 
 from registration import mqtt
 from registration.models import Badge, Dealer, Firebase, PrintHistory, Staff
+from registration.signing import print_capability_signer
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +74,9 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
     if not data:
         return JsonResponse({"success": False, "reason": "Missing data"}, status=400)
 
-    signer = TimestampSigner()
+    # Peer-review ATTACK-1: salt-namespaced print-capability context.
     try:
-        data_obj = signer.unsign_object(data, max_age=60)
+        data_obj = print_capability_signer().unsign_object(data, max_age=60)
     except Exception:
         return JsonResponse({"success": False, "reason": "Invalid data"}, status=401)
 

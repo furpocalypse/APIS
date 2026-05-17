@@ -3,7 +3,6 @@ import logging
 from collections import Counter
 from json import JSONDecodeError
 
-from django.core.signing import TimestampSigner
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from idempotency_key.decorators import idempotency_key
@@ -18,7 +17,6 @@ from registration.models import (
     Decimal,
     Discount,
     Event,
-    Firebase,
     Order,
     OrderItem,
     PriceLevel,
@@ -34,6 +32,7 @@ from registration.paypal_payments import (
     create_unpaid_paypal_order,
 )
 from registration.ratelimit import rate_limited_json
+from registration.signing import resolve_terminal_token
 from registration.types import BillingData, TranslatedCartItem
 
 from . import cart, common
@@ -705,16 +704,16 @@ def cancel_order(request):
 
 def notify_terminal(request, order):
     try:
-        associated_terminal = request.COOKIES.get("terminal-token")
-        if associated_terminal:
-            signer = TimestampSigner()
-            data_obj = signer.unsign_object(associated_terminal, max_age=60 * 30)
+        # Peer-review ATTACK-1/2: resolve via the salt-namespaced,
+        # id+epoch-bound terminal-token context (no cross-context
+        # confusion, name immutability, rotation invalidation).
+        terminal = resolve_terminal_token(request.COOKIES.get("terminal-token"), 60 * 30)
+        if terminal:
             # S33 HIGH-2 (OWASP API1 BOLA): bind the order to the terminal
             # that opened it, on first notify only. Best-effort — the
             # surrounding try/except swallows failures so a binding miss
             # never blocks completion of a legitimate checkout.
-            terminal = Firebase.objects.filter(name=data_obj["terminal"]).first()
-            if terminal and order.opened_at_terminal_id is None:
+            if order.opened_at_terminal_id is None:
                 order.opened_at_terminal = terminal
                 order.save(update_fields=["opened_at_terminal"])
             # We only need one badge ID as onsite will automatically add all
@@ -722,7 +721,7 @@ def notify_terminal(request, order):
             order_item = OrderItem.objects.filter(order_id=order.id).first()
             if order_item:
                 mqtt.send_mqtt_message(
-                    mqtt.get_topic("web/registration/completed", name=data_obj["terminal"]),
+                    mqtt.get_topic("web/registration/completed", name=terminal.name),
                     {"badgeId": order_item.badge_id},
                 )
     except Exception as ex:

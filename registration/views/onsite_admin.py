@@ -15,7 +15,6 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import permission_required
 from django.contrib.messages import get_messages
 from django.contrib.postgres.search import TrigramSimilarity
-from django.core.signing import TimestampSigner
 from django.db import transaction
 from django.db.models import Case, F, Func, Q, Sum, Value, When
 from django.http import HttpRequest, HttpResponseRedirect, JsonResponse
@@ -45,6 +44,11 @@ from registration.models import (
     get_random_token,
 )
 from registration.payments_sanitize import sanitize_api_data
+from registration.signing import (
+    mint_terminal_token,
+    print_capability_signer,
+    resolve_terminal_token,
+)
 from registration.views.attendee import get_attendee_age
 from registration.views.ordering import (
     get_discount_total,
@@ -70,9 +74,10 @@ def get_active_terminal(request) -> Firebase | None:
 # from a bare ``?terminal=<id>`` param trusted the URL indefinitely — a
 # session's active-terminal context could be flipped by anyone who could
 # reach the staff-gated endpoint. Re-validate possession of the terminal
-# by requiring the device's signed ``terminal-token`` cookie (issued by
-# terminal_square_token, same TimestampSigner + 30 min window as
-# notify_terminal) to match the terminal being bound. Bearer-token paths
+# by requiring the device's signed ``terminal-token`` cookie (issued
+# HttpOnly by ``regtoken`` via the salted, id+epoch-bound
+# registration.signing context — 30 min window, the same context
+# notify_terminal verifies) to match the terminal. Bearer-token paths
 # (complete_square_transaction) set the session terminal only after
 # Firebase.find_by_token and never go through these URL-param binders, so
 # they are unaffected.
@@ -82,15 +87,12 @@ _security_logger = logging.getLogger("fm_eventmanager.security")
 
 def _request_proves_terminal(request, terminal: Firebase) -> bool:
     """True iff the request carries a valid signed terminal-token cookie
-    whose embedded terminal name matches ``terminal``."""
-    cookie = request.COOKIES.get("terminal-token")
-    if not cookie:
-        return False
-    try:
-        data = TimestampSigner().unsign_object(cookie, max_age=_TERMINAL_TOKEN_MAX_AGE)
-    except Exception:
-        return False
-    return data.get("terminal") == terminal.name
+    bound (by id + rotation epoch, via the salted terminal-token context)
+    to ``terminal``. Peer-review ATTACK-1/2: salt-namespaced so a
+    print-capability blob cannot be replayed here, and bound to the
+    immutable id (not the mutable name) with rotation invalidation."""
+    proven = resolve_terminal_token(request.COOKIES.get("terminal-token"), _TERMINAL_TOKEN_MAX_AGE)
+    return proven is not None and proven.id == terminal.id
 
 
 def _audit_cash_action(
@@ -500,8 +502,9 @@ def onsite_print_badges(request):
     badge_list = request.GET.getlist("id")
     terminal = get_active_terminal(request)
 
-    signer = TimestampSigner()
-    data = signer.sign_object(
+    # Peer-review ATTACK-1: distinct salt so this print-capability blob
+    # can never be replayed as a terminal-token cookie.
+    data = print_capability_signer().sign_object(
         {
             "badge_ids": [int(badge_id) for badge_id in badge_list],
             "terminal": terminal.name if terminal else None,
@@ -1280,14 +1283,25 @@ def regtoken(request):
             {"success": False, "reason": "No terminal attached to session"}, status=400
         )
 
-    signer = TimestampSigner()
-    data = signer.sign_object(
-        {
-            "terminal": terminal.name,
-        }
+    # Peer-review ATTACK-1/2/3: salt-namespaced, id+rotation-epoch bound,
+    # and set as an HttpOnly+Secure+SameSite cookie SERVER-side (no longer
+    # handed to JS to write a non-HttpOnly cookie an XSS could read).
+    data = mint_terminal_token(terminal)
+    # The authoritative cookie for browser clients is the HttpOnly one set
+    # here (an XSS can no longer read it). `token` is still returned for a
+    # non-browser kiosk client that provisions its own cookie — both
+    # resolve through the same salted/id-bound context, so this is purely
+    # back-compat, not a second trust path.
+    response = JsonResponse({"success": True, "token": data})
+    response.set_cookie(
+        "terminal-token",
+        data,
+        max_age=_TERMINAL_TOKEN_MAX_AGE,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="Lax",
     )
-
-    return JsonResponse({"success": True, "token": data})
+    return response
 
 
 @require_safe
@@ -1336,7 +1350,13 @@ def attendee_details(request):
 
 @csrf_exempt
 def terminal_square_token(request):
-    key = request.headers.get("authorization").removeprefix("Bearer ")
+    # Peer-review ATTACK-4: a missing/garbage Authorization header must
+    # return the generic 401, not an unhandled AttributeError 500
+    # (.removeprefix on None) — mirrors complete_square_transaction.
+    try:
+        key = request.headers.get("authorization").removeprefix("Bearer ")
+    except (AttributeError, TypeError):
+        return JsonResponse({"success": False, "reason": "Incorrect API key"}, status=401)
 
     # Decision #8 / RT-B1: see complete_square_transaction comment.
     terminal = Firebase.find_by_token(key)
