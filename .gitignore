@@ -69,3 +69,4 @@ docker-compose.override.yaml
 /registration/static/import_export/
 /registration/static/mfa/
 fm_eventmanager/settings.py
+azure/.azure

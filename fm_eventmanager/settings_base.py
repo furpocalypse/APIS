@@ -42,7 +42,14 @@ if SENTRY_ENABLED:
                 "cookie",
                 "x-csrftoken",
                 "idempotency-key",
-                "x-firebase-token",
+                # S33-e: terminal bearer tokens travel in `Authorization:
+                # Bearer` (already scrubbed above) — the prior
+                # `x-firebase-token` entry was cargo-cult (that header
+                # exists nowhere in the codebase). Also scrub the
+                # E2E mock-signature header so an event can't reveal it.
+                "x-square-hmacsha256-signature",
+                "paypal-transmission-sig",
+                "x-e2e-mock-signature",
             }:
                 headers[hkey] = "[scrubbed]"
         return event

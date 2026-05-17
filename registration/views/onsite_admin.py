@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import re
+import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -1250,13 +1251,12 @@ def oauth_square(request):
     url_state = request.GET.get("state") or ""
     cookie_state = request.COOKIES.get("square_oauth_state") or ""
 
-    # ASVS V2.1.7 / V13.2.6: constant-time compare for any value used as
-    # an authentication or anti-CSRF token.
-    import secrets
-
-    if not (
-        url_state and cookie_state and secrets.compare_digest(url_state, cookie_state)
-    ):
+    # S16: one clear predicate (no double-negative). bool(url_state) rejects
+    # empty/absent state; secrets.compare_digest is constant-time and
+    # returns False for any cookie/url mismatch incl. an empty cookie
+    # (ASVS V2.1.7 / V13.2.6 — anti-CSRF/auth token compare).
+    state_ok = bool(url_state) and secrets.compare_digest(url_state, cookie_state)
+    if not state_ok:
         return JsonResponse(
             {"success": False, "reason": "Saved state did not match URL state"},
             status=400,
