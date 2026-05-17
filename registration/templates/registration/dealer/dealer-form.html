@@ -369,7 +369,9 @@
       beforeSend: function (xhr, settings) {
         if (!(/^http:.*/.test(settings.url) || /^https:.*/.test(settings.url))) {
           // Only send the token to relative URLs i.e. locally.
-          xhr.setRequestHeader("X-CSRFToken", getCookie('csrftoken'));
+          // getCSRFToken() (from main.js) reads the <meta name="csrf_token">
+          // tag, since CSRF_COOKIE_HTTPONLY=True hides the cookie from JS.
+          xhr.setRequestHeader("X-CSRFToken", getCSRFToken());
         }
       }
     });

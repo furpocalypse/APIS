@@ -5,6 +5,12 @@
   <title>{% current_site_name %} {% block title %}{% endblock %}</title>
   <!-- APIS release: {% settings_value 'SENTRY_RELEASE' %} -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% comment %}
+  CSRF token for AJAX. CSRF_COOKIE_HTTPONLY=True means JS can't read the
+  cookie, so the legacy jQuery forms (main.js, dealer-form.html) read the
+  token from this tag instead -- same name the SPA host uses.
+  {% endcomment %}
+  <meta name="csrf_token" content="{{ csrf_token }}">
   <!-- Bootstrap -->
   <!-- <link href="/static/css/bootstrap.min.css" rel="stylesheet" media="screen"> -->
   <link href="{% static 'css/bs-cerulean.css' %}" rel="stylesheet" media="screen">

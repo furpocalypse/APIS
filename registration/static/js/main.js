@@ -44,12 +44,22 @@ function getCookie(name) {
     return cookieValue;
 }
 
+// CSRF token source. With CSRF_COOKIE_HTTPONLY=True the csrftoken cookie is
+// not visible to document.cookie, so read the token from the meta tag
+// rendered by master.html. Fall back to the cookie for any page/config that
+// still exposes it.
+function getCSRFToken() {
+    const meta = document.querySelector("meta[name='csrf_token']");
+    const token = meta && meta.getAttribute("content");
+    return token ? token : getCookie('csrftoken');
+}
+
 async function postJSON(url, body) {
     let headers = {
         'Content-Type': 'application/json',
     };
     if (!(/^http:.*/.test(url) || /^https:.*/.test(url))) {
-        headers['X-CSRFToken'] = getCookie('csrftoken');
+        headers['X-CSRFToken'] = getCSRFToken();
         headers['IDEMPOTENCY-KEY'] = IDEMPOTENCY_KEY;
     }
 
@@ -65,7 +75,7 @@ $(document).ready(function (e) {
         beforeSend: function(xhr, settings) {
             if (!(/^http:.*/.test(settings.url) || /^https:.*/.test(settings.url))) {
                 // Only send the token to relative URLs i.e. locally.
-                xhr.setRequestHeader("X-CSRFToken", getCookie('csrftoken'));
+                xhr.setRequestHeader("X-CSRFToken", getCSRFToken());
                 xhr.setRequestHeader("IDEMPOTENCY-KEY", IDEMPOTENCY_KEY);
             }
         }
