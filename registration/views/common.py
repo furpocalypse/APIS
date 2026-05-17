@@ -15,6 +15,11 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import cache_page
 
+# Plan D-IP: the single client-IP resolver. common.get_client_ip is
+# DELETED (not re-exported with a divergent body); callers use the one
+# resolver. clientip is model-free so this import is safe here too.
+from fm_eventmanager.clientip import get_client_ip
+
 from registration.models import (
     Cart,
     Department,
@@ -52,20 +57,6 @@ def clear_session(request):
             del request.session[key]
             logger.debug(f"Delete session key {key}")
     request.session.save()
-
-
-def get_client_ip(request):
-    # Single source of truth for the client IP. allauth reads
-    # ALLAUTH_TRUSTED_CLIENT_IP_HEADER (X-Real-IP by default) and validates
-    # the value parses as an IP address; if it doesn't (or the header is
-    # absent in tests), allauth falls back per its configured policy. Using
-    # the allauth helper rather than re-implementing the leftmost-XFF read
-    # closes the spoof path where an attacker controls $xff_hosts[0].
-    from allauth.core.internal.httpkit import (
-        get_client_ip as _allauth_get_client_ip,
-    )
-
-    return _allauth_get_client_ip(request)
 
 
 def get_request_meta(request):

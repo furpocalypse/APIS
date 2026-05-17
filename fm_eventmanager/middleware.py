@@ -1,4 +1,6 @@
-"""Project-wide middleware. See fm_eventmanager/settings.py.* for ordering."""
+"""Project-wide middleware. Ordering is pinned in settings_base.MIDDLEWARE:
+RequireClientIPMiddleware is positioned strictly before AxesMiddleware so
+axes never observes an unresolved client IP (plan D-IP / RT-B5)."""
 
 from __future__ import annotations
 
@@ -7,71 +9,63 @@ import logging
 from django.conf import settings
 from django.http import HttpResponseForbidden
 
+# Plan D-IP: the ONE client-IP resolver. clientip is model-free (stdlib +
+# allauth only), so this top-level import is safe while Django resolves
+# MIDDLEWARE / AXES_CLIENT_IP_CALLABLE before app readiness — no
+# AppRegistryNotReady, no lazy imports anywhere in this module.
+from fm_eventmanager.clientip import get_client_ip
+
 logger = logging.getLogger("fm_eventmanager.security")
 
 
 def axes_client_ip(request):
-    """IP-resolution callable for django-axes.
+    """IP-resolution callable for django-axes (``AXES_CLIENT_IP_CALLABLE``).
 
-    Routes through our central :func:`registration.views.common.get_client_ip`
-    so axes lockout state keys off the same client IP that allauth sees
-    (the trusted edge's ``X-Real-IP`` header). Without this, axes would
-    fall back to its own IP detection against the spoofable
-    ``REMOTE_ADDR`` and produce per-attacker lockout state that a real
-    user would also share. ASVS V13.1.4.
-
-    The function is imported via dotted-path string in the
-    ``AXES_CLIENT_IP_CALLABLE`` setting; importing
-    ``registration.views.common`` lazily avoids an import cycle at app
-    startup (this middleware module is loaded before app readiness).
+    Returns the single resolver's result verbatim — **no ``"0.0.0.0"``
+    sentinel**. Coercing an unresolved IP to a constant would collapse
+    every attacker into one axes lockout bucket (fail-open, the inverse of
+    intent). RequireClientIPMiddleware runs before AxesMiddleware and
+    rejects requests whose IP cannot be resolved, so axes never sees a
+    ``None`` here in the enforced (production) path. ASVS V13.1.4.
     """
-    from registration.views.common import get_client_ip
-
-    return get_client_ip(request) or "0.0.0.0"
+    return get_client_ip(request)
 
 
 class RequireClientIPMiddleware:
     """Fail closed when the real client IP cannot be determined.
 
-    The proxy/header pipeline (see CLAUDE.md and nginx.conf) makes nginx the
-    single trust boundary that writes ``X-Real-IP`` to the real client.
-    allauth's ``get_client_ip`` reads that header. *If the header is missing*
-    — because nginx is misconfigured, the deploy bypasses nginx, or a future
-    change removes the trust boundary — every IP-derived security control
-    (rate limiting, allauth login records, audit logging, abuse signals)
-    silently no-ops. That is fail-open, the inverse of what we want.
+    nginx (the trust boundary, plan S13) overwrites the trusted client-IP
+    header with the real client after the realip module rewrites
+    ``$remote_addr`` from a verified upstream. allauth's resolver (the one
+    re-exported by :mod:`fm_eventmanager.clientip`) reads that header. If
+    it is missing — nginx misconfigured, deploy bypasses nginx, or a
+    future change removes the boundary — every IP-derived control (axes
+    lockout, allauth login records, audit logging, rate limits) silently
+    no-ops. That is fail-open; this middleware makes it fail-closed.
 
-    OWASP A01 (Broken Access Control), ASVS V13.1.4, OWASP "HTTP Headers"
-    cheat sheet: derive the client IP only from a header set by the trusted
-    edge, AND fail closed if that derivation fails.
+    OWASP A01, ASVS V13.1.4. Behaviour:
 
-    Behaviour:
-      * ``DEBUG=True``: no-op. Local runserver / tests / dev flows are
-        unaffected. The flag is captured at construction time so the
-        per-request hot path in production has no extra branch.
-      * ``DEBUG=False``: call ``registration.views.common.get_client_ip``;
-        if it returns ``None``, return a generic 403. Otherwise stash the
-        resolved IP on ``request.client_ip`` for downstream code that
-        wants to skip re-resolution.
+      * ``DEBUG=True``: no-op (local runserver / tests / dev). Captured at
+        construction so the prod hot path has no extra branch.
+      * ``DEBUG=False``: resolve the client IP; if ``None``, return a
+        generic 403 (the message intentionally leaks nothing about the
+        trust chain) and log the reason at WARNING on the
+        ``fm_eventmanager.security`` logger. Otherwise stash the resolved
+        IP on ``request.client_ip`` for downstream reuse.
 
-    The 403 response intentionally does NOT explain the precise cause to
-    the caller (an attacker fingerprinting the trust chain learns nothing
-    from a generic message). The reason is logged at WARNING.
+    The WARNING line is PII-safe and triage-sufficient: it carries the
+    path and the (attacker-controlled, non-PII) spoof-header values only —
+    never session id, cookie, Authorization, or request body (plan BT-B5).
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
-        # Capture DEBUG at construction time. Flipping DEBUG at runtime is
-        # not supported by Django anyway, and this lets us avoid a per-
-        # request settings dereference in the prod hot path.
+        # DEBUG is fixed for a process; capture once to avoid a per-request
+        # settings dereference on the prod hot path.
         self._enforce = not settings.DEBUG
 
     def __call__(self, request):
         if self._enforce:
-            # Imported lazily so the middleware module can be imported
-            # before app loading (registration.views imports app models).
-            from registration.views.common import get_client_ip
-
             ip = get_client_ip(request)
             if ip is None:
                 logger.warning(
@@ -85,9 +79,6 @@ class RequireClientIPMiddleware:
                 return HttpResponseForbidden(
                     "Forbidden: client identity could not be determined."
                 )
-            # Convenience cache. Downstream code (rate-limit decorators,
-            # views that log the IP for audit) can read request.client_ip
-            # without re-doing the header parse.
             request.client_ip = ip
 
         return self.get_response(request)
