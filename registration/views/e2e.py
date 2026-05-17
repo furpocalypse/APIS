@@ -54,7 +54,7 @@ def reset(request):
     for model in _VOLATILE:
         model.objects.all().delete()
     # S3 test (c): the e2e harness runs with axes ACTIVE
-    # (APIS_TEST_AXES_ENABLED=1). Clear axes lockout state between specs so
+    # (up.sh exports AXES_ENABLED=true). Clear axes lockout state between specs so
     # the deliberate bad-password auth test (and any Playwright retry /
     # cross-browser project) cannot lock the shared e2e-admin and cascade
     # every later login test. The brute-force control stays exercised

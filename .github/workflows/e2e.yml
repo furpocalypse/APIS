@@ -92,7 +92,10 @@ jobs:
 
       - name: Run Playwright suite
         env:
-          DJANGO_SETTINGS_MODULE: fm_eventmanager.settings_test
+          # Decision #11: single canonical module; up.sh sources .env.test
+          # for the full posture. Set here too so it is correct even before
+          # up.sh runs.
+          DJANGO_SETTINGS_MODULE: fm_eventmanager.settings
           TEST_DATABASE_HOST: 127.0.0.1
           TEST_DATABASE_PORT: 5432
           TEST_DATABASE_USER: apis

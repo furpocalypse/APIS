@@ -275,6 +275,13 @@ MIDDLEWARE = [
     "axes.middleware.AxesMiddleware",
 ]
 
+# Decision #11: WhiteNoise serves /static/ from gunicorn in prod. The
+# Django test runner never serves static and the manifest-strict path adds
+# avoidable CI fragility, so the test/CI .env.* set WHITENOISE_ENABLED=false
+# to drop it. LOGIC lives here; the VALUE lives in the active .env.* file.
+if not eval_bool(os.getenv("WHITENOISE_ENABLED", "True")):
+    MIDDLEWARE = [m for m in MIDDLEWARE if "whitenoise" not in m]
+
 # django-debug-toolbar is dev-only. Adding the app/middleware unconditionally
 # (a) leaks SQL / settings / stacks to anyone who can reach the listener if
 # DEBUG flips to True for any reason, and (b) crashes import in any prod
@@ -364,6 +371,13 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True"))
 CELERY_TASK_SEND_SENT_EVENT = eval_bool(os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True"))
+# Decision #11: tests run Celery eagerly so .delay() side effects resolve
+# before the HTTP response. Prod uses the real broker (default False). The
+# test/CI/e2e .env.* set CELERY_TASK_ALWAYS_EAGER=true.
+CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "False"))
+CELERY_TASK_EAGER_PROPAGATES = eval_bool(
+    os.getenv("CELERY_TASK_EAGER_PROPAGATES", "False")
+)
 
 
 # Prometheus metrics
@@ -453,6 +467,15 @@ ACCOUNT_ADAPTER = "fm_eventmanager.adapters.account.RegistrationAccountAdapter"
 #                            other IP-derived control uses. Otherwise axes
 #                            would re-implement IP detection against the
 #                            wrong header.
+# Decision #11 / S3 / S6 / S10: axes defaults ENABLED (prod + django-axes
+# default). The unit test runner's .env.test sets AXES_ENABLED=false so the
+# request-less Django test-client `client.login()` works (it calls
+# authenticate() with no request, which AxesStandaloneBackend rejects); the
+# e2e harness sets it true so Playwright exercises the brute-force control
+# active. Real lockout behaviour is proven by
+# registration.tests.test_middleware.TestAxesLockoutAtConfiguredLimit
+# (@override_settings(AXES_ENABLED=True) against the real /accounts/login/).
+AXES_ENABLED = eval_bool(os.getenv("AXES_ENABLED", "True"))
 AXES_FAILURE_LIMIT = int(os.getenv("AXES_FAILURE_LIMIT", "5"))
 AXES_COOLOFF_TIME = int(os.getenv("AXES_COOLOFF_TIME_HOURS", "1"))
 AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
@@ -584,7 +607,10 @@ if DEBUG:
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "/static/"
-STATIC_ROOT = "/app/apis/static/"
+# Decision #11: env-driven. Prod image bakes /app/apis/static/; test/CI
+# .env.* point this at a writable /tmp path (collectstatic can't write the
+# image path off-image).
+STATIC_ROOT = os.getenv("STATIC_ROOT", "/app/apis/static/")
 # NOTE: do NOT add a ("bundler", ...) STATICFILES_DIRS entry here. The Vite
 # build in Dockerfile's ``assets`` stage outputs to
 # ``registration/static/bundler/`` — Django's AppDirectoriesFinder picks that
@@ -785,9 +811,12 @@ VALIDATE_TEMPLATES_IGNORE_APPS = ["allauth"]
 
 # ===================================================================
 # Binding plan invariants (PR #41 remediation — see plan Decisions
-# #8/RT-B2, D-IP, S35). settings_base.py is the single tracked
-# env-driven source; settings.py / settings_test.py / settings.py.example
-# are thin `from .settings_base import *` specializations.
+# #8/RT-B2, D-IP, S35, and Decision #11). This is THE single canonical,
+# tracked, env-driven settings module — there is no settings_base /
+# settings_test split. Per-environment particulars live in fully
+# independent `.env.${APIS_ENV}` files loaded by the process manager
+# (compose `env_file:` / Makefile TEST_ENV / CI). settings.py owns
+# LOGIC; the .env.* files carry VALUES.
 # ===================================================================
 
 # A positive production signal, independent of DEBUG. RT-B2: an operator
@@ -809,13 +838,16 @@ if _IS_PROD and _E2E_ENV:
     )
 E2E_MODE = bool(DEBUG) and _E2E_ENV
 
-# RT-B2: in a production-signalled process the active settings module must
-# not be the test module (which sets DEBUG/E2E posture and would re-open
-# the bypass).
-if _IS_PROD and "settings_test" in os.getenv("DJANGO_SETTINGS_MODULE", ""):
+# RT-B2 (Decision #11): there is no separate test settings module to
+# misselect anymore; the residual risk is a non-production `.env.*` (which
+# sets DEBUG=True + the E2E/test posture) being loaded in a production
+# process. A production-signalled process MUST NOT run with DEBUG — that
+# is the load-bearing guard now that env files (not the module) carry the
+# posture. Fail closed at import.
+if _IS_PROD and DEBUG:
     raise RuntimeError(
-        "DJANGO_SETTINGS_MODULE points at settings_test while "
-        "APIS_ENV=production — refusing to start."
+        "APIS_ENV=production with DJANGO_DEBUG truthy — a non-production "
+        ".env.* was loaded in a production process. Refusing to start."
     )
 
 # D-IP: allauth's get_client_ip falls back to REMOTE_ADDR only when

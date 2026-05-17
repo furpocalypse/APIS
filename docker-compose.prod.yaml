@@ -124,7 +124,10 @@ services:
     expose:
       - "8000"   # internal only; the nginx sidecar reaches it as app:8000
     env_file:
-      - .env
+      # Decision #11: production values live in .env.production (gitignored;
+      # distributed out-of-band — copy .env.production.example). It sets
+      # APIS_ENV=production + DJANGO_SETTINGS_MODULE=fm_eventmanager.settings.
+      - .env.production
     cap_drop:
       - ALL
     security_opt:
@@ -151,7 +154,10 @@ services:
     command: worker
     restart: always
     env_file:
-      - .env
+      # Decision #11: production values live in .env.production (gitignored;
+      # distributed out-of-band — copy .env.production.example). It sets
+      # APIS_ENV=production + DJANGO_SETTINGS_MODULE=fm_eventmanager.settings.
+      - .env.production
     cap_drop:
       - ALL
     security_opt:

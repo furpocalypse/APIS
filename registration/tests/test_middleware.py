@@ -103,7 +103,7 @@ class TestMiddlewareOrderingAndPurity(TestCase):
 class TestAxesLockoutAtConfiguredLimit(TestCase):
     """S3 test (a) / S10 / S6-shared.
 
-    The unit suite runs with ``AXES_ENABLED=False`` (settings_test) so the
+    The unit suite runs with ``AXES_ENABLED=False`` (.env.test) so the
     Django test client's request-less ``client.login()`` works. That posture
     must NOT mean the brute-force control is untested: here axes is forced
     ACTIVE (prod-equivalent) and exercised through the *real*

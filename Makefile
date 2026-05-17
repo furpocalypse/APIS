@@ -195,27 +195,14 @@ SQUARE_APPLICATION_ID ?= test
 SQUARE_ACCESS_TOKEN   ?= test
 SQUARE_LOCATION_ID    ?= test
 
-TEST_ENV = \
-	DJANGO_SETTINGS_MODULE=fm_eventmanager.settings_test \
-	DJANGO_SECRET_KEY=test \
-	PAYPAL_CLIENT_ID=$(PAYPAL_CLIENT_ID) \
-	PAYPAL_CLIENT_SECRET=$(PAYPAL_CLIENT_SECRET) \
-	SQUARE_APPLICATION_ID=$(SQUARE_APPLICATION_ID) \
-	SQUARE_ACCESS_TOKEN=$(SQUARE_ACCESS_TOKEN) \
-	SQUARE_LOCATION_ID=$(SQUARE_LOCATION_ID) \
-	ALLOWED_HOSTS='testserver,localhost,127.0.0.1' \
-	CSRF_TRUSTED_ORIGINS='http://testserver,http://localhost,http://127.0.0.1' \
-	TRUSTED_CLIENT_IP_HEADER='' \
-	DATABASE_HOST=$(TEST_DATABASE_HOST) DATABASE_PORT=$(TEST_DATABASE_PORT) \
-	DATABASE_USER=$(TEST_DATABASE_USER) DATABASE_PASS=$(TEST_DATABASE_PASS) \
-	DATABASE_NAME=$(TEST_DATABASE_NAME) DJANGO_DATABASE_POOL=False \
-	DJANGO_REDIS_URL=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/1 \
-	CELERY_BROKER_URL=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/2 \
-	CELERY_RESULT_BACKEND=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/2 \
-	IDEMPOTENCY_KEY_LOCK_LOCATION=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT) \
-	STATIC_ROOT=$(TEST_STATIC_ROOT) \
-	MAINTENANCE_MODE_STATE_FILE_PATH=$(CURDIR)/build/maintenance_mode_state.txt \
-	GOTENBERG_HOST=http://127.0.0.1:3000
+# Decision #11: the test posture lives in the tracked, secret-free,
+# fully-independent .env.test (APIS_ENV=test). TEST_ENV is a command
+# prefix that loads it (set -a exports every KEY=value) so the existing
+# `$(TEST_ENV) uv run …` call sites are unchanged. Pre-exported env vars
+# (e.g. real PAYPAL_* sandbox creds for `make test-paypal`) can still be
+# layered by exporting them before invoking make and re-sourcing is
+# idempotent. CI does NOT use this — django.yml loads .env.ci directly.
+TEST_ENV = set -a && . ./.env.test && set +a &&
 
 # Fail loudly if a model change on the branch lacks a migration. Django's
 # test runner applies existing migrations to the throwaway test database, so
@@ -389,7 +376,11 @@ e2e-ui:
 
 # mypy/pylint load Django via the django-stubs / pylint-django plugins, which
 # import settings_test; that needs a (throwaway) secret key and a STATIC_ROOT.
-LINT_ENV = DJANGO_SETTINGS_MODULE=fm_eventmanager.settings_test DJANGO_SECRET_KEY=lint STATIC_ROOT=$(CURDIR)/build/lint-static
+# Decision #11: mypy/pylint import the Django settings (django plugins),
+# so they need a clean importable env (DEBUG/ALLOWED_HOSTS/…). Reuse the
+# tracked .env.test posture rather than a partial inline env that would
+# trip settings.py's !DEBUG ALLOWED_HOSTS guard.
+LINT_ENV = set -a && . ./.env.test && set +a &&
 
 lint:
 	uv run ruff check .

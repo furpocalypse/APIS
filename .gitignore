@@ -39,7 +39,8 @@ fm_eventmanager/maintenance_mode_state.txt
 localhost.crt
 localhost.key
 .env
-.env.dev
+.env.production
+.env.*.local
 database.env
 .tmp_*
 # Local cert experiments (not the apis-nginx mount path — that's /opt/apis/certs
@@ -68,5 +69,4 @@ docker-compose.override.yaml
 /registration/static/django_extensions/
 /registration/static/import_export/
 /registration/static/mfa/
-fm_eventmanager/settings.py
 azure/.azure

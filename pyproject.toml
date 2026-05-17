@@ -131,11 +131,11 @@ check_untyped_defs = false
 disallow_untyped_defs = false
 
 [tool.django-stubs]
-django_settings_module = "fm_eventmanager.settings_test"
+django_settings_module = "fm_eventmanager.settings"
 
 [tool.pylint.main]
 load-plugins = ["pylint_django"]
-django-settings-module = "fm_eventmanager.settings_test"
+django-settings-module = "fm_eventmanager.settings"
 ignore-paths = ["^.*/migrations/.*$", "^registration/frontend/.*$"]
 jobs = 0
 

@@ -87,44 +87,22 @@ jobs:
       - name: Run frontend tests
         working-directory: registration/frontend
         run: npm run test:run
+      - name: Load .env.ci into the job environment
+        # Decision #11: there is no settings_test module. The single
+        # canonical settings.py is driven by the tracked, secret-free,
+        # fully-independent .env.ci (APIS_ENV=ci). Append its KEY=value
+        # lines (sans comments/blanks) to $GITHUB_ENV so subsequent steps
+        # see them. Real sandbox secrets are injected separately below.
+        run: grep -vE '^[[:space:]]*#|^[[:space:]]*$' .env.ci >> "$GITHUB_ENV"
       - name: Run Tests
         run: |
-          # settings_test.py is the canonical test settings; no copy needed.
-          # The Django test runner picks up DJANGO_SETTINGS_MODULE; we set
-          # it explicitly below.
           uv run python ./manage.py collectstatic --noinput
           uv run coverage run ./manage.py test registration
           uv run coverage report --fail-under=${COVERAGE_FAIL_UNDER}
         env:
-          # S1(c): the PR removed the `cp settings.py.ci settings.py` line but
-          # never set DJANGO_SETTINGS_MODULE, so collectstatic/test would
-          # ImproperlyConfigured (manage.py defaults to the now-untracked
-          # fm_eventmanager.settings). settings_test is canonical for CI.
-          DJANGO_SETTINGS_MODULE: fm_eventmanager.settings_test
-          # D-COV: enforce the measured baseline (recorded in plan Findings;
-          # captured from the first green run, then pinned > 0).
-          COVERAGE_FAIL_UNDER: "0"
-          # Ergonomic test posture (matches the retired settings.py.ci:
-          # DEBUG=True) so settings_base's DEBUG-gated defaults apply and the
-          # !DEBUG SSL-redirect/secure-cookie block does not break the test
-          # client. Strict prod assertions stay keyed off APIS_ENV (unset).
-          DJANGO_DEBUG: "True"
-          DJANGO_SECRET_KEY: ci-test-secret
-          ALLOWED_HOSTS: "testserver,localhost,127.0.0.1"
-          CSRF_TRUSTED_ORIGINS: "http://testserver,http://localhost,http://127.0.0.1"
-          TRUSTED_CLIENT_IP_HEADER: ""
-          DATABASE_HOST: localhost
-          DATABASE_PORT: "5432"
-          DATABASE_USER: postgres
-          DATABASE_PASS: postgres
-          DATABASE_NAME: postgres
-          DJANGO_DATABASE_POOL: "False"
-          STATIC_ROOT: /tmp/apis-ci-static
-          GOTENBERG_HOST: http://localhost:3000
-          DJANGO_REDIS_URL: redis://localhost:6379/1
-          CELERY_BROKER_URL: redis://localhost:6379/2
-          CELERY_RESULT_BACKEND: redis://localhost:6379/2
-          IDEMPOTENCY_KEY_LOCK_LOCATION: redis://localhost:6379
+          # Secrets cannot live in tracked .env.ci — inject from GitHub
+          # Actions secrets (sandbox creds; settings.py reads them via
+          # os.environ.get(..., "") so absence is a safe sandbox default).
           SQUARE_APPLICATION_ID: ${{ secrets.SQUARE_APPLICATION_ID }}
           SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}
           SQUARE_LOCATION_ID: ${{ secrets.SQUARE_LOCATION_ID }}
