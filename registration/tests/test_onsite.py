@@ -85,6 +85,20 @@ class OnsiteBaseTestCase(TestCase):
         self.boogeyman_hold = HoldType.objects.create(name="Boogeyman")
 
         self.client = Client()
+        # MED-2: binding a terminal to the session now requires the
+        # device's signed terminal-token cookie to match. The default
+        # client "operates from" self.terminal; use bind_terminal() to
+        # switch the proven terminal in a test.
+        self.bind_terminal(self.terminal)
+
+    def bind_terminal(self, terminal):
+        """Set the signed terminal-token cookie proving possession of
+        ``terminal`` (mirrors registration.views.onsite_admin)."""
+        from django.core.signing import TimestampSigner
+
+        self.client.cookies["terminal-token"] = TimestampSigner().sign_object(
+            {"terminal": terminal.name}
+        )
 
     def add_to_cart(self, level, options):
         form_data = {
@@ -667,7 +681,9 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
     @patch("registration.mqtt.send_mqtt_message")
     def test_cash_mismatch_rejected_when_both_known(self, mock_mqtt):
         order = self._make_order("CASH-MM", opened_at=self.terminal)
-        # Active session terminal = terminal_b, order bound to terminal A.
+        # Active session terminal = terminal_b (prove it via its cookie),
+        # order bound to terminal A.
+        self.bind_terminal(self.terminal_b)
         self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal_b.id})
         args = {"reference": "CASH-MM", "total": order.total, "tendered": order.total}
         response = self.client.post(
@@ -677,6 +693,25 @@ class TestTerminalOrderBinding(OnsiteBaseTestCase):
         self.assertFalse(response.json()["success"])
         order.refresh_from_db()
         self.assertEqual(order.status, Order.PENDING)
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_med2_url_param_without_proof_does_not_bind(self, mock_mqtt):
+        """MED-2: ?terminal= alone (cookie proves a different terminal)
+        must NOT bind terminal_b. The order is opened@terminal_a, so with
+        no proven terminal_b the cross-terminal guard cannot engage and
+        the cash sale completes (proving the bind was rejected, not that
+        terminal_b became the active terminal)."""
+        order = self._make_order("CASH-NP", opened_at=self.terminal)
+        # Cookie still proves self.terminal (base setUp); request binds
+        # terminal_b by URL param only → rejected.
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal_b.id})
+        args = {"reference": "CASH-NP", "total": order.total, "tendered": order.total}
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+        )
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.COMPLETED)
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_cash_match_completes(self, mock_mqtt):

@@ -50,6 +50,26 @@ Net effect: a leaked or shared terminal token can only complete the orders
 that were explicitly routed to *that* terminal — not arbitrary orders, and
 not any staff-tier action.
 
+## Session ↔ terminal binding (MED-2)
+
+A staff session's *active terminal* is bound from the `?terminal=<id>`
+parameter on the onsite-admin endpoints. That parameter alone is **not**
+sufficient: the request must also carry the device's signed
+`terminal-token` cookie (issued by `terminal_square_token`, same
+`TimestampSigner` + 30-minute window as `notify_terminal`) whose embedded
+terminal **name** matches the terminal being bound. Without that proof the
+bind is rejected and logged (`fm_eventmanager.security`), and the session
+is left with no selected terminal — the page still renders.
+
+Operational consequence: terminal selection must be performed **from the
+provisioned terminal device** (the browser that holds the signed
+`terminal-token` cookie). A generic staff console with no terminal cookie
+can browse the onsite admin but cannot bind a terminal; money-mutating
+cash/drawer actions then simply skip their receipt-print push (the
+financial ledger entry is still recorded and audited) rather than failing.
+Bearer-token paths (`complete_square_transaction`) are unaffected — they
+establish the session terminal only after `Firebase.find_by_token`.
+
 ## Operational rules
 
 - A terminal token is a secret. Rotate it (`admin` → terminal → Rotate,

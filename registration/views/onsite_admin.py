@@ -65,6 +65,33 @@ def get_active_terminal(request) -> Firebase | None:
     return None
 
 
+# MED-2 (OWASP A07 / ASVS V3.2.1): binding a terminal to a staff session
+# from a bare ``?terminal=<id>`` param trusted the URL indefinitely — a
+# session's active-terminal context could be flipped by anyone who could
+# reach the staff-gated endpoint. Re-validate possession of the terminal
+# by requiring the device's signed ``terminal-token`` cookie (issued by
+# terminal_square_token, same TimestampSigner + 30 min window as
+# notify_terminal) to match the terminal being bound. Bearer-token paths
+# (complete_square_transaction) set the session terminal only after
+# Firebase.find_by_token and never go through these URL-param binders, so
+# they are unaffected.
+_TERMINAL_TOKEN_MAX_AGE = 60 * 30
+_security_logger = logging.getLogger("fm_eventmanager.security")
+
+
+def _request_proves_terminal(request, terminal: Firebase) -> bool:
+    """True iff the request carries a valid signed terminal-token cookie
+    whose embedded terminal name matches ``terminal``."""
+    cookie = request.COOKIES.get("terminal-token")
+    if not cookie:
+        return False
+    try:
+        data = TimestampSigner().unsign_object(cookie, max_age=_TERMINAL_TOKEN_MAX_AGE)
+    except Exception:
+        return False
+    return data.get("terminal") == terminal.name
+
+
 @require_safe
 @staff_member_required
 def onsite_admin(request):
@@ -110,22 +137,32 @@ def onsite_admin_context(request):
     terminal_id = request.GET.get("terminal", None)
     if terminal_id:
         terminal = Firebase.objects.get(id=terminal_id)
-        request.session["terminal"] = terminal.id
+        # MED-2: only bind the terminal to this session if the request
+        # proves possession of that terminal (signed terminal-token
+        # cookie). Otherwise skip the bind and render with no selected
+        # terminal — the page still works, the URL param alone cannot
+        # flip a staff session's active-terminal context.
+        if _request_proves_terminal(request, terminal):
+            request.session["terminal"] = terminal.id
 
-        selected_terminal = {
-            "id": terminal.id,
-            "features": {
-                "card": terminal.payment_type is not None,
-                "cashdrawer": terminal.cashdrawer,
-                "prompt": terminal.payment_type == Firebase.MQTT_REGISTER_APP,
-                "squareTerminal": terminal.square_terminal_id is not None,
-            },
-        }
+            selected_terminal = {
+                "id": terminal.id,
+                "features": {
+                    "card": terminal.payment_type is not None,
+                    "cashdrawer": terminal.cashdrawer,
+                    "prompt": terminal.payment_type == Firebase.MQTT_REGISTER_APP,
+                    "squareTerminal": terminal.square_terminal_id is not None,
+                },
+            }
 
-        mqtt_context = {
-            "broker": getattr(settings, "MQTT_EXTERNAL_BROKER", None),
-            "auth": mqtt.get_onsite_admin_token(terminal),
-        }
+            mqtt_context = {
+                "broker": getattr(settings, "MQTT_EXTERNAL_BROKER", None),
+                "auth": mqtt.get_onsite_admin_token(terminal),
+            }
+        else:
+            _security_logger.warning(
+                "terminal bind rejected: no valid terminal-token proof (onsite_admin_context)"
+            )
 
     context = {
         "user": {
@@ -271,10 +308,20 @@ def get_terminal_from_request(request) -> Firebase | None:
 
     if url_terminal:
         try:
-            active = Firebase.objects.get(id=int(url_terminal))
-            request.session["terminal"] = active.id
+            candidate = Firebase.objects.get(id=int(url_terminal))
         except (ValueError, Firebase.DoesNotExist):
             return None
+        # MED-2: a URL/POST `terminal` param may bind the session only
+        # with a valid signed terminal-token proof for that terminal.
+        # Without proof, ignore the param and fall back to an already
+        # (proven) session terminal — the param alone can't flip context.
+        if _request_proves_terminal(request, candidate):
+            active = candidate
+            request.session["terminal"] = active.id
+        else:
+            _security_logger.warning(
+                "terminal bind rejected: no valid terminal-token proof (get_terminal_from_request)"
+            )
 
     if not active and session_terminal:
         try:
@@ -598,7 +645,12 @@ def drawer_status(request):
 @permission_required("order.cash_admin")
 def no_sale(request):
     position = get_active_terminal(request)
-    mqtt.send_mqtt_message(mqtt.get_topic("receipt/nosale", name=str(position.name)))
+    # MED-2: no proven terminal → nothing to print to; the no-sale event
+    # is itself non-financial, so just skip the receipt push.
+    if position is not None:
+        mqtt.send_mqtt_message(mqtt.get_topic("receipt/nosale", name=str(position.name)))
+    else:
+        _security_logger.warning("no-sale receipt not pushed: no proven terminal bound to session")
 
     return JsonResponse({"success": True})
 
@@ -607,6 +659,13 @@ def no_sale(request):
 @permission_required("order.cash_admin")
 def print_audit_receipt(request, audit_type, cash_ledger, cashdraw=True):
     position = get_active_terminal(request)
+    # MED-2: the cash-drawer ledger entry is already persisted by the
+    # caller (audited regardless); the audit *slip* just needs a print
+    # target. With no proven terminal, skip the push instead of 500-ing a
+    # completed, permission-gated drawer action.
+    if position is None:
+        _security_logger.warning("audit-slip not pushed: no proven terminal bound to session")
+        return
     event = Event.objects.get(default=True)
     payload = {
         "v": 1,
@@ -769,8 +828,19 @@ def complete_cash_transaction(request):
 
     payload = cash_receipt_payload(order, tendered, total)
 
-    terminal = get_active_terminal(request)
-    mqtt.send_mqtt_message(mqtt.get_topic("receipt/print/cash", name=str(terminal.name)), payload)
+    # MED-2: with the bind-gate, no session terminal may be resolvable
+    # (e.g. a console without a valid terminal-token proof). The cash sale
+    # itself is already recorded; only the receipt-print push needs a
+    # terminal. Skip the push (log, don't 500) rather than fail a
+    # completed, permitted, audited cash transaction on a missing receipt
+    # target.
+    if active_terminal is not None:
+        mqtt.send_mqtt_message(
+            mqtt.get_topic("receipt/print/cash", name=str(active_terminal.name)),
+            payload,
+        )
+    else:
+        _security_logger.warning("cash receipt not pushed: no proven terminal bound to session")
 
     return JsonResponse({"success": True})
 
