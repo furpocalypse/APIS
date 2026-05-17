@@ -72,11 +72,11 @@ command -v az >/dev/null 2>&1 \
 ok "docker, compose, az CLI present"
 
 [ -f "$COMPOSE_FILE" ]                  || { err "compose file not found: $COMPOSE_FILE"; exit 1; }
-[ -f "${COMPOSE_DIR}/.env" ]            || { err ".env not found: ${COMPOSE_DIR}/.env (copy .env.prod.example, fill in real values)"; exit 1; }
+[ -f "${COMPOSE_DIR}/.env.production" ]            || { err ".env.production not found: ${COMPOSE_DIR}/.env.production (copy .env.production.example, fill in real values)"; exit 1; }
 [ -f "${COMPOSE_DIR}/database.env" ]    || { err "database.env not found: ${COMPOSE_DIR}/database.env"; exit 1; }
 ok "compose file + .env + database.env present"
 
-# Refuse to deploy if .env still has known-bad placeholder values.
+# Refuse to deploy if .env.production still has known-bad placeholder values.
 declare -a PLACEHOLDERS=(
     "supersecretcrypt"
     "your-strong-password-here"
@@ -86,16 +86,16 @@ declare -a PLACEHOLDERS=(
     "REPLACE_ME"
 )
 for ph in "${PLACEHOLDERS[@]}"; do
-    if grep -qF "$ph" "${COMPOSE_DIR}/.env"; then
-        err ".env contains the placeholder value '${ph}' — refusing to deploy."
+    if grep -qF "$ph" "${COMPOSE_DIR}/.env.production"; then
+        err ".env.production contains the placeholder value '${ph}' — refusing to deploy."
         err "Replace every placeholder with a real production secret first."
         exit 1
     fi
 done
-ok ".env has no known placeholder secrets"
+ok ".env.production has no known placeholder secrets"
 
-# Find APIS_DATA_DIR (env override > .env > default in compose).
-DATA_DIR="${APIS_DATA_DIR:-$(read_env APIS_DATA_DIR "${COMPOSE_DIR}/.env" || true)}"
+# Find APIS_DATA_DIR (env override > .env.production > default in compose).
+DATA_DIR="${APIS_DATA_DIR:-$(read_env APIS_DATA_DIR "${COMPOSE_DIR}/.env.production" || true)}"
 DATA_DIR="${DATA_DIR:-/srv/apis}"
 
 if mountpoint -q "$DATA_DIR" 2>/dev/null; then
@@ -204,7 +204,7 @@ fi
 log "Step 5 — ${bold "bootstrap initial admin (idempotent)"}"
 
 # bootstrap_admin --from-env reads BOOTSTRAP_ADMIN_{USERNAME,EMAIL,PASSWORD}
-# from the container env (sourced from .env). If a superuser already exists
+# from the container env (sourced from .env.production). If a superuser already exists
 # the command short-circuits with success and a "nothing to do" message —
 # so re-running this script is safe after the first deploy.
 if docker compose -f "$COMPOSE_FILE" exec -T app /app/manage.py bootstrap_admin --from-env; then
@@ -213,7 +213,7 @@ else
     rc=$?
     err "bootstrap_admin failed with exit code $rc."
     err "Verify BOOTSTRAP_ADMIN_USERNAME / BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD"
-    err "are set in ${COMPOSE_DIR}/.env, and the password is >= 12 chars + not in the"
+    err "are set in ${COMPOSE_DIR}/.env.production, and the password is >= 12 chars + not in the"
     err "common-password list (AUTH_PASSWORD_VALIDATORS will reject weak passwords)."
     exit "$rc"
 fi
@@ -229,7 +229,7 @@ Next:
        curl -fsS -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-For: 127.0.0.1' \\
             https://localhost/robots.txt -k
 
-  2. ${bold "Scrub the bootstrap password from ${COMPOSE_DIR}/.env"} now that the
+  2. ${bold "Scrub the bootstrap password from ${COMPOSE_DIR}/.env.production"} now that the
      admin exists. The bootstrap command unsets BOOTSTRAP_ADMIN_PASSWORD
      from os.environ at runtime, but the value is still on disk. Either
      comment it out or rotate it to an obviously-invalid placeholder so

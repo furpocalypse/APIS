@@ -45,12 +45,13 @@ Optional monitoring stack (InfluxDB 3 + Prometheus + node-exporter + Grafana): `
 git clone https://github.com/furpocalypse/APIS.git
 cd APIS
 
-# Copy the templates and fill in real values:
-cp .env.dev.example .env.dev
+# Decision #11: `.env.dev` is TRACKED, complete and secret-free — the dev
+# compose loads it directly, so `docker compose up` Just Works after a
+# clean clone. Only the DB credential file is per-machine:
 cp database.env.example database.env
-# (.env.dev and database.env are gitignored; edit them as needed.
-# DATABASE_USER / DATABASE_PASS in .env.dev must match POSTGRES_USER /
-# POSTGRES_PASSWORD in database.env.)
+# (database.env is gitignored. DATABASE_USER / DATABASE_PASS in .env.dev
+# must match POSTGRES_USER / POSTGRES_PASSWORD in database.env; edit
+# .env.dev in place only if you change those.)
 
 # Install Docker if you don't have it; on Ubuntu:
 #   curl -fsSL https://get.docker.com | sh
@@ -69,15 +70,15 @@ Then open <http://localhost:8000/registration/> in a browser. Dev exposes gunico
 
 ```bash
 # On the VM, in /opt/apis:
-cp .env.prod.example .env                # prod compose loads .env (not .env.dev); fill in REAL secrets / ACR token / etc.
-cp database.env.example database.env     # POSTGRES_PASSWORD must match DATABASE_PASS in .env
+cp .env.production.example .env.production   # Decision #11: prod compose loads .env.production (APIS_ENV=production); fill in REAL secrets / ACR token / etc.
+cp database.env.example database.env         # POSTGRES_PASSWORD must match DATABASE_PASS in .env.production
 
 # Run the one-shot deploy script — handles data-dir ownership, ACR login,
 # pull + up, healthcheck wait, and admin bootstrap. Idempotent.
 ./azure-vm-deploy.sh
 ```
 
-See [`.env.prod.example`](.env.prod.example), [`docker-compose.prod.yaml`](docker-compose.prod.yaml), and the [`azure-vm-deploy.sh`](azure-vm-deploy.sh) header docstring for the full operator runbook.
+See [`.env.production.example`](.env.production.example), [`docker-compose.prod.yaml`](docker-compose.prod.yaml), [`docs/deploy-preflight.md`](docs/deploy-preflight.md) (image-digest + netpol/CIDR preflight), and the [`azure-vm-deploy.sh`](azure-vm-deploy.sh) header docstring for the full operator runbook.
 
 ### Production use — additional infrastructure
 

@@ -33,9 +33,10 @@
 #     Origin Certificate. nginx refuses to start without the cert files.
 #
 # REQUIRED on the VM before `docker compose ... up`:
-#   - `.env`           (created from .env.prod.example; never commit)
+#   - `.env.production` (created from .env.production.example; never
+#                        commit; APIS_ENV=production — Decision #11)
 #   - `database.env`   (POSTGRES_DB / USER / PASSWORD; must match the
-#                       DATABASE_* values in .env above)
+#                       DATABASE_* values in .env.production above)
 #   - ACR login:       `az acr login --name furpocalypse`  (or a service
 #                       principal write-token in `docker login`)
 #   - APIS_DATA_DIR    persistent disk mounted; owner uid 1000:1000 on
