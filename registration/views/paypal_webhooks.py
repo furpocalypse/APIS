@@ -3,6 +3,8 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from types import ModuleType
+from typing import Literal
 
 from django.conf import settings
 from django.core.cache import cache
@@ -19,6 +21,9 @@ from registration.views.webhook_age import (
     webhook_within_age_window,
 )
 
+# Optional dependency: declare as Optional module so the `is None`
+# guards below type-check cleanly (no suppression needed).
+sentry_sdk: ModuleType | None
 try:
     import sentry_sdk
 except ImportError:
@@ -26,8 +31,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Sentry's capture_message accepts only this fixed set of level strings.
+_SentryLevel = Literal["fatal", "critical", "error", "warning", "info", "debug"]
 
-def _sentry_capture(message: str, level: str = "warning", **tags) -> None:
+
+def _sentry_capture(message: str, level: _SentryLevel = "warning", **tags) -> None:
     if sentry_sdk is None:
         return
     with sentry_sdk.push_scope() as scope:

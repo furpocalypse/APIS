@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from typing import Any, Protocol, cast
 from unittest.mock import Mock, patch
 
 from django.test import override_settings, tag
@@ -49,7 +50,19 @@ def generate_refund_mock(id: str, status: RefundStatus, amount: float, reason: s
     }}""".format(**locals())
 
 
-def create_api_response(body: str | dict, body_type: type, code: int | None = 200) -> ApiResponse:
+class _PayPalModelClass(Protocol):
+    """The shared shape of every PayPal SDK model class used as a response body.
+
+    Each generated SDK model exposes a ``from_dictionary`` classmethod that
+    deserializes a parsed-JSON ``dict`` into a model instance.
+    """
+
+    def from_dictionary(self, dictionary: Any) -> Any: ...
+
+
+def create_api_response(
+    body: str | dict, body_type: _PayPalModelClass, code: int | None = 200
+) -> ApiResponse:
     """Creates an ApiResponse object to be used in a mock.
 
     :param body: The response body. Should be valid JSON.
@@ -91,7 +104,7 @@ def _make_paypal_order_response(
     include_card: bool = True,
 ) -> ApiResponse:
     """Build a PayPal GET /orders response wrapped as an ApiResponse."""
-    body = {
+    body: dict[str, Any] = {
         "id": order_id,
         "purchase_units": [
             {
@@ -1362,8 +1375,9 @@ class TestPayPalRefunds(OrdersTestCase):
         self.order_no_refund.refresh_from_db()
 
         self.assertEqual(0, self.order_no_refund.total)
-        self.assertTrue("refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"])
-        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"]["refunds"]
+        api_data = cast(dict[str, Any], self.order_no_refund.apiData)
+        self.assertTrue("refunds" in api_data["purchase_units"][0]["payments"])
+        refund_list = api_data["purchase_units"][0]["payments"]["refunds"]
         self.assertEqual(1, len(refund_list))
         refund_data = refund_list[0]
         self.assertEqual("SUCCESS_FULL", refund_data["id"])
@@ -1390,8 +1404,9 @@ class TestPayPalRefunds(OrdersTestCase):
         self.order_no_refund.refresh_from_db()
 
         self.assertEqual(self.price_45.basePrice / 2, self.order_no_refund.total)
-        self.assertTrue("refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"])
-        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"]["refunds"]
+        api_data = cast(dict[str, Any], self.order_no_refund.apiData)
+        self.assertTrue("refunds" in api_data["purchase_units"][0]["payments"])
+        refund_list = api_data["purchase_units"][0]["payments"]["refunds"]
         self.assertEqual(1, len(refund_list))
         refund_data = refund_list[0]
         self.assertEqual("SUCCESS_PARTIAL_HALF", refund_data["id"])
@@ -1429,8 +1444,9 @@ class TestPayPalRefunds(OrdersTestCase):
             self.price_45.basePrice - (self.price_45.basePrice / 2) - 10,
             self.order_no_refund.total,
         )
-        self.assertTrue("refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"])
-        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"]["refunds"]
+        api_data = cast(dict[str, Any], self.order_no_refund.apiData)
+        self.assertTrue("refunds" in api_data["purchase_units"][0]["payments"])
+        refund_list = api_data["purchase_units"][0]["payments"]["refunds"]
         self.assertEqual(2, len(refund_list))
 
         self.assertEqual("SUCCESS_PARTIAL_10", refund_list[0]["id"])

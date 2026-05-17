@@ -76,7 +76,10 @@ class AttendeeForm(forms.ModelForm):
         )
 
     def clean(self) -> dict[str, Any]:
-        data = super().clean()
+        # Django's Form.clean() always returns the cleaned_data dict at
+        # runtime; the stub types it Optional. `or {}` satisfies the type
+        # without changing behaviour (an empty dict is a no-op downstream).
+        data = super().clean() or {}
         check_state(data, "country", "state")
         return data
 
@@ -130,7 +133,10 @@ class OrderForm(forms.ModelForm):
                 self.fields[field].required = True
 
     def clean(self) -> dict[str, Any]:
-        data = super().clean()
+        # Django's Form.clean() always returns the cleaned_data dict at
+        # runtime; the stub types it Optional. `or {}` satisfies the type
+        # without changing behaviour (an empty dict is a no-op downstream).
+        data = super().clean() or {}
         check_state(data, "billingCountry", "billingState")
         return data
 

@@ -7,7 +7,8 @@ from io import BytesIO
 import qrcode
 from allauth.account.decorators import secure_admin_login
 from django import forms
-from django.contrib import admin, auth, messages
+from django.contrib import admin, messages
+from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.db import transaction
@@ -16,7 +17,8 @@ from django.forms import NumberInput, widgets
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import path, re_path, reverse
-from django.utils.html import format_html, urlencode
+from django.utils.html import format_html
+from django.utils.http import urlencode
 from django.utils.safestring import mark_safe
 from import_export import fields, resources
 from import_export.admin import ImportExportModelAdmin
@@ -71,7 +73,11 @@ logger = logging.getLogger(__name__)
 
 admin.site.site_url = None
 admin.site.site_header = "APIS Backoffice"
-admin.site.login = secure_admin_login(admin.site.login)
+# mypy [method-assign]: wrapping the bound admin login view with allauth's
+# secure_admin_login is the documented allauth integration; this is a plain
+# attribute assignment on the AdminSite instance (behavior unchanged). ruff
+# B010 forbids the setattr() form, so a targeted ignore is the only option.
+admin.site.login = secure_admin_login(admin.site.login)  # type: ignore[method-assign]
 
 # Register your models here.
 admin.site.register(HoldType)
@@ -81,7 +87,7 @@ admin.site.register(TableSize)
 admin.site.register(Cart)
 
 
-class UserProfileAdmin(auth.admin.UserAdmin):
+class UserProfileAdmin(UserAdmin):
     model = User
     list_display = (
         "username",
@@ -907,10 +913,10 @@ def assign_badge_numbers(modeladmin, request, queryset: "QuerySet[Badge]"):
     if highest is None:
         highest = 0
 
-    reserved_numbers = ReservedBadgeNumbers.objects.filter(badgeNumber__gt=highest).values(
+    reserved_numbers_qs = ReservedBadgeNumbers.objects.filter(badgeNumber__gt=highest).values(
         "badgeNumber"
     )
-    reserved_numbers = {num["badgeNumber"] for num in reserved_numbers}
+    reserved_numbers = {num["badgeNumber"] for num in reserved_numbers_qs}
 
     for badge in queryset.order_by("registeredDate"):
         # Skip assigning to badges not in current event
@@ -1572,11 +1578,9 @@ class PaymentWebhookAdmin(admin.ModelAdmin):
     exclude = ("body", "headers")
     actions = [process_unprocessed_notifications]
 
-    @admin.display(description="Headers")
+    @admin.display(description="Body")
     def body_highlighted(self, instance):
         return json_highlight_format_value(instance.body)
-
-    body_highlighted.short_description = "Body"
 
     def headers_highlighted(self, instance):
         return json_highlight_format_value(instance.headers)

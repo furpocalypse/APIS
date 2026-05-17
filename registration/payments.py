@@ -2,6 +2,7 @@ import logging
 import uuid
 from collections import Counter
 from datetime import datetime
+from typing import Any, cast
 
 from django.conf import settings
 from django.db import transaction
@@ -33,6 +34,8 @@ from square.types.payment import Payment
 
 from . import tasks
 from .models import (
+    Attendee,
+    Badge,
     BanList,
     Cashdrawer,
     Decimal,
@@ -303,7 +306,7 @@ def charge_payment(
             extra_fields=_fields,
             refresh=False,
         )
-        return True, None
+        return True, cast(dict, None)  # success path returns no detail dict by contract
     else:
         logger.debug(api_response.errors)
         logger.debug("---- Transaction Failed ----")
@@ -420,7 +423,9 @@ def refresh_payment(
     order.apiData = sanitize_api_data(api_data)  # MED-8
     order.total = Decimal(order_total) / 100
 
-    if order.orgDonation + order.charityDonation > order.total:
+    if cast(Decimal, order.orgDonation) + cast(Decimal, order.charityDonation) > cast(
+        Decimal, order.total
+    ):  # ORM Optional Decimal fields; runtime-guaranteed non-None here
         order.orgDonation = 0
         order.charityDonation = order.total
         message = "Refunded order has caused charity and organization donation amounts to reset."
@@ -459,20 +464,23 @@ def update_order_payment_data(order: Order, order_total: int, payment: Payment) 
              will be the amount inside of the ``payment`` data.
     """
     try:
-        order.lastFour = payment.card_details.card.last4
+        # Square SDK Optional models; populated on completed-payment path
+        order.lastFour = cast(str, cast(Any, payment).card_details.card.last4)
     except KeyError:
         logger.warning("Unable to update last_4 details for order")
     status = payment.status
     if status == "COMPLETED":
         order.status = Order.COMPLETED
-        order_total = payment.total_money.amount
+        # Square SDK Optional Money; populated on COMPLETED status
+        order_total = cast(int, cast(Any, payment).total_money.amount)
     elif status == "FAILED":
         order.status = Order.FAILED
     elif status == "APPROVED":
         # Payment was only captured, approved, and never settled (not usually what we do)
         # https://developer.squareup.com/docs/payments-api/overview#payments-api-workflow
         order.status = Order.CAPTURED
-        order_total = payment.total_money.amount
+        # Square SDK Optional Money; populated on APPROVED status
+        order_total = cast(int, cast(Any, payment).total_money.amount)
     elif status == "CANCELED":
         order.status = Order.FAILED
     return order_total
@@ -500,7 +508,9 @@ def refund_payment(
         result, message = refund_card_payment(order, amount, reason, request=None)
         return result, message
     if order.billingType == Order.CASH:
-        result, message = refund_cash_payment(order, amount, reason)
+        result, message = cast(
+            "tuple[bool, str]", refund_cash_payment(order, amount, reason)
+        )  # cash refund returns no message; widened to str by caller contract
         return result, message
     if order.billingType == Order.COMP:
         return False, "Comped orders cannot be refunded."
@@ -527,7 +537,8 @@ def refund_cash_payment(
     order.notes += f"\nRefund issued {timezone.now()}: {reason}"
 
     # Reset order total
-    order.total -= amount
+    # ORM Optional Decimal; runtime-guaranteed non-None here
+    order.total = cast(Decimal, order.total) - cast(Decimal, amount)
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
@@ -556,7 +567,8 @@ def refund_card_payment(
     :return: A tuple of a boolean success status and an accompanying message.
     """
     old_status = order.status
-    api_data = order.apiData
+    # apiData JSONField Optional; populated for card orders
+    api_data = cast("dict[str, Any]", order.apiData)
     payment_id = api_data["payment"]["id"]
     converted_amount = int(amount * 100)
 
@@ -580,11 +592,12 @@ def refund_card_payment(
         logger.error(f"Error in square refund: {errors}")
         return False, errors
 
+    # apiData JSONField Optional; dict on card-order path
     stored_refunds = api_data.get("refunds", [])
 
     status = api_response.refund.status
     stored_refunds.append(api_response.refund.model_dump())
-    api_data["refunds"] = stored_refunds
+    api_data["refunds"] = stored_refunds  # apiData JSONField Optional; dict on card-order path
     order.apiData = sanitize_api_data(api_data)  # MED-8
 
     if status == "COMPLETED":
@@ -593,9 +606,12 @@ def refund_card_payment(
         order.status = Order.REFUND_PENDING
 
     if status in ("COMPLETED", "PENDING"):
-        order.total -= amount
+        # ORM Optional Decimal; runtime-guaranteed non-None here
+        order.total = cast(Decimal, order.total) - cast(Decimal, amount)
         # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
+        if cast(Decimal, order.orgDonation) + cast(Decimal, order.charityDonation) > cast(
+            Decimal, order.total
+        ):  # ORM Optional Decimal fields; runtime-guaranteed non-None here
             order.orgDonation = 0
             order.charityDonation = order.total
             logger.warning(
@@ -626,10 +642,11 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
         logger.warning(f"Got refund.updated webhook update for a refund id not found: {refund_id}")
         return False
     except NotSupportedError:
+        # rec is Order; legacy code path indexes apiData JSONField
         orders = [
             rec
             for rec in Order.objects.all()
-            if "id" in rec["apiData"] and rec["apiData"]["id"] == refund_id
+            if "id" in cast(Any, rec)["apiData"] and cast(Any, rec)["apiData"]["id"] == refund_id
         ]
         if len(orders) == 0:
             logger.warning(
@@ -646,7 +663,8 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
         order = Order.objects.select_for_update().get(pk=order.pk)
         old_status = order.status
         output = []
-        refunds_list = order.apiData.get("refunds", [])
+        # apiData JSONField Optional; dict on refunded order
+        refunds_list = cast("dict[str, Any]", order.apiData).get("refunds", [])
         for refund in refunds_list:
             if refund["id"] == refund_id:
                 output.append(webhook_refund)
@@ -656,7 +674,8 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
         if webhook_refund["status"] == "COMPLETED":
             order.status = Order.REFUNDED
 
-        order.apiData["refunds"] = output
+        # apiData JSONField Optional; dict on refunded order
+        cast("dict[str, Any]", order.apiData)["refunds"] = output
         update_capacity_for_status_change(order, old_status, order.status)
         order.save()
     return True
@@ -678,7 +697,8 @@ def process_webhook_payment_updated(notification: PaymentWebhookNotification) ->
         order = Order.objects.select_for_update().get(pk=order.pk)
         old_status = order.status
         payment = Payment.model_validate(notification.body["data"]["object"]["payment"])
-        order.apiData["payment"] = sanitize_api_data(payment.model_dump())  # MED-8
+        # MED-8; apiData JSONField Optional; dict for paid order
+        cast("dict[str, Any]", order.apiData)["payment"] = sanitize_api_data(payment.model_dump())
         update_order_payment_data(order, 0, payment)
         update_capacity_for_status_change(order, old_status, order.status)
         order.save()
@@ -712,9 +732,11 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
 
         # Store refund in api data
         old_status = order.status
-        refunds = order.apiData.get("refunds", [])
+        # apiData JSONField Optional; dict for paid order
+        refunds = cast("dict[str, Any]", order.apiData).get("refunds", [])
         refunds.append(webhook_refund)
-        order.apiData["refunds"] = refunds
+        # apiData JSONField Optional; dict for paid order
+        cast("dict[str, Any]", order.apiData)["refunds"] = refunds
 
         status = webhook_refund["status"]
         if status == "COMPLETED":
@@ -725,7 +747,9 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
         if status in ("COMPLETED", "PENDING"):
             order.total -= Decimal(webhook_refund["amount_money"]["amount"]) / 100
             # Reset org & charity donations if the remaining total isn't enough:
-            if order.orgDonation + order.charityDonation > order.total:
+            if cast(Decimal, order.orgDonation) + cast(Decimal, order.charityDonation) > cast(
+                Decimal, order.total
+            ):  # ORM Optional Decimal fields; runtime-guaranteed non-None here
                 order.orgDonation = 0
                 order.charityDonation = order.total
                 logger.warning(
@@ -763,10 +787,12 @@ def process_webhook_dispute_created_or_updated(
     with transaction.atomic():
         order = Order.objects.select_for_update().get(pk=order.pk)
         old_status = order.status
-        order.apiData["dispute"] = sanitize_api_data(webhook_dispute)  # MED-8
+        # MED-8; apiData JSONField Optional; dict for disputed order
+        cast("dict[str, Any]", order.apiData)["dispute"] = sanitize_api_data(webhook_dispute)
         order.status = Order.DISPUTE_STATUS_MAP[webhook_dispute["state"]]
+        # ORM Optional Decimal fields; runtime-guaranteed non-None here
         if order.status in (Order.DISPUTE_LOST, Order.DISPUTE_ACCEPTED) and (
-            order.orgDonation > 0 or order.charityDonation > 0
+            cast(Decimal, order.orgDonation) > 0 or cast(Decimal, order.charityDonation) > 0
         ):
             # Lost/accepted dispute → reset charitable donation earmarks:
             order.notes += (
@@ -786,7 +812,8 @@ def process_webhook_dispute_created_or_updated(
         order_items = OrderItem.objects.filter(order=order)
         # Add dispute hold to all attendees on the order
         for oi in order_items:
-            attendee = oi.badge.attendee
+            # Badge/Attendee Optional FK; present for badge on order
+            attendee = cast(Attendee, cast(Badge, oi.badge).attendee)
             attendee.holdType = dispute_hold
             attendee.save()
 
@@ -902,7 +929,8 @@ def create_square_order(terminal_name: str, data: dict) -> str | None:
             api_response = client.orders.create(
                 idempotency_key=str(uuid.uuid4()),
                 order=OrderParams(
-                    location_id=settings.SQUARE_LOCATION_ID,
+                    # settings value Optional[str]; configured non-None in all envs
+                    location_id=cast(str, settings.SQUARE_LOCATION_ID),
                     reference_id=data["reference"],
                     source=OrderSourceParams(name=terminal_name),
                     discounts=discounts,

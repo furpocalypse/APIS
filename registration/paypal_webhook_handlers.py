@@ -25,11 +25,14 @@ PayPal API references used while writing these handlers:
 import logging
 from datetime import datetime
 from decimal import Decimal
+from typing import cast
 
 from django.db import transaction
 
 from registration import tasks
 from registration.models import (
+    Attendee,
+    Badge,
     BanList,
     Order,
     OrderItem,
@@ -203,7 +206,12 @@ def _reset_donations_if_insufficient(order: Order) -> None:
     cover them. Mirrors the rule in
     :func:`registration.paypal_payments.update_order_refund_data`.
     """
-    if order.orgDonation + order.charityDonation > order.total:
+    # ORM declares these DecimalFields as Optional; on the refund path they
+    # are always populated. cast() is a runtime no-op and only narrows the
+    # static type for the comparison below.
+    if cast(Decimal, order.orgDonation) + cast(Decimal, order.charityDonation) > cast(
+        Decimal, order.total
+    ):
         order.orgDonation = Decimal("0")
         order.charityDonation = max(order.total, Decimal("0"))
         message = (
@@ -509,7 +517,10 @@ def handle_capture_denied(notification: PaymentWebhookNotification) -> bool:
 def _add_attendees_to_banlist_and_hold(order: Order) -> None:
     dispute_hold = get_hold_type("Chargeback")
     for oi in OrderItem.objects.filter(order=order):
-        attendee = oi.badge.attendee
+        # OrderItem.badge and Badge.attendee are Optional in the ORM, but a
+        # chargeback always traces back to a badge with an attendee. The
+        # casts are runtime no-ops and only narrow the static types.
+        attendee = cast(Attendee, cast(Badge, oi.badge).attendee)
         attendee.holdType = dispute_hold
         attendee.save()
         BanList.objects.get_or_create(

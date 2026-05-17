@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 from json import JSONDecodeError
+from typing import cast
 
 from django.forms import model_to_dict
 from django.http import (
@@ -298,7 +299,7 @@ def _set_up_assistant_checkout(
     if total <= 0:
         raise RuntimeError(400, "No unpaid assistants to charge for.")
 
-    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
+    order_item = OrderItem(badge=badge, priceLevel=cast(PriceLevel, price_level), enteredBy="WEB")
     order_item.save()
     session_items = request.session.get("order_items", [])
     session_items.append(order_item.id)
@@ -308,7 +309,7 @@ def _set_up_assistant_checkout(
 
 
 def _apply_assistants_form(
-    dealer: Dealer, event: Event, assistants_form: dict
+    dealer: Dealer, event: Event, assistants_form: list
 ) -> tuple[int, str] | None:
     """Create/update DealerAsst rows from the assistants payload.
 
@@ -413,11 +414,15 @@ def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
         total, order_items = _set_up_assistant_checkout(request, form_data, dealer, event)
 
     status, message, order = do_checkout(
-        processor, billing_data, total, None, [], order_items, 0, 0
+        processor, billing_data, total, None, [], order_items, Decimal(0), Decimal(0)
     )
 
     if status:
         # Payment succeeded - Mark assistants as paid
+        # do_checkout() returns a non-None Order whenever status is True
+        # (see registration.views.ordering.do_checkout); narrow for the
+        # type checker without altering runtime behavior.
+        order = cast(Order, order)
         for assistant in dealer.dealerasst_set.all().filter(paid=False):
             assistant.paid = True
             assistant.save()

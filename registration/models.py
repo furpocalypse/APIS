@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib import admin
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import F
@@ -183,13 +184,11 @@ class PriceLevel(models.Model):
     def __str__(self):
         return self.name
 
+    @admin.display(boolean=True, description="Active")
     def get_level_active_status(self):
         tz = timezone.get_current_timezone()
         today = datetime.now(tz=tz)
         return self.startDate <= today <= self.endDate
-
-    get_level_active_status.boolean = True
-    get_level_active_status.short_description = "Active"
 
     # ---- Ground-truth verification methods (DB queries) ----
 
@@ -686,13 +685,12 @@ class Attendee(models.Model):
     parentEmail = models.CharField(max_length=200, blank=True)
     aslRequest = models.BooleanField(default=False)
 
+    @admin.display(description="First Name")
     def getFirst(self):
         if not self.preferredName:
             return self.firstName
         else:
             return self.preferredName
-
-    getFirst.short_description = "First Name"
 
     def __str__(self):
         if self is None:

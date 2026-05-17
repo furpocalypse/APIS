@@ -4,12 +4,16 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING, cast
 
 import jwt
 from django.conf import settings
 from paho.mqtt import publish as mqtt_publish
 
 from registration.models import Firebase
+
+if TYPE_CHECKING:
+    from paho.mqtt.publish import AuthParameter, TLSParameter
 
 FORMAT_TOPIC_SYS_RE = re.compile(r"^\$")
 FORMAT_TOPIC_WILDCARD_RE = re.compile(r"[\#\+ /]")
@@ -149,7 +153,7 @@ def get_token(sub, exp=None, subs=None, publ=None) -> str:
 
     return jwt.encode(
         claims,
-        base64.b64decode(settings.MQTT_JWT_SECRET),
+        base64.b64decode(cast(str, settings.MQTT_JWT_SECRET)),
         algorithm=settings.MQTT_JWT_ALGORITHM,
     )
 
@@ -197,8 +201,8 @@ def send_mqtt_message(topic: str, payload: dict | None = None, retain: bool = Fa
         topic,
         payload_json,
         retain=retain,
-        hostname=settings.MQTT_BROKER["host"],
-        port=settings.MQTT_BROKER["port"],
-        auth=auth,
-        tls=tls,
+        hostname=cast(str, settings.MQTT_BROKER["host"]),
+        port=cast(int, settings.MQTT_BROKER["port"]),
+        auth=cast("AuthParameter", auth),
+        tls=cast("TLSParameter | None", tls),
     )

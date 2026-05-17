@@ -252,8 +252,8 @@ class UserSimulator:
                     )
                 )
 
-                csrf_token = client.cookies.get("csrftoken", "")
-                csrf_headers = {"X-CSRFToken": csrf_token}
+                csrf_token: str = client.cookies.get("csrftoken") or ""
+                csrf_headers: dict[str, str] = {"X-CSRFToken": csrf_token}
 
                 # Step 2: POST get price levels (csrf_exempt, but header is harmless)
                 await asyncio.sleep(random.uniform(*self.think_times.after_landing))

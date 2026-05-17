@@ -55,6 +55,7 @@ class CreateAttendeeOptions:
         option = self.price_level_options.get(int(option_id))
         if option and (option.public or not only_public):
             return option
+        return None
 
     def private_options(self) -> Iterator[PriceLevelOption]:
         for price_level_option in self.price_level_options.values():
@@ -62,7 +63,7 @@ class CreateAttendeeOptions:
                 yield price_level_option
 
     def _create_entries(
-        self, entries: Iterable[tuple[AttendeeOptions, str]]
+        self, entries: Iterable[tuple[PriceLevelOption, str]]
     ) -> list[AttendeeOptions]:
         attendee_options = (
             AttendeeOptions(orderItem=self.order_item, option=option, optionValue=value)

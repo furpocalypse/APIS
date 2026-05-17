@@ -16,6 +16,10 @@ from registration.views import ordering
 
 
 class DealerTestCase(TestCase):
+    # Set in setUpTestData (mypy/django-stubs cannot infer classmethod-set
+    # attrs); declare it so attribute access type-checks.
+    assistant: DealerAsst
+
     def setUp(self) -> None:
         self.client = Client()
         self.assistant.refresh_from_db()

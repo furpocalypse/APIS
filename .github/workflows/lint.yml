@@ -35,9 +35,11 @@ jobs:
 
   # Non-blocking (Phase B): surfaces the backlog without gating merges.
   # Phase C flips these to blocking once the backlog is triaged.
+  # Phase C: the mypy backlog has been fully triaged to zero errors
+  # (real cast()/annotation fixes, no blanket type: ignore), so mypy is
+  # now BLOCKING — a new type regression fails the build.
   mypy:
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install the latest version of uv

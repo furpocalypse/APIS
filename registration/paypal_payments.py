@@ -2,6 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from json import JSONDecodeError
+from typing import cast
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -291,12 +292,18 @@ def refresh_payment(
     if store_api_data:
         api_data = store_api_data
     else:
-        api_data = order.apiData
+        # order.apiData is Optional[dict] in the ORM; the truthiness guard
+        # below is what actually enforces non-None at runtime. cast() is a
+        # no-op at runtime and only aligns the static type with the dict
+        # branch above (store_api_data).
+        api_data = cast(dict, order.apiData)
         if not api_data:
             logger.warning(f"No order data yet for {order.reference}")
             return False, f"No order data yet for {order.reference}"
     old_status = order.status
-    order_total = 0
+    # Annotation only (value stays the int literal 0 at runtime);
+    # update_order_payment_data() widens this accumulator to float.
+    order_total: float = 0
 
     try:
         api_data = PayPalOrder.from_dictionary(api_data)
@@ -346,7 +353,7 @@ def refresh_payment(
 
 
 def update_order_payment_data(
-    order: ApisOrder, order_total: int, payment: CapturedPayment
+    order: ApisOrder, order_total: float, payment: CapturedPayment
 ) -> float:
     """
     Updates payment data in an APIS Order object based on info returned from
@@ -397,7 +404,12 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
     elif completed:
         order.status = ApisOrder.REFUNDED
 
-    if order.orgDonation + order.charityDonation > order.total:
+    # ORM declares these DecimalFields as Optional; on the refund path they
+    # are always populated. cast() is a runtime no-op and only narrows the
+    # static type for the comparison below.
+    if cast(Decimal, order.orgDonation) + cast(Decimal, order.charityDonation) > cast(
+        Decimal, order.total
+    ):
         order.orgDonation = 0
         order.charityDonation = order.total
         message = "Refunded order has caused charity and organization donation amounts to reset."
@@ -428,12 +440,20 @@ def refund_payment(
              message in the case of an error.
     """
 
+    # Bare annotation only (no runtime effect): this function's contract is
+    # tuple[bool, str | None], but refund_card_payment() returns a str
+    # message while refund_cash_payment() returns None. Declaring the joined
+    # type up front keeps both branch assignments consistent.
+    message: str | None
+
     if order.status == ApisOrder.FAILED:
         return False, "Failed orders cannot be refunded."
     if order.billingType == ApisOrder.CREDIT:
         result, message = refund_card_payment(order, amount, reason, request=None)
         return result, message
     if order.billingType == ApisOrder.CASH:
+        # refund_cash_payment() is typed tuple[bool, None]; message is
+        # declared str | None above so the None branch type-checks.
         result, message = refund_cash_payment(order, amount, reason)
         return result, message
     if order.billingType == ApisOrder.COMP:
@@ -511,7 +531,10 @@ def refund_card_payment(
     try:
         resp_raw_body = json.loads(api_response.text)
     except (ValueError, JSONDecodeError) as e:
-        message = f"Error decoding PayPal refund response: {e.msg}"
+        # json.loads() only raises JSONDecodeError (a ValueError subclass) for
+        # a malformed body, so e always carries .msg here. cast() is a runtime
+        # no-op; it only tells the type checker which subclass this is.
+        message = f"Error decoding PayPal refund response: {cast(JSONDecodeError, e).msg}"
         logger.error(message)
         return False, message
 
@@ -534,9 +557,15 @@ def refund_card_payment(
         order.status = ApisOrder.REFUND_PENDING
 
     if status in (RefundStatus.COMPLETED, RefundStatus.PENDING):
-        order.total -= amount
+        # order.total is Optional[Decimal] in the ORM but always populated on
+        # the refund path; the sole caller (admin.py) passes a quantized
+        # Decimal for `amount` despite the float annotation. Both casts are
+        # runtime no-ops and only reconcile the static types with reality.
+        order.total = cast(Decimal, order.total) - cast(Decimal, amount)
         # Reset org & charity donations if the remaining total isn't enough to cover them:
-        if order.orgDonation + order.charityDonation > order.total:
+        if cast(Decimal, order.orgDonation) + cast(Decimal, order.charityDonation) > cast(
+            Decimal, order.total
+        ):
             order.orgDonation = 0
             order.charityDonation = 0
             logger.warning(

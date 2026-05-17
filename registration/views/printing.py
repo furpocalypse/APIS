@@ -1,4 +1,5 @@
 import logging
+from typing import Any, cast
 
 from django.conf import settings
 from django.contrib import messages
@@ -16,10 +17,33 @@ from gotenberg_client.options import (
 )
 
 from registration import mqtt
-from registration.models import Badge, Dealer, Firebase, PrintHistory, Staff
+from registration.models import (
+    Badge,
+    BadgeTemplate,
+    Dealer,
+    Firebase,
+    PrintHistory,
+    Staff,
+)
 from registration.signing import print_capability_signer
 
 logger = logging.getLogger(__name__)
+
+
+def _measurement(value: str | None) -> Measurement:
+    """Build a gotenberg ``Measurement`` from a ``BadgeTemplate`` dimension
+    field.
+
+    ``BadgeTemplate.paperWidth``/``margin*`` are ``CharField(null=True)``,
+    so the runtime value is ``str | None`` (e.g. ``"8.5in"``), not the
+    ``float | int`` that ``Measurement.value`` is annotated with. This is a
+    deliberately loose third-party contract: gotenberg-client's
+    ``optional_to_form`` drops ``None`` (no form field emitted) and applies
+    ``str(value)`` to anything else, so a string or ``None`` is the correct
+    input here. The ``cast`` documents that the loose annotation is
+    intentional rather than erasing the real type with ``Any``.
+    """
+    return Measurement(cast("float | int", value))
 
 
 def _safe_internal_url(url: str, request: HttpRequest) -> str:
@@ -80,11 +104,19 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
     except Exception:
         return JsonResponse({"success": False, "reason": "Invalid data"}, status=401)
 
+    gotenberg_host = settings.GOTENBERG_HOST
+    if not gotenberg_host:
+        logger.error("servePDF called but GOTENBERG_HOST is not configured")
+        return JsonResponse(
+            {"success": False, "reason": "PDF rendering is not configured"},
+            status=503,
+        )
+
     badge_ids = data_obj.get("badge_ids", [])
     queryset = Badge.objects.filter(id__in=badge_ids)
 
-    badge_groups = {}
-    badge_templates = {}
+    badge_groups: dict[int, list[dict[str, Any]]] = {}
+    badge_templates: dict[int, tuple[BadgeTemplate, Template]] = {}
 
     for badge in queryset:
         level = badge.effectiveLevel()
@@ -93,6 +125,14 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
             continue
 
         badge_template = badge.event.defaultBadgeTemplate
+        if badge_template is None:
+            messages.warning(
+                request,
+                f"skipped printing {badge} because event "
+                f"{badge.event} has no badge template configured",
+            )
+            continue
+
         if badge_template.id not in badge_templates:
             badge_groups[badge_template.id] = []
             badge_templates[badge_template.id] = (
@@ -119,7 +159,7 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
             }
         )
 
-    with GotenbergClient(settings.GOTENBERG_HOST) as client:
+    with GotenbergClient(gotenberg_host) as client:
         pdfs = []
 
         for badge_template_id, badges in badge_groups.items():
@@ -131,16 +171,16 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
                 response = (
                     route.size(
                         PageSize(
-                            Measurement(badge_template.paperWidth),
-                            Measurement(badge_template.paperHeight),
+                            _measurement(badge_template.paperWidth),
+                            _measurement(badge_template.paperHeight),
                         )
                     )
                     .margins(
                         PageMarginsType(
-                            Measurement(badge_template.marginTop),
-                            Measurement(badge_template.marginBottom),
-                            Measurement(badge_template.marginLeft),
-                            Measurement(badge_template.marginRight),
+                            _measurement(badge_template.marginTop),
+                            _measurement(badge_template.marginBottom),
+                            _measurement(badge_template.marginLeft),
+                            _measurement(badge_template.marginRight),
                         )
                     )
                     .orient(

@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+from typing import Any
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
@@ -229,10 +230,11 @@ class SearchFields:
             except ValueError:
                 query = query.replace(badge_nums.group(0), "")
 
-        birthday = re.search(r"birthday:([0-9-]{10}) ?", query)
-        if birthday:
-            query = query.replace(birthday.group(0), "")
-            birthday = birthday.group(1)
+        birthday_match = re.search(r"birthday:([0-9-]{10}) ?", query)
+        birthday: str | None = None
+        if birthday_match:
+            query = query.replace(birthday_match.group(0), "")
+            birthday = birthday_match.group(1)
 
         query = query.strip()
 
@@ -363,6 +365,7 @@ def send_mqtt_message_to_terminal(
 ) -> JsonResponse:
     if data is None:
         data = {}
+    active: Firebase | None
     if isinstance(request, Firebase):
         active = request
     else:
@@ -804,7 +807,7 @@ def cash_receipt_payload(order: Order, tendered: str, total: str) -> dict:
             attendee_options.append({"item": "Discount", "price": f"-%{order.discount.percentOff}"})
 
     event = Event.objects.get(default=True)
-    payload = {
+    payload: dict[str, Any] = {
         "v": 1,
         "event": event.name,
         "line_items": attendee_options,

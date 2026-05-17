@@ -2,6 +2,7 @@ import json
 import logging
 from collections import Counter
 from json import JSONDecodeError
+from typing import Any, cast
 
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
@@ -12,6 +13,7 @@ from registration import mqtt, tasks
 from registration.forms import OrderForm
 from registration.models import (
     Attendee,
+    Badge,
     Cart,
     DealerAsst,
     Decimal,
@@ -132,13 +134,13 @@ def do_checkout(
     processor: str,
     billingData: BillingData,
     total: Decimal,
-    discount: Decimal,
+    discount: Discount | None,
     cartItems: list,
     orderItems: list,
     donationOrg: Decimal,
     donationCharity: Decimal,
-    request: HttpRequest = None,
-) -> tuple[bool, dict, Order]:
+    request: HttpRequest | None = None,
+) -> tuple[bool, dict | str, Order | None]:
     event = Event.objects.get(default=True)
     # Reuse the reference token set on the PayPal order at create_paypal_order
     # time so that invoice_id/custom_id on every downstream PayPal webhook
@@ -173,7 +175,11 @@ def do_checkout(
     )
 
     if not form.is_valid():
-        return False, {"errors": [{"code": f"{k} - {v}"} for k, v in form.errors]}, None
+        return (
+            False,
+            {"errors": [{"code": f"{k} - {v}"} for k, v in cast(Any, form.errors)]},
+            None,
+        )
 
     order: Order = form.save(commit=False)
 
@@ -203,6 +209,8 @@ def do_checkout(
         # order.status and save on their own success/failure branches
         # (except a couple of PayPal early-return error paths handled by
         # the normalization guard below).
+        status: bool
+        response: dict | str
         if processor == "paypal":
             orderId = billingData.get("source_id")
             if not orderId:
@@ -355,9 +363,11 @@ def get_discount_total(disc, subtotal):
     return 0
 
 
-def get_line_item_total(item: Cart | OrderItem, disc: str | None = "") -> Decimal:
-    item_total = 0
-    discount = 0
+def get_line_item_total(
+    item: Cart | OrderItem, disc: str | None = ""
+) -> tuple[Decimal | int, Decimal | int]:
+    item_total: Decimal | int = 0
+    discount: Decimal | int = 0
     if isinstance(item, Cart):
         post_data = json.loads(item.formData)
         pdp = post_data["priceLevel"]
@@ -368,8 +378,8 @@ def get_line_item_total(item: Cart | OrderItem, disc: str | None = "") -> Decima
         item_total += getCartItemOptionTotal(options)
 
     elif isinstance(item, OrderItem):
-        item_sub_total = item.priceLevel.basePrice
-        eff_level = item.badge.effectiveLevel()
+        item_sub_total = cast(PriceLevel, item.priceLevel).basePrice
+        eff_level = cast(Badge, item.badge).effectiveLevel()
 
         item_total = item_sub_total - eff_level.basePrice if eff_level else item_sub_total
 
@@ -383,21 +393,22 @@ def get_line_item_total(item: Cart | OrderItem, disc: str | None = "") -> Decima
 
 def get_total(
     cartItems: list[Cart], orderItems: list[OrderItem], disc: str | None = ""
-) -> tuple[Decimal, Decimal]:
-    total = 0
-    total_discount = 0
+) -> tuple[Decimal | int, Decimal | int]:
+    total: Decimal | int = 0
+    total_discount: Decimal | int = 0
     if not cartItems and not orderItems:
         return 0, 0
 
-    for item in cartItems:
-        item_total, discount = get_line_item_total(item, disc)
+    cart_item: Cart | OrderItem
+    for cart_item in cartItems:
+        item_total, discount = get_line_item_total(cart_item, disc)
         total_discount += discount
         item_total -= discount
         if item_total > 0:
             total += item_total
 
-    for item in orderItems:
-        item_total, discount = get_line_item_total(item, disc)
+    for order_item in orderItems:
+        item_total, discount = get_line_item_total(order_item, disc)
         total_discount += discount
         item_total -= discount
         if item_total > 0:
@@ -476,13 +487,19 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     event = Event.objects.get(default=True)
 
-    discount = Discount.objects.filter(codeName=discount_code)
-    discount = discount.first() if discount.count() > 0 and discount.first().isValid() else None
+    discount_qs = Discount.objects.filter(codeName=discount_code)
+    # Preserved query side-effects (count()/first()) from the original
+    # control flow; the resolved value itself was never read here.
+    _resolved_discount = (  # intentionally unused; kept for query-side-effect parity
+        discount_qs.first()
+        if discount_qs.count() > 0 and cast(Discount, discount_qs.first()).isValid()
+        else None
+    )
 
     # Process cart item data and calculate totals
     translated_cart: list[TranslatedCartItem] = []
-    for item in cart_items:
-        parsed_data = json.loads(item.formData)
+    for cart_item in cart_items:
+        parsed_data = json.loads(cart_item.formData)
         pda = parsed_data["attendee"]
         pdp = parsed_data["priceLevel"]
 
@@ -494,30 +511,30 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         )
         priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 
-        item_total, discount = get_line_item_total(item, discount_code)
+        item_total, _discount = get_line_item_total(cart_item, discount_code)
         translated_cart.append(
             {
                 "name": f"{event} {priceLevel} - {attendee}",
-                "total": item_total,
+                "total": cast(Decimal, item_total),
                 "donation": False,
             }
         )
 
-    for item in order_items:
-        item_total, discount = get_line_item_total(item, discount_code)
-        badge = item.badge
+    for order_item in order_items:
+        item_total, _discount = get_line_item_total(order_item, discount_code)
+        badge = cast(Badge, order_item.badge)
         translated_cart.append(
             {
-                "name": str(event) + " " + str(item.priceLevel) + " - " + str(badge.attendee),
-                "total": item_total,
+                "name": str(event) + " " + str(order_item.priceLevel) + " - " + str(badge.attendee),
+                "total": cast(Decimal, item_total),
                 "donation": False,
             }
         )
 
     subtotal, total_discount = get_total(cart_items, order_items, discount_code)
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    porg: Decimal | int = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity: Decimal | int = Decimal(post_data.get("charityDonation") or "0.00")
 
     if porg < 0:
         porg = 0
@@ -525,13 +542,15 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         pcharity = 0
 
     if porg > 0:
-        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
+        translated_cart.append(
+            {"name": f"Donation to {event}", "total": cast(Decimal, porg), "donation": True}
+        )
 
     if pcharity > 0:
         translated_cart.append(
             {
                 "name": f"Donation to {event.charity}",
-                "total": pcharity,
+                "total": cast(Decimal, pcharity),
                 "donation": True,
             }
         )

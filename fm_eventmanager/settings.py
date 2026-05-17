@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+from typing import Any
 
 from idempotency_key import status
 
@@ -100,7 +101,7 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = eval_bool(os.getenv("DJANGO_DEBUG", "False"))
 
-LOGGING = {
+LOGGING: dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {

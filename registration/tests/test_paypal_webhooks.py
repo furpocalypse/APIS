@@ -35,26 +35,26 @@ class PaypalResourceType(Enum):
     # Data structure references:
     # - POST /v2/payments/captures/{capture_id}/refund paypal
     # - GET /v2/payments/refunds/{refund_id}.
-    refund: str = "refund"
+    refund = "refund"
 
     # Data structure references:
     # - Missing
-    capture: str = "capture"
+    capture = "capture"
 
     # Data structure references:
     # - Missing
-    sale: str = "sale"
+    sale = "sale"
 
     # Data structure references:
     # - Missing
-    dispute: str = "dispute"
+    dispute = "dispute"
 
 
 class PaypalNotificationEventType(Enum):
     # primary refund event, the resource is a Refund object (not a Capture)
     # Resource type: 'refund'
     # Do we want to test this: Yes
-    PAYMENT_CAPTURE_REFUNDED: str = "PAYMENT.CAPTURE.REFUNDED"
+    PAYMENT_CAPTURE_REFUNDED = "PAYMENT.CAPTURE.REFUNDED"
 
     # fires when PayPal (not the merchant) reverses a capture — typically due
     # to a chargeback or dispute resolution. Despite the event name, the
@@ -63,14 +63,14 @@ class PaypalNotificationEventType(Enum):
     # https://github.com/woocommerce/woocommerce-paypal-payments/issues/1614
     # Resource type: 'refund'
     # Do we want to test this: Yes
-    PAYMENT_CAPTURE_REVERSED: str = "PAYMENT.CAPTURE.REVERSED"
+    PAYMENT_CAPTURE_REVERSED = "PAYMENT.CAPTURE.REVERSED"
 
     # For chargebacks, you need the dispute events.
     # Data structure references:
     # - GET /v1/customer/disputes/{id}.
     # Resource type: 'dispute'
     # Do we want to test this: Maybe
-    CUSTOMER_DISPUTE_CREATED: str = "CUSTOMER.DISPUTE.CREATED"
+    CUSTOMER_DISPUTE_CREATED = "CUSTOMER.DISPUTE.CREATED"
 
     # Community reports indicate PayPal has occasionally sent v1-style events
     # to v2 integrations without warning.
@@ -80,7 +80,7 @@ class PaypalNotificationEventType(Enum):
     # - Missing
     # Resource type: 'sale'
     # Do we want to test this: Yes
-    PAYMENT_SALE_REFUNDED: str = "PAYMENT.SALE.REFUNDED"
+    PAYMENT_SALE_REFUNDED = "PAYMENT.SALE.REFUNDED"
 
     # NB: PAYMENT.REFUND.PENDING and PAYMENT.REFUND.FAILED do NOT exist as
     # PayPal webhook event types per
@@ -93,14 +93,14 @@ class PaypalNotificationEventType(Enum):
     # - Missing
     # Resource type: 'dispute'
     # Do we want to test this: No
-    CUSTOMER_DISPUTE_UPDATED: str = "CUSTOMER.DISPUTE.UPDATED"
+    CUSTOMER_DISPUTE_UPDATED = "CUSTOMER.DISPUTE.UPDATED"
 
     # Dispute reaches final resolution
     # Data structure references:
     # - Missing
     # Resource type: 'dispute'
     # Do we want to test this: Maybe
-    CUSTOMER_DISPUTE_RESOLVED: str = "CUSTOMER.DISPUTE.RESOLVED"
+    CUSTOMER_DISPUTE_RESOLVED = "CUSTOMER.DISPUTE.RESOLVED"
 
 
 def paypal_resource_type_for_notfication_type(
