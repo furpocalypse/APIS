@@ -97,6 +97,7 @@ The single sharpest architectural trade-off is **statefulness**: both paths host
 - **Fix idea:** Two paths:
   1. **Migrate to managed services** for prod (Azure DB for PostgreSQL Flexible Server + Azure Cache for Redis). Lift the workload off Kubernetes for the durable-state portion. *Strongly preferred.*
   2. Keep StatefulSets and add a Velero schedule (or a `pg_dump` CronJob streaming to Azure Blob Storage with lifecycle rules). Document the RPO target (e.g. "≤24h data loss") so the trade-off is explicit.
+- **Remediation status (S33 / Decision #9):** **DEFERRED — operations-infrastructure decision, not a code fix.** No change to APIS source can make a stateful-workload backup strategy correct; this is a half-day architectural decision (managed Azure DB for PostgreSQL Flexible Server + Azure Cache for Redis — *path 1, the CLAUDE.md-preferred Azure-native primitive, which makes this finding moot by construction* — vs an in-cluster Velero/`pg_dump` schedule with a documented RPO). Tracked in the remediation plan's Findings ledger with rationale and routed to the ops follow-up; explicitly **not silently dropped** and **not** claimed fixed.
 
 ---
 
