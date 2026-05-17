@@ -27,6 +27,7 @@ Design (plan S2):
 from __future__ import annotations
 
 import logging
+from datetime import timezone as dt_timezone
 
 from django.conf import settings
 from django.utils import timezone
@@ -65,8 +66,8 @@ def _parse_utc(value):
     if dt is None:
         return None
     if timezone.is_naive(dt):
-        dt = timezone.make_aware(dt, timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = timezone.make_aware(dt, dt_timezone.utc)
+    return dt.astimezone(dt_timezone.utc)
 
 
 def webhook_within_age_window(timestamp_iso, *, source) -> bool:
