@@ -153,6 +153,7 @@ If a change would touch authentication, sessions, payments, webhooks, secrets, h
 - **OAuth callback paths are frozen** for the related wow-tankgear project (`/bnet-callback`, `/wcl-callback`). That memory note is unrelated to APIS but lives in the same Claude memory namespace; do not repurpose APIS routes with those names.
 - **Prometheus metrics** are exposed on container port 81. This port **must not** be reachable from the public internet — bind it to the management network only.
 - **Maintenance mode** is on (`django-maintenance-mode`); `/accounts/` is allowlisted. Any new admin-only path must be added to `MAINTENANCE_MODE_IGNORE_URLS` if it should remain accessible during a maintenance window.
+- **Terminal trust model** (onsite point-of-sale): the bearer-token "terminal" tier vs the `@staff_member_required` tier is a deliberate kiosk model, bounded by the order↔terminal binding. The design is documented in [`docs/terminal-trust-model.md`](docs/terminal-trust-model.md) — read it before touching `complete_*_transaction`, `terminal_square_token`, or `Firebase`/terminal auth.
 
 ---
 

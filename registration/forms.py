@@ -42,12 +42,6 @@ class FirebaseForm(ModelForm):
         }
 
 
-class SignatureUploadForm(forms.Form):
-    badge_id = forms.IntegerField()
-    svg_file = forms.FileField()
-    png_file = forms.FileField()
-
-
 class AttendeeForm(forms.ModelForm):
     def __init__(self, collect_address: bool, **kwargs) -> None:
         super().__init__(**kwargs)

@@ -14,6 +14,8 @@ import os
 
 from idempotency_key import status
 
+from fm_eventmanager.security_checks import assert_strong_mqtt_secret
+
 
 def eval_bool(x):
     return x.lower() in ("true", "1", "t", "y", "yes")
@@ -112,11 +114,15 @@ LOGGING = {
         "require_debug_true": {
             "()": "django.utils.log.RequireDebugTrue",
         },
+        # MED-6: central PII redaction on everything reaching a stdout handler.
+        "pii_redaction": {
+            "()": "fm_eventmanager.log_redaction.PIIRedactingFilter",
+        },
     },
     "handlers": {
         "console": {
             "level": "INFO",
-            #'filters': ['require_debug_true'],
+            "filters": ["pii_redaction"],
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
@@ -860,6 +866,17 @@ if _IS_PROD and not ALLAUTH_TRUSTED_CLIENT_IP_HEADER:
         "APIS_ENV=production (TRUSTED_CLIENT_IP_HEADER env var)."
     )
 
+# MED-5 (OWASP A02 / ASVS V6.1.1): MQTT push tokens are HS256-signed with
+# base64-decoded MQTT_JWT_SECRET (registration/mqtt.py). A missing, invalid,
+# or under-strength key makes MQTT auth forgeable. In a production-signalled
+# process this MUST fail closed at boot. Dev/test deliberately use short
+# deterministic secrets and do not set APIS_ENV, so this only fires for a
+# real production deploy (same pattern as the E2E_MODE / DEBUG /
+# trusted-client-IP guards above). Logic lives in security_checks so it is
+# unit-testable without importing this module.
+if _IS_PROD:
+    assert_strong_mqtt_secret(MQTT_JWT_SECRET)
+
 # S35: security-logging observability contract. Named loggers with pinned
 # WARNING levels so the detection signals this remediation adds
 # (RequireClientIPMiddleware rejects, webhook age-window rejects, axes
@@ -868,6 +885,7 @@ if _IS_PROD and not ALLAUTH_TRUSTED_CLIENT_IP_HEADER:
 # gets its own handler and does NOT propagate (no double-emit).
 LOGGING.setdefault("handlers", {})["security"] = {
     "level": "WARNING",
+    "filters": ["pii_redaction"],
     "class": "logging.StreamHandler",
     "formatter": "verbose",
 }
