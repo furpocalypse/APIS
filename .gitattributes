@@ -1,0 +1,55 @@
+# Line-ending normalization.
+#
+# Without this file, a Windows checkout (or an editor / OneDrive sync that
+# rewrites EOLs) can flip the entire working tree to CRLF. `manage.py` and
+# the shell entrypoints then fail *inside the Linux container* — the Docker
+# build dies at `RUN ./manage.py collectstatic` with
+#   /usr/bin/env: 'python\r': No such file or directory
+# and `ENTRYPOINT ["/app/start.sh"]` crashes with a bad `#!/bin/sh\r`
+# interpreter. core.autocrlf is intentionally not relied upon; this file is
+# the source of truth so every clone behaves identically.
+
+# Default: treat everything as text, store as LF in the repo, and check out
+# as LF regardless of platform.
+* text=auto eol=lf
+
+# Files that MUST be LF to execute in the runtime/build container. Called
+# out explicitly so the intent survives even if the wildcard above changes.
+*.sh            text eol=lf
+*.bash          text eol=lf
+manage.py       text eol=lf
+*.py            text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.conf          text eol=lf
+*.template      text eol=lf
+*.env.example   text eol=lf
+.env.*.example  text eol=lf
+Makefile        text eol=lf
+
+# Windows-only helper scripts stay CRLF.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Lockfiles: LF, and collapse their diffs (huge, machine-generated).
+package-lock.json text eol=lf -diff
+uv.lock           text eol=lf -diff
+
+# Binary assets — never apply EOL conversion.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.svg    text eol=lf
+*.pdf    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.eot    binary
+*.zip    binary
+*.gz     binary
+*.whl    binary
