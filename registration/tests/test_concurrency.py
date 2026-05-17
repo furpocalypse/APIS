@@ -302,3 +302,97 @@ class TestWebhookOrderCompletionRace(TransactionTestCase):
             f"counter drift: remaining={self.tier.remainingSlots} "
             f"reserved={self.tier.reservedSlots}",
         )
+
+    def _capture_notification(self):
+        # Minimal PAYMENT.CAPTURE.COMPLETED resolvable to self.order via
+        # invoice_id == Order.reference (_find_order_for_v2_capture).
+        class _N:
+            body = {
+                "resource": {
+                    "id": "CAP-RACE",
+                    "invoice_id": self.order.reference,
+                    "custom_id": self.order.reference,
+                    "status": "COMPLETED",
+                    "amount": {"value": "45.00", "currency_code": "USD"},
+                }
+            }
+
+        return _N()
+
+    def test_handle_capture_completed_handler_exactly_once(self):
+        """Peer-review Radical-Doubt #3 / Test-Coverage: drive the ACTUAL
+        webhook handler (not the primitive directly) under contention."""
+        from registration.paypal_webhook_handlers import handle_capture_completed
+
+        barrier = threading.Barrier(self.NUM_THREADS)
+        with patch("registration.tasks.send_registration_email_task.delay") as mock_delay:
+
+            def worker():
+                try:
+                    barrier.wait(timeout=10)
+                    handle_capture_completed(self._capture_notification())
+                finally:
+                    connection.close()
+
+            threads = [threading.Thread(target=worker) for _ in range(self.NUM_THREADS)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+        # Email queued exactly once across N concurrent deliveries.
+        self.assertEqual(mock_delay.call_count, 1)
+        self.tier.refresh_from_db()
+        self.assertEqual(self.tier.reservedSlots, 0)
+        self.assertTrue(self.tier.verify_and_repair_counters())
+
+    def test_sync_checkout_vs_webhook_capacity_once(self):
+        """Peer-review Test-Coverage gap: synchronous checkout
+        finalization (now routed through transition_order_status,
+        expected=PENDING) racing a duplicate webhook must confirm
+        capacity + email exactly once, never double."""
+        from registration.paypal_webhook_handlers import handle_capture_completed
+
+        barrier = threading.Barrier(self.NUM_THREADS + 1)
+        with patch("registration.tasks.send_registration_email_task.delay") as mock_delay:
+
+            def sync_worker():
+                try:
+                    barrier.wait(timeout=10)
+                    o = Order.objects.get(pk=self.order.pk)
+                    # Mirrors do_checkout / charge_payment finalization.
+                    transition_order_status(
+                        o, Order.COMPLETED, expected=[Order.PENDING], refresh=False
+                    )
+                finally:
+                    connection.close()
+
+            def webhook_worker():
+                try:
+                    barrier.wait(timeout=10)
+                    handle_capture_completed(self._capture_notification())
+                finally:
+                    connection.close()
+
+            threads = [threading.Thread(target=sync_worker)] + [
+                threading.Thread(target=webhook_worker) for _ in range(self.NUM_THREADS)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+        # At most one email (sync path does not email; webhook emails only
+        # if it won from PENDING) — never two.
+        self.assertLessEqual(mock_delay.call_count, 1)
+        self.tier.refresh_from_db()
+        self.assertEqual(self.tier.reservedSlots, 0)
+        self.assertTrue(
+            self.tier.verify_and_repair_counters(),
+            f"capacity double-applied: remaining={self.tier.remainingSlots} "
+            f"reserved={self.tier.reservedSlots}",
+        )
