@@ -2,9 +2,16 @@ import json
 from enum import Enum
 from typing import Any
 from unittest.mock import MagicMock, patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
-from django.test import RequestFactory, TestCase, override_settings, tag
+from django.core.cache import cache
+from django.test import (
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    override_settings,
+    tag,
+)
 from django.urls import reverse
 
 from registration.models import (
@@ -375,6 +382,12 @@ class TestPaypalWebhookSignatureVerification(TestCase):
     branches) gets exercised.
     """
 
+    def setUp(self):
+        # MED-7: verify_signature now caches the OAuth token. Clear it
+        # between tests so each starts empty and the token-fetch + verify
+        # call sequence (and call_count) is deterministic / order-free.
+        cache.clear()
+
     ALL_HEADERS = {
         "paypal-auth-algo": "SHA256withRSA",
         "paypal-cert-url": "https://api.paypal.com/v1/notifications/certs/CERT-ID",
@@ -481,6 +494,48 @@ class TestPaypalWebhookSignatureVerification(TestCase):
         request = self._build_paypal_request_with_headers()
         self.assertFalse(verify_signature(request))
         self.assertFalse(mock_urlopen.called)
+
+    @patch("urllib.request.urlopen")
+    def test_oauth_token_is_cached_across_calls(self, mock_urlopen):
+        """MED-7 — the second verify reuses the cached token (no re-fetch).
+
+        First call: token-fetch + verify (2). Second call: verify only,
+        because the token is served from cache (1). Total 3, not 4.
+        """
+        mock_urlopen.side_effect = [
+            self._mock_response({"access_token": "tok", "expires_in": 32400}),
+            self._mock_response({"verification_status": "SUCCESS"}),
+            self._mock_response({"verification_status": "SUCCESS"}),
+        ]
+        req = self._build_paypal_request_with_headers()
+        self.assertTrue(verify_signature(req))
+        self.assertTrue(verify_signature(self._build_paypal_request_with_headers()))
+        self.assertEqual(mock_urlopen.call_count, 3)
+
+    @patch("urllib.request.urlopen")
+    def test_401_invalidates_token_and_retries_once(self, mock_urlopen):
+        """MED-7 / LOW-3 — a 401 on verify forces a token refresh + one retry."""
+        mock_urlopen.side_effect = [
+            self._mock_response({"access_token": "stale", "expires_in": 32400}),
+            HTTPError("u", 401, "Unauthorized", {}, None),
+            self._mock_response({"access_token": "fresh", "expires_in": 32400}),
+            self._mock_response({"verification_status": "SUCCESS"}),
+        ]
+        req = self._build_paypal_request_with_headers()
+        self.assertTrue(verify_signature(req))
+        # token, verify(401), token-refresh, verify(success).
+        self.assertEqual(mock_urlopen.call_count, 4)
+
+    @patch("urllib.request.urlopen")
+    def test_non_401_http_error_fails_closed(self, mock_urlopen):
+        """A non-401 HTTP error on verify fails closed with no retry."""
+        mock_urlopen.side_effect = [
+            self._mock_response({"access_token": "tok", "expires_in": 32400}),
+            HTTPError("u", 500, "Server Error", {}, None),
+        ]
+        req = self._build_paypal_request_with_headers()
+        self.assertFalse(verify_signature(req))
+        self.assertEqual(mock_urlopen.call_count, 2)
 
 
 class TestMalformedPaypalRefundWebhooks(TestCase):
@@ -2264,3 +2319,65 @@ class TestPaypalCaptureWebhooks(TestCase):
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.REFUNDED)
+
+
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+    PAYPAL_CLIENT_ID="cid",
+    PAYPAL_CLIENT_SECRET="csec",
+)
+class TestPaypalTokenCache(SimpleTestCase):
+    """MED-7 — _get_paypal_access_token caching (no DB, runs locally)."""
+
+    def setUp(self):
+        cache.clear()
+
+    @staticmethod
+    def _resp(body):
+        inner = MagicMock()
+        inner.read.return_value = json.dumps(body).encode()
+        inner.status = 200
+        cm = MagicMock()
+        cm.__enter__.return_value = inner
+        cm.__exit__.return_value = False
+        return cm
+
+    @patch("urllib.request.urlopen")
+    def test_token_fetched_once_then_served_from_cache(self, mock_urlopen):
+        from registration.views.paypal_webhooks import _get_paypal_access_token
+
+        mock_urlopen.side_effect = [self._resp({"access_token": "T", "expires_in": 32400})]
+        self.assertEqual(_get_paypal_access_token(), "T")
+        # Second call: cache hit, no second HTTP fetch.
+        self.assertEqual(_get_paypal_access_token(), "T")
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+    @patch("urllib.request.urlopen")
+    def test_force_refresh_and_invalidate(self, mock_urlopen):
+        from registration.views.paypal_webhooks import (
+            _get_paypal_access_token,
+            invalidate_paypal_access_token,
+        )
+
+        mock_urlopen.side_effect = [
+            self._resp({"access_token": "A", "expires_in": 32400}),
+            self._resp({"access_token": "B", "expires_in": 32400}),
+            self._resp({"access_token": "C", "expires_in": 32400}),
+        ]
+        self.assertEqual(_get_paypal_access_token(), "A")
+        # force_refresh bypasses the cache.
+        self.assertEqual(_get_paypal_access_token(force_refresh=True), "B")
+        # invalidate drops the cache, so the next plain call re-fetches.
+        invalidate_paypal_access_token()
+        self.assertEqual(_get_paypal_access_token(), "C")
+        self.assertEqual(mock_urlopen.call_count, 3)
+
+    @patch("urllib.request.urlopen")
+    def test_ttl_capped_below_paypal_expiry(self, mock_urlopen):
+        from registration.views import paypal_webhooks as pw
+
+        mock_urlopen.side_effect = [self._resp({"access_token": "T", "expires_in": 99999})]
+        with patch.object(pw.cache, "set", wraps=pw.cache.set) as spy:
+            pw._get_paypal_access_token()
+        timeout = spy.call_args.kwargs.get("timeout") or spy.call_args.args[2]
+        self.assertLessEqual(timeout, pw.PAYPAL_TOKEN_CACHE_MAX_TTL)
