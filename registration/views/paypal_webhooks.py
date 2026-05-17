@@ -181,6 +181,19 @@ def paypal_webhook(request):
     if "id" not in request_body:
         return common.abort(400, "Missing id")
 
+    # Bound the webhook's age (see webhooks.webhook_within_age_window
+    # rationale). PayPal's ``paypal-transmission-time`` header is already
+    # part of the signature input, so its integrity is validated. We also
+    # cross-check ``create_time`` from the body — both must be in window.
+    from registration.views.webhooks import webhook_within_age_window
+
+    transmission_time = request.headers.get("paypal-transmission-time")
+    create_time = request_body.get("create_time")
+    if not webhook_within_age_window(transmission_time, source="paypal"):
+        return common.abort(400, "Webhook timestamp out of window")
+    if create_time and not webhook_within_age_window(create_time, source="paypal"):
+        return common.abort(400, "Webhook timestamp out of window")
+
     event_id = request_body["id"]
     event_type = request_body.get("event_type")
 

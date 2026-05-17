@@ -5,26 +5,35 @@
 </head>
 
 <body>
-<a href="{{ next }}">Go Back</a>
+{% if next %}<a href="{{ next }}">Go Back</a>{% endif %}
+{% comment %}
+  `printing_data` is a small dict of validated, same-origin URLs. Passing
+  it via the json_script filter produces a <script type="application/json">
+  block whose contents are JSON-escaped — closing the JS-string XSS vector
+  that plain "{{ var }}" interpolation in a <script> tag would have.
+{% endcomment %}
+{{ printing_data|json_script:"printing-data" }}
 <script>
-    var w = window.open("{{ file }}", "", "width=400,height=400");
+    var printingData = JSON.parse(document.getElementById('printing-data').textContent);
+    var w = printingData.file
+        ? window.open(printingData.file, "", "width=400,height=400")
+        : null;
 
     if (!w || w.closed || typeof w.closed == 'undefined') {
         // Didn't popup
-        document.write("<h1>Problem printing - check your popup blocker!</h2>");
+        document.write("<h1>Problem printing - check your popup blocker!</h1>");
     } else {
         w.onload = function () {
             w.print();
         };
 
         window.setTimeout(function () {
-            {% if next %}
-                window.location.href = "{{ next }}";
-            {% else %}
+            if (printingData.next) {
+                window.location.href = printingData.next;
+            } else {
                 window.close();
-            {% endif %}
+            }
         }, 1000);
-
     }
 </script>
 <!-- redirect after close -->

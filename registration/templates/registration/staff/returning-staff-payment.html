@@ -83,9 +83,14 @@
   </script>
   <script type="text/javascript" src="/static/js/templates/price-types.js"></script>
   <script type="text/javascript" src="/static/js/templates/staff.js"></script>
+  {{ jsonStaff|json_script:"staff-data" }}
+  {{ jsonAttendee|json_script:"attendee-data" }}
   <script type="text/javascript">
-      let staff = {{ jsonStaff|safe|default:"null" }};
-      let attendee = {{ jsonAttendee|safe|default:"null" }};
+      // json_script emits valid JSON (including the literal `null` when the
+      // view passes None), closing the JS-string-XSS vector that |safe in a
+      // <script> tag had. OWASP A03.
+      let staff = JSON.parse(document.getElementById("staff-data").textContent);
+      let attendee = JSON.parse(document.getElementById("attendee-data").textContent);
 
       function doRegister(e) {
           e.preventDefault();

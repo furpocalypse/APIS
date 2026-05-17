@@ -1,0 +1,225 @@
+# --------------------------------------------------------------------------
+# APIS — Azure VM production compose file.
+#
+# Topology:
+#   internet
+#     │  (DNS proxied through Cloudflare)
+#     ▼
+#   Cloudflare edge (TLS terminated, WAF, DDoS)
+#     │  HTTPS → origin (Cloudflare Origin Certificate at /opt/apis/certs)
+#     ▼
+#   apis-nginx container :443 / :80
+#     │  HTTP (loopback network) → app:8000
+#     ▼
+#   app container (gunicorn :8000)
+#     │
+#     ▼
+#   postgres + redis containers
+#
+# Two boot styles:
+#   docker compose -f docker-compose.prod.yaml pull
+#   docker compose -f docker-compose.prod.yaml up -d
+#
+# Differences from docker-compose.yaml (the dev file):
+#   * Pulls prebuilt images from Azure Container Registry — NO `build:`.
+#   * No host volume mounts shadowing image code. Runtime is what was
+#     baked at image-build time, period.
+#   * Hardening: read_only root filesystem, cap_drop ALL,
+#     no-new-privileges, tmpfs for every writable path.
+#   * Postgres + Redis data persist to bind mounts under
+#     ${APIS_DATA_DIR:-/srv/apis}. On an Azure VM this should be on an
+#     attached managed disk.
+#   * apis-nginx mounts /opt/apis/certs:/app/certs:ro for the Cloudflare
+#     Origin Certificate. nginx refuses to start without the cert files.
+#
+# REQUIRED on the VM before `docker compose ... up`:
+#   - `.env`           (created from .env.prod.example; never commit)
+#   - `database.env`   (POSTGRES_DB / USER / PASSWORD; must match the
+#                       DATABASE_* values in .env above)
+#   - ACR login:       `az acr login --name furpocalypse`  (or a service
+#                       principal write-token in `docker login`)
+#   - APIS_DATA_DIR    persistent disk mounted; owner uid 1000:1000 on
+#                       postgres and redis subdirs
+#   - /opt/apis/certs/fullchain.pem and /opt/apis/certs/privkey.pem
+#                       readable to uid 101 (nginx user inside the
+#                       apis-nginx container)
+#
+# Single-VM / VMSS notes:
+#   * For real production prefer Azure Database for PostgreSQL Flexible
+#     Server + Azure Cache for Redis (TLS, port 6380) over the in-VM
+#     services below — comment out the `postgres` and `redis` services
+#     and point DATABASE_HOST / DJANGO_REDIS_URL at the managed endpoints.
+#   * For VMSS instance replacement to be lossless, the managed disk
+#     mounted at APIS_DATA_DIR must be re-attachable across replacements.
+#     Or, again, prefer the managed services.
+
+services:
+  # --------------------------------------------------------------------
+  # nginx reverse proxy. Terminates TLS from Cloudflare, enforces
+  # CF-source-IP allowlist, proxies to the app on the docker network.
+  # --------------------------------------------------------------------
+  nginx:
+    profiles: ["app","fullstack"]
+    image: furpocalypse.azurecr.io/apis-nginx:0.5.2
+    pull_policy: always
+    restart: always
+    ports:
+      # Map host:80 -> container:80 (for Cloudflare HTTP probes / ACME
+      # http-01 if you ever need it) and host:443 -> container:443.
+      - "80:80"
+      - "443:443"
+    environment:
+      TRUSTED_PROXY_MODE: cloudflare
+      # Replace with the FQDN(s) your Cloudflare Origin Certificate covers.
+      NGINX_SERVER_NAMES: registration.furpocalypse.org www.registration.furpocalypse.org
+      NGINX_UPSTREAM: app:8000
+    volumes:
+      # Cloudflare Origin Certificate (or Let's Encrypt cert) bind-mount.
+      # Pre-create on the VM:
+      #   sudo mkdir -p /opt/apis/certs
+      #   sudo chown 101:101 /opt/apis/certs
+      #   sudo chmod 750 /opt/apis/certs
+      # Then place fullchain.pem + privkey.pem there.
+      - /opt/apis/certs:/app/certs:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # Raise the open-file limit so nginx's worker_rlimit_nofile=8192 can
+    # actually take effect. Default container limit is 1024, which caps
+    # each worker at ~512 concurrent connections (each connection = 2 fds).
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 16384
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /var/cache/nginx:rw,nosuid,nodev,size=16m
+      - /run:rw,nosuid,nodev,size=4m
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # --------------------------------------------------------------------
+  # APIS app (gunicorn). No public port mapping — only the nginx sidecar
+  # and the worker can reach it over the docker network.
+  # --------------------------------------------------------------------
+  app:
+    profiles: ["app","fullstack"]
+    # Pinned to a specific tag. For the strongest reproducibility (and
+    # CIS Docker 4.2), append the SHA256 digest:
+    #   image: furpocalypse.azurecr.io/apis:0.5.3@sha256:<digest>
+    # Resolve via:
+    #   az acr repository show --name furpocalypse --image apis:0.5.3 --query 'digest'
+    image: furpocalypse.azurecr.io/apis:0.5.3
+    pull_policy: always
+    restart: always
+    expose:
+      - "8000"   # internal only; the nginx sidecar reaches it as app:8000
+    env_file:
+      - .env
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # gunicorn is PID 1 now (no supervisord, no nginx in this image).
+    # /tmp is for gunicorn's worker temp files; /app/.gunicorn for its
+    # control socket; /run for whatever a stdlib lib may want.
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /app/.gunicorn:rw,nosuid,nodev,size=4m,uid=1000,gid=1000
+      - /run:rw,nosuid,nodev,size=4m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Healthcheck is baked into the image (hits :8000/robots.txt).
+
+  worker:
+    profiles: ["app","fullstack"]
+    image: furpocalypse.azurecr.io/apis:0.5.3
+    pull_policy: always
+    command: worker
+    restart: always
+    env_file:
+      - .env
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /run:rw,nosuid,nodev,size=4m
+    # Override the image's baked-in HEALTHCHECK (which probes :8000 — only
+    # valid for the web service). Celery's liveness signal is `inspect
+    # ping` against the worker's control channel. start_period is generous
+    # because the worker waits for migrations to finish on the app pod
+    # before it'll happily process tasks that touch new schema.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A fm_eventmanager inspect ping -d celery@$$HOSTNAME --timeout=5 >/dev/null 2>&1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    profiles: ["db","fullstack"]
+    image: postgres:16
+    restart: always
+    env_file:
+      - database.env
+    volumes:
+      # Bind mount onto the persistent data directory so postgres
+      # survives container / VM replacement. Pre-create on the VM:
+      #   sudo mkdir -p ${APIS_DATA_DIR}/postgres
+      #   sudo chown 999:999 ${APIS_DATA_DIR}/postgres
+      - ${APIS_DATA_DIR:-/srv/apis}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  redis:
+    profiles: ["db","fullstack"]
+    image: redis:8
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --save 60 1
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      # Bind mount for AOF persistence. Pre-create:
+      #   sudo mkdir -p ${APIS_DATA_DIR}/redis
+      #   sudo chown 999:999 ${APIS_DATA_DIR}/redis
+      - ${APIS_DATA_DIR:-/srv/apis}/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gotenberg:
+    # PDF rendering. Behind a profile so it's only started when needed.
+    # If used, set GOTENBERG_HOST=http://gotenberg:3000 in .env.
+    profiles: ["gotenberg"]
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped

@@ -1,4 +1,75 @@
+# --- VCS / IDE / OS junk -----------------------------------------------
 .git/
+.github/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Python build/test caches -----------------------------------------
 .venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+
+# --- Frontend caches (the BUILT bundle is shipped via the assets stage,
+#     bundler/ may exist locally as collectstatic output) ----------------
 node_modules/
 bundler/
+**/dist/
+**/.vite/
+
+# --- Local + dev-only configuration -----------------------------------
+# .env* covers .env, .env.dev.example, .env.prod.example, .env.local, etc.
+# — keep secrets out of the image at all costs (CLAUDE.md operational rule
+# on Key Vault). The example templates ARE matched by `.env.*` but they
+# don't carry real values, so excluding them is still correct.
+.env
+.env.*
+.envrc
+database.env
+database.env.example
+.tool-versions
+.flake8
+.isort.cfg
+.coveragerc
+.pre-commit-config.yaml
+
+# --- Docker / build / dev-runner artefacts (don't ship the ones that
+#     define the build to the runtime image) -----------------------------
+Dockerfile
+.dockerignore
+docker-compose.yaml
+docker-compose.*.yaml
+docker-compose.*.yml
+Makefile
+
+# --- Non-runtime directories ------------------------------------------
+docs/
+e2e/
+postgres/
+redis/
+ssl/
+.tmp_*
+.rollback/
+
+# --- Tests (don't ship to prod images) --------------------------------
+**/tests/
+**/test_*.py
+
+# --- Markdown — keep CLAUDE.md (binding context) and LICENSE only -----
+*.md
+!CLAUDE.md
+README.md

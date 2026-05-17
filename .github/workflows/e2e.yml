@@ -79,7 +79,7 @@ jobs:
           npx playwright install --with-deps chromium firefox
 
       - name: Prepare Django settings
-        run: cp fm_eventmanager/settings.py.ci fm_eventmanager/settings.py
+        run: # settings_test.py is the canonical test settings — no copy needed.
 
       - name: Build frontend
         working-directory: registration/frontend

@@ -263,11 +263,17 @@
   {% if dealer %}
   <script type="text/javascript" src="{% static "js/templates/price-types.js" %}"></script>
   <script type="text/javascript" src="{% static "js/date-entry.js" %}"></script>
+  {{ jsonDealer|json_script:"dealer-data" }}
+  {{ jsonAttendee|json_script:"attendee-data" }}
+  {{ jsonBadge|json_script:"badge-data" }}
+  {{ jsonTable|json_script:"table-data" }}
   <script type="text/javascript">
-      let dealer = {{ jsonDealer|safe }};
-      let attendee = {{ jsonAttendee|safe }};
-      let badge = {{ jsonBadge|safe }};
-      let table = {{ jsonTable|safe }};
+      // See attendee-upgrade.html note: json_script blocks the JS-string XSS
+      // vector that |safe interpolation in <script> had. OWASP A03.
+      let dealer = JSON.parse(document.getElementById("dealer-data").textContent);
+      let attendee = JSON.parse(document.getElementById("attendee-data").textContent);
+      let badge = JSON.parse(document.getElementById("badge-data").textContent);
+      let table = JSON.parse(document.getElementById("table-data").textContent);
 
       let partners = dealer.partners.split(', ');
       let partnerCount = 0;

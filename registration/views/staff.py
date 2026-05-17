@@ -12,7 +12,7 @@ from django.views.decorators.http import require_POST
 from registration.models import *
 from registration.services import CreateAttendeeOptions
 
-from .common import abort, handler, logger
+from .common import abort, handler, logger, to_json_safe
 from .ordering import get_total
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,13 @@ def find_returning_staff(request):
         email = post_data["email"]
         token = post_data["token"]
     except (json.JSONDecodeError, KeyError) as e:
-        logger.warning(f"Unable to find returning staff: bad request - {request.body}")
+        # OWASP A09 / ASVS V7.1.1 / V8.3.1: never log the raw request
+        # body — it carries email + registrationToken (and historically
+        # has carried PII like birthdate / address) which lands in
+        # plaintext logs and Sentry events. Log only the error type.
+        logger.warning(
+            "Unable to find returning staff: bad request (%s)", type(e).__name__
+        )
         return abort(400, str(e))
 
     try:
@@ -206,7 +212,17 @@ def find_returning_staff(request):
 
 def info_returning_staff(request):
     event = Event.objects.get(default=True)
-    context = {"staff": None, "event": event, "form_type": form_type}
+    # Always provide jsonStaff / jsonAttendee in the context so the template's
+    # {% json_script %} blocks always emit valid JSON. If the staff session
+    # is unset, both are None (rendered as JS `null`), preserving the prior
+    # `|default:"null"` semantics without the unsafe |safe interpolation.
+    context = {
+        "staff": None,
+        "event": event,
+        "form_type": form_type,
+        "jsonStaff": None,
+        "jsonAttendee": None,
+    }
 
     staff_id = request.session.get("staff_id")
     if staff_id is None:
@@ -228,8 +244,9 @@ def info_returning_staff(request):
 
         context = {
             "staff": staff,
-            "jsonStaff": json.dumps(staff_dict, default=handler),
-            "jsonAttendee": json.dumps(attendee_dict, default=handler),
+            # Plain dicts for `{% json_script %}`; closes JS-string-XSS vector.
+            "jsonStaff": to_json_safe(staff_dict),
+            "jsonAttendee": to_json_safe(attendee_dict),
             "badge": badge,
             "event": event,
             "paid_total": paid_total,
@@ -256,8 +273,37 @@ def add_returning_staff(request):
     else:
         event = Event.objects.get(default=True)
 
-    attendee = Attendee.objects.get(id=pda["id"])
-    if not attendee:
+    # Audit P1.8 (BOLA / IDOR fix): the staff record (and the attendee
+    # behind it) must be the ones bound to *this* session, not whatever
+    # the body asserts. Read both from the session-bound staff record;
+    # body-supplied ids are checked for mismatch and rejected.
+    staff_id = request.session.get("staff_id")
+    if staff_id is None:
+        return JsonResponse({"success": False, "message": "Session expired"})
+
+    try:
+        staff = Staff.objects.get(id=staff_id)
+    except Staff.DoesNotExist:
+        return JsonResponse({"success": False, "message": "Staff record not found"})
+    if pds.get("id") and int(pds["id"]) != staff.id:
+        logger.warning(
+            "BOLA attempt in add_returning_staff: session staff %s tried to mutate staff %s",
+            staff_id,
+            pds.get("id"),
+        )
+        return JsonResponse({"success": False, "message": "Staff record not found"})
+
+    attendee = staff.attendee
+    if attendee is None:
+        return JsonResponse({"success": False, "message": "Staff has no attendee"})
+    if pda.get("id") and int(pda["id"]) != attendee.id:
+        logger.warning(
+            "BOLA attempt in add_returning_staff: session staff %s (attendee %s) tried "
+            "to mutate attendee %s",
+            staff_id,
+            attendee.id,
+            pda.get("id"),
+        )
         return JsonResponse({"success": False, "message": "Attendee not found"})
 
     tz = timezone.get_current_timezone()
@@ -283,14 +329,8 @@ def add_returning_staff(request):
         logger.exception("Error saving staff attendee record.")
         return JsonResponse({"success": False, "message": "Attendee not saved: " + e})
 
-    staff = Staff.objects.get(id=pds["id"])
-    if "staff_id" not in request.session:
-        return JsonResponse({"success": False, "message": "Staff record not found"})
-
-    # Update Staff info
-    if not staff:
-        return JsonResponse({"success": False, "message": "Staff record not found"})
-
+    # `staff` and `attendee` are already resolved from session above
+    # (P1.8 BOLA fix) — don't re-fetch from the body.
     staff_from_post_data(pds, attendee, event, staff)
 
     try:

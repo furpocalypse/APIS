@@ -1,0 +1,22 @@
+# Replace the rules + tls blocks in one shot. The Ingress is targeted by
+# the kustomization.yaml `patches[].target` selector, so we only need the
+# fields we're changing here.
+- op: replace
+  path: /spec/tls
+  value:
+    - hosts:
+        - apis-dev.example.org
+      secretName: apis-dev-tls
+- op: replace
+  path: /spec/rules
+  value:
+    - host: apis-dev.example.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: apis-app
+                port:
+                  number: 8000

@@ -1,0 +1,45 @@
+# Base manifests — environment-agnostic. Overlays (overlays/dev,
+# overlays/prod) patch values that vary per environment: image tag,
+# hostnames, replica counts, resource asks, ALLOWED_HOSTS, Key Vault
+# name, Managed Identity client IDs.
+#
+# Do not apply this directory directly:
+#   kubectl apply -k aks/base                # DON'T
+# Always apply through an overlay:
+#   kubectl apply -k aks/overlays/prod       # correct
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apis
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: apis
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - secretproviderclass.yaml
+  - deployment-app.yaml
+  - deployment-worker.yaml
+  - statefulset-postgres.yaml
+  - statefulset-redis.yaml
+  - services.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+# Build the `apis-config` ConfigMap from apis-config.env. Overlays merge
+# additional / overriding values via their own configMapGenerator with
+# `behavior: merge`. `disableNameSuffixHash: true` so the Deployments'
+# `configMapRef: apis-config` keeps resolving across reapplies — flip
+# this on if you want config changes to force pod rollouts.
+configMapGenerator:
+  - name: apis-config
+    envs:
+      - apis-config.env
+    options:
+      disableNameSuffixHash: true

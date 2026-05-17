@@ -1,0 +1,154 @@
+# Default-deny ingress + egress for the namespace, then explicit allows.
+# AKS network policy engine (Azure NPM, Cilium, or Calico) must be
+# enabled on the cluster for these to take effect — `kubectl describe
+# networkpolicy` will list "PodSelector" but enforcement requires a
+# supported CNI/dataplane.
+#
+# Allow matrix:
+#                ingress to                | egress from
+#   web    <-    AppGW (kube-system AGIC)  |  postgres, redis, DNS, egress LB
+#   worker <-    (nothing — internal only) |  postgres, redis, DNS, egress LB
+#   postgres <- web, worker                |  DNS
+#   redis    <- web, worker                |  DNS
+
+# --- 1. Default deny ALL ingress + egress in the namespace --------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: apis
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# --- 2. DNS egress for every pod (required for service discovery) -------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: apis
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# --- 3. Allow ingress to the web pod from the AGIC (kube-system) -------
+# AGIC runs in kube-system. We accept any source from there on port 80.
+# If AGIC is replaced by an in-cluster ingress controller, broaden the
+# namespaceSelector accordingly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-web
+  namespace: apis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: apis
+      app.kubernetes.io/component: web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# --- 4. Web + worker can hit postgres and redis ------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-postgres
+  namespace: apis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apis
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-redis
+  namespace: apis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# --- 5. App + worker egress: postgres, redis, internet (for SMTP, ------
+#     PayPal / Square APIs, ACR, etc.).
+#     The 0.0.0.0/0 egress to the internet has explicit exclusions for
+#     the cluster service CIDR + node CIDR to stop lateral movement —
+#     in-cluster reachability must go through the explicit rules above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-egress
+  namespace: apis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: apis
+  policyTypes: [Egress]
+  egress:
+    # In-cluster: postgres + redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Internet egress for SMTP, payment providers, Key Vault, ACR.
+    # NOTE: the except CIDRs below MUST be adjusted to your cluster's
+    # actual pod / service / node CIDRs — these are AKS defaults.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # default AKS VNet — narrow to actual range
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 587   # SMTP submission
+        - protocol: TCP
+          port: 8883  # MQTT-TLS

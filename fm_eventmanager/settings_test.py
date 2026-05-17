@@ -21,21 +21,28 @@ if SENTRY_ENABLED:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
 
+    def _sentry_before_send(event, hint):
+        request = (event or {}).get("request") or {}
+        request.pop("data", None)
+        request.pop("cookies", None)
+        headers = request.get("headers") or {}
+        for hkey in list(headers):
+            if hkey.lower() in {
+                "authorization",
+                "cookie",
+                "x-csrftoken",
+                "idempotency-key",
+                "x-firebase-token",
+            }:
+                headers[hkey] = "[scrubbed]"
+        return event
+
     sentry_sdk.init(
         dsn=os.environ["SENTRY_DSN"],
         integrations=[DjangoIntegration()],
-        # Set traces_sample_rate to 1.0 to capture 100%
-        # of transactions for performance monitoring.
-        # We recommend adjusting this value in production,
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", 0.01)),
-        # If you wish to associate users to errors (assuming you are using
-        # django.contrib.auth) you may enable sending PII data.
-        send_default_pii=True,
-        # By default the SDK will try to use the SENTRY_RELEASE
-        # environment variable, or infer a git commit
-        # SHA as release, however you may want to set
-        # something more human-readable.
-        # release="myapp@1.0.0",
+        send_default_pii=eval_bool(os.environ.get("SENTRY_SEND_DEFAULT_PII", "False")),
+        before_send=_sentry_before_send,
         auto_session_tracking=False,
     )
 
@@ -107,12 +114,40 @@ if eval_bool(os.getenv("APIS_ADMIN_EMAIL_HANDLER", "False")):
 SERVER_EMAIL = os.getenv("DJANGO_SERVER_EMAIL", "no-reply@example.com")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", SERVER_EMAIL)
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
-CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://*,https://*").split(
-    ","
-)
+
+# ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS — mirror settings.py.
+def _split_env(name):
+    raw = os.environ.get(name, "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+ALLOWED_HOSTS = _split_env("ALLOWED_HOSTS")
+CSRF_TRUSTED_ORIGINS = _split_env("CSRF_TRUSTED_ORIGINS")
+
+if DEBUG:
+    if not ALLOWED_HOSTS:
+        ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver"]
+    if not CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS = ["http://localhost", "http://127.0.0.1"]
+else:
+    if not ALLOWED_HOSTS:
+        raise RuntimeError(
+            "ALLOWED_HOSTS must be set (comma-separated FQDNs) when DEBUG=False."
+        )
+    if not CSRF_TRUSTED_ORIGINS:
+        raise RuntimeError(
+            "CSRF_TRUSTED_ORIGINS must be set (comma-separated https:// origins) "
+            "when DEBUG=False."
+        )
+    if any(h == "*" for h in ALLOWED_HOSTS):
+        raise RuntimeError("ALLOWED_HOSTS must not contain '*' in production.")
+    if any(o in ("http://*", "https://*", "*") for o in CSRF_TRUSTED_ORIGINS):
+        raise RuntimeError(
+            "CSRF_TRUSTED_ORIGINS must not contain wildcards in production."
+        )
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 
 # Application definition
 
@@ -137,9 +172,10 @@ INSTALLED_APPS = [
     "allauth.mfa",
     "registration",
     "nested_inline",
-    "debug_toolbar",
     "django_prometheus",
     "django_vite",
+    "csp",
+    "axes",
 ]
 
 MIDDLEWARE = [
@@ -147,16 +183,29 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "fm_eventmanager.middleware.RequireClientIPMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
+    "csp.middleware.CSPMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "idempotency_key.middleware.ExemptIdempotencyKeyMiddleware",
     "maintenance_mode.middleware.MaintenanceModeMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
+    "axes.middleware.AxesMiddleware",
 ]
+
+# django-debug-toolbar is dev-only; gate same as settings.py.
+if DEBUG:
+    INSTALLED_APPS += ["debug_toolbar"]
+    _DT_MW = "debug_toolbar.middleware.DebugToolbarMiddleware"
+    if _DT_MW not in MIDDLEWARE:
+        MIDDLEWARE.insert(
+            MIDDLEWARE.index("django.middleware.clickjacking.XFrameOptionsMiddleware")
+            + 1,
+            _DT_MW,
+        )
 
 ROOT_URLCONF = "fm_eventmanager.urls"
 
@@ -191,7 +240,10 @@ DATABASES = {
         "PASSWORD": os.getenv("DATABASE_PASS", "secret"),
         "HOST": os.getenv("DATABASE_HOST"),
         "PORT": os.getenv("DATABASE_PORT", "5432"),
-        "OPTIONS": {"pool": eval_bool(os.getenv("DJANGO_DATABASE_POOL", "True"))},
+        "OPTIONS": {
+            "pool": eval_bool(os.getenv("DJANGO_DATABASE_POOL", "True")),
+            "sslmode": os.getenv("DATABASE_SSLMODE", "prefer"),
+        },
     }
 }
 
@@ -225,7 +277,7 @@ CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(
 CELERY_TASK_SEND_SENT_EVENT = eval_bool(
     os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True")
 )
-# Match settings.py.ci behavior: execute Celery tasks synchronously inside
+# Match settings_test.py behavior: execute Celery tasks synchronously inside
 # Django tests so ``.delay(...)`` dispatches hit ``mail.outbox`` and mocked
 # task functions assertions fire before the HTTP response returns. Without
 # this, tasks would enqueue to a real Redis broker that CI does not run.
@@ -237,26 +289,27 @@ CELERY_TASK_EAGER_PROPAGATES = eval_bool(
 
 # Prometheus metrics
 PROMETHEUS_METRICS_EXPORT_PORT_RANGE = range(81, 90)
-PROMETHEUS_METRICS_EXPORT_ADDRESS = ""
+PROMETHEUS_METRICS_EXPORT_ADDRESS = os.getenv(
+    "PROMETHEUS_METRICS_EXPORT_ADDRESS", "127.0.0.1"
+)
 
 
-# Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
-
-# AUTH_PASSWORD_VALIDATORS = [
-#    {
-#        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-#    },
-#    {
-#        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-#    },
-#    {
-#        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-#    },
-#    {
-#        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-#    },
-# ]
+# Password validation: mirror settings.py.
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
+]
 
 
 # Internationalization
@@ -275,17 +328,43 @@ USE_TZ = True
 SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
 ACCOUNT_ADAPTER = "fm_eventmanager.adapters.account.RegistrationAccountAdapter"
 
+# axes — mirror settings.py.
+AXES_FAILURE_LIMIT = int(os.getenv("AXES_FAILURE_LIMIT", "5"))
+AXES_COOLOFF_TIME = int(os.getenv("AXES_COOLOFF_TIME_HOURS", "1"))
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_RESET_ON_SUCCESS = True
+AXES_LOCKOUT_CALLABLE = None
+AXES_CLIENT_IP_CALLABLE = "fm_eventmanager.middleware.axes_client_ip"
+AXES_HANDLER = "axes.handlers.database.AxesDatabaseHandler"
+
+# Disable allauth's login_failed rate limit; axes covers it.
+ACCOUNT_RATE_LIMITS = {
+    "login_failed": "",
+    "signup": "20/m/ip",
+    "reset_password": "20/m/ip,5/m/key",
+    "reset_password_from_key": "20/m/ip",
+    "manage_email": "10/m/user",
+    "change_password": "5/m/user",
+    "change_phone": "1/m/user",
+    "request_login_code": "20/m/ip,3/m/key",
+    "login": "30/m/ip",
+    "reauthenticate": "10/m/user",
+    "confirm_email": "1/180s/key",
+    "verify_phone": "1/30s/key,3/m/ip",
+}
+
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
 MFA_PASSKEY_LOGIN_ENABLED = True
 MFA_ADAPTER = "allauth.mfa.adapter.DefaultMFAAdapter"
 
-ALLAUTH_TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER")
+ALLAUTH_TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER", "X-Real-IP")
 
 LOGIN_REDIRECT_URL = "admin:index"
 
@@ -348,9 +427,15 @@ IDEMPOTENCY_KEY = {
     },
 }
 
+# Maintenance mode — mirror settings.py: use the Redis cache
+# backend so state survives restarts and works under read-only root fs.
+MAINTENANCE_MODE_STATE_BACKEND = os.getenv(
+    "MAINTENANCE_MODE_STATE_BACKEND",
+    "maintenance_mode.backends.CacheBackend",
+)
 MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
     "MAINTENANCE_MODE_STATE_FILE_PATH",
-    "/app/fm_eventmanager/maintenance_mode_state.txt",
+    "/tmp/maintenance_mode_state.txt",
 )
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
@@ -372,7 +457,7 @@ STATIC_URL = "/static/"
 STATIC_ROOT = os.getenv("STATIC_ROOT", "/app/apis/static/")
 # NOTE: no STATICFILES_DIRS("bundler", ...) — AppDirectoriesFinder picks up
 # ``registration/static/bundler/`` (Vite's output) automatically. See the
-# equivalent note in settings.py.docker.
+# equivalent note in settings.py.
 
 STORAGES = {
     "default": {
@@ -380,6 +465,69 @@ STORAGES = {
     },
     "staticfiles": {
         "BACKEND": "fm_eventmanager.file_storage.SelectiveManifestStaticFilesStorage",
+    },
+}
+
+# Cookie / transport hardening — mirror settings.py.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Lax"
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+X_FRAME_OPTIONS = "DENY"
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", str(60 * 60 * 24 * 365)))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = eval_bool(
+        os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "True")
+    )
+    SECURE_HSTS_PRELOAD = eval_bool(os.getenv("SECURE_HSTS_PRELOAD", "False"))
+
+# CSP — mirror settings.py.
+_CSP_REPORT_URI = os.getenv("CSP_REPORT_URI", "")
+CONTENT_SECURITY_POLICY_REPORT_ONLY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "script-src": [
+            "'self'",
+            "https://web.squarecdn.com",
+            "https://sandbox.web.squarecdn.com",
+            "https://www.paypal.com",
+            "https://www.paypalobjects.com",
+        ],
+        "style-src": [
+            "'self'",
+            "https://web.squarecdn.com",
+            "https://sandbox.web.squarecdn.com",
+            "https://www.paypalobjects.com",
+        ],
+        "img-src": ["'self'", "data:", "https://www.paypalobjects.com"],
+        "font-src": ["'self'", "data:"],
+        "connect-src": [
+            "'self'",
+            "wss:",
+            "https://connect.squareup.com",
+            "https://connect.squareupsandbox.com",
+            "https://api-m.paypal.com",
+            "https://api-m.sandbox.paypal.com",
+        ],
+        "frame-src": [
+            "'self'",
+            "https://web.squarecdn.com",
+            "https://sandbox.web.squarecdn.com",
+            "https://www.paypal.com",
+            "https://www.sandbox.paypal.com",
+        ],
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'self'"],
+        "base-uri": ["'self'"],
+        "object-src": ["'none'"],
+        **({"report-uri": [_CSP_REPORT_URI]} if _CSP_REPORT_URI else {}),
     },
 }
 
@@ -428,7 +576,7 @@ REGISTER_DEFAULT_WEBVIEW = os.getenv(
 )
 
 # Cron metrics recording provider and settings
-APIS_METRICS_BACKEND = "InfluxDBReporter"
+APIS_METRICS_BACKEND = os.getenv("APIS_METRICS_BACKEND", "InfluxDBReporter")
 APIS_METRICS_SETTINGS = {
     "database": os.getenv("INFLUXDB_DATABASE", "apis"),
     "host": os.getenv("INFLUXDB_HOST", "localhost"),

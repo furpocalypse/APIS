@@ -34,7 +34,13 @@ jobs:
         make tag-${{ github.event.inputs.environment }}
 
     - name: Deploy to server
-      uses: appleboy/ssh-action@master
+      # SHA-pinned per OWASP A08 / CI/CD Security Cheat Sheet. `master` is a
+      # mutable ref; pinning to the SHA the v1.2.5 tag pointed to means a
+      # supply-chain compromise of appleboy/ssh-action cannot inject code into
+      # this deploy workflow. To upgrade: re-resolve the SHA for the new tag,
+      # review the diff against the previous SHA, then update both the SHA
+      # below and the inline version comment.
+      uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
       with:
         host: maaa-registration
         username: ${{ secrets.SSH_USERNAME }}

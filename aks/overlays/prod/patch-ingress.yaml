@@ -1,0 +1,32 @@
+# Prod hostname.
+#
+# TLS cert delivery options (pick one — both are out-of-band setup):
+#
+#  A. Key Vault certificate, synced into a Secret of type kubernetes.io/tls
+#     via a second SecretProviderClass with `objectType: cert` plus a
+#     secretObject of type kubernetes.io/tls. AGIC reads the Secret.
+#
+#  B. ARM-managed AppGW listener cert: skip the `tls:` block here and
+#     bind the cert directly on the gateway listener via the AppGW
+#     `appgw.ingress.kubernetes.io/appgw-ssl-certificate` annotation.
+#
+# The example below assumes (A) — apis-tls is the synced Secret.
+- op: replace
+  path: /spec/tls
+  value:
+    - hosts:
+        - register.furpocalypse.org
+      secretName: apis-tls
+- op: replace
+  path: /spec/rules
+  value:
+    - host: register.furpocalypse.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: apis-app
+                port:
+                  number: 8000

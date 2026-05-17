@@ -19,7 +19,7 @@ from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import clear_session, getOptionsDict, handler, logger
+from .common import clear_session, getOptionsDict, handler, logger, to_json_safe
 from .ordering import do_checkout, doZeroCheckout, get_total
 
 logger = logging.getLogger(__name__)
@@ -79,9 +79,10 @@ def find_upgrade(request):
         "attendee": attendee,
         "badge": badge,
         "event": event,
-        "jsonAttendee": json.dumps(attendee_dict, default=handler),
-        "jsonBadge": json.dumps(badge_dict, default=handler),
-        "jsonLevel": json.dumps(level_dict, default=handler),
+        # Plain dicts for `{% json_script %}`; closes JS-string-XSS vector.
+        "jsonAttendee": to_json_safe(attendee_dict),
+        "jsonBadge": to_json_safe(badge_dict),
+        "jsonLevel": to_json_safe(level_dict),
     }
     return render(request, "registration/attendee-upgrade.html", context)
 
@@ -93,21 +94,39 @@ def add_upgrade(request):
         logger.error("Unable to decode JSON for add_upgrade()")
         return JsonResponse({"success": False})
 
-    pda = postData["attendee"]
     pdp = postData["priceLevel"]
     pdd = postData["badge"]
     evt = postData["event"]
     event = Event.objects.get(name=evt)
 
-    if "attendee_id" not in request.session:
+    # Audit P1.8 (BOLA / IDOR fix): the attendee and badge being modified
+    # must be the ones bound to *this* session, NOT whatever the request
+    # body says. Reading attendee/badge ids from the body let an
+    # authenticated attendee mutate someone else's records.
+    attendee_id = request.session.get("attendee_id")
+    if attendee_id is None:
         return HttpResponseServerError("Session expired")
 
-    # Update Attendee info
-    attendee = Attendee.objects.get(id=pda["id"])
-    if not attendee:
+    try:
+        attendee = Attendee.objects.get(id=attendee_id)
+    except Attendee.DoesNotExist:
         return HttpResponseServerError("Attendee id not found")
 
-    badge = Badge.objects.get(id=pdd["id"])
+    # The badge id IS supplied by the body (an attendee can have multiple
+    # badges across events), but it MUST belong to the session attendee
+    # AND to the requested event. Reject any badge that doesn't.
+    try:
+        badge = Badge.objects.get(id=pdd["id"], attendee=attendee, event=event)
+    except Badge.DoesNotExist:
+        logger.warning(
+            "BOLA attempt in add_upgrade: session attendee %s tried to "
+            "modify badge %s for event %s",
+            attendee_id,
+            pdd.get("id"),
+            event.pk,
+        )
+        return HttpResponseServerError("Badge not found")
+
     priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 
     orderItem = OrderItem(badge=badge, priceLevel=priceLevel, enteredBy="WEB")

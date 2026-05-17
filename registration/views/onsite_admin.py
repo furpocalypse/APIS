@@ -486,10 +486,11 @@ def complete_square_transaction(request):
             {"success": False, "reason": "Invalid authorization"}, status=401
         )
 
-    try:
-        terminal = Firebase.objects.get(token=token)
-        request.session["terminal"] = terminal.id
-    except Firebase.DoesNotExist:
+    # P1.9: lookup via SHA-256 hash + constant-time compare. Plaintext
+    # tokens are never matched against the DB column directly — that path
+    # is timing-attackable and stores a bearer in the clear.
+    terminal = Firebase.find_by_token(token)
+    if terminal is None:
         return JsonResponse(
             {
                 "success": False,
@@ -497,6 +498,7 @@ def complete_square_transaction(request):
             },
             status=401,
         )
+    request.session["terminal"] = terminal.id
 
     data = json.loads(request.body)
 
@@ -1214,9 +1216,9 @@ def attendee_details(request):
 def terminal_square_token(request):
     key = request.headers.get("authorization").removeprefix("Bearer ")
 
-    try:
-        terminal = Firebase.objects.get(token=key)
-    except Firebase.DoesNotExist:
+    # P1.9: see complete_square_transaction comment.
+    terminal = Firebase.find_by_token(key)
+    if terminal is None:
         return JsonResponse(
             {"success": False, "reason": "Incorrect API key"}, status=401
         )
@@ -1245,10 +1247,16 @@ def terminal_square_token(request):
 @require_safe
 @staff_member_required
 def oauth_square(request):
-    url_state = request.GET.get("state")
-    cookie_state = request.COOKIES.get("square_oauth_state")
+    url_state = request.GET.get("state") or ""
+    cookie_state = request.COOKIES.get("square_oauth_state") or ""
 
-    if url_state != cookie_state:
+    # ASVS V2.1.7 / V13.2.6: constant-time compare for any value used as
+    # an authentication or anti-CSRF token.
+    import secrets
+
+    if not (
+        url_state and cookie_state and secrets.compare_digest(url_state, cookie_state)
+    ):
         return JsonResponse(
             {"success": False, "reason": "Saved state did not match URL state"},
             status=400,

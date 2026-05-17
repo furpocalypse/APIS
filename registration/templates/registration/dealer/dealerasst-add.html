@@ -215,6 +215,7 @@
           data-sdk-integration-source="developer-studio"
       ></script>
     {% endif %}
+  {{ json_assistants|json_script:"dealer-assistants-data" }}
   <script type="text/javascript">
       /* APIS URLs */
       const URL_REGISTRATION_CREATEORDER = "{% url 'registration:dealer_assistants_paypalcreate' %}";
@@ -233,7 +234,10 @@
 
       const dealer_id = {{dealer.id}};
       const maxPartners = {{dealer.tableSize.partnerMax}};
-      const dealer_assistants = {{json_assistants|safe}};
+      // dealer_assistants is rendered safely via json_script (see the
+      // <script type="application/json"> block just before this one).
+      // OWASP A03 — replaces the prior |safe interpolation in JS context.
+      const dealer_assistants = JSON.parse(document.getElementById("dealer-assistants-data").textContent);
 
 
       $("body").ready(function () {

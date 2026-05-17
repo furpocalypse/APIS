@@ -20,6 +20,8 @@ Commands:
 	make makemigrations             : Create new Django migrations (host-uv, dev DB)
 	make migrate                    : Apply Django migrations (host-uv, dev DB)
 	make createsuperuser            : Create a Django superuser (host-uv, dev DB, interactive)
+	make bootstrap-admin            : Idempotent first-run admin provisioning (interactive)
+	make bootstrap-admin-from-env   : Idempotent first-run admin provisioning (from BOOTSTRAP_ADMIN_* env)
 
 	make dev-makemigrations         : Create new Django migrations (inside `make dev` container)
 	make dev-migrate                : Apply Django migrations (inside `make dev` container)
@@ -88,9 +90,8 @@ dev:
 
 dev-setup:
 	uv sync
-	cp fm_eventmanager/settings.py.devel fm_eventmanager/settings.py
-
-	@echo "ACTION REQUIRED: Review fm_eventmanager/settings.py"
+	@echo "Settings are checked into fm_eventmanager/settings.py (single canonical file)."
+	@echo "Copy .env.dev.example to .env and adjust if needed; then run 'docker compose up -d'."
 
 pre-commit-setup:
 	pip3 install pre-commit
@@ -100,10 +101,9 @@ pre-commit-setup:
 # Django management commands (dev environment)
 # --------------------------------------------------------------------------
 # Thin wrappers around `manage.py` for the most common ops commands. These
-# use the default DJANGO_SETTINGS_MODULE (fm_eventmanager.settings, populated
-# by `make dev-setup` from settings.py.devel) — i.e. the developer's local
-# DB, not the test DB. For the test-context migration check, see
-# `test-check-migrations`.
+# use the default DJANGO_SETTINGS_MODULE (fm_eventmanager.settings) — the
+# single canonical settings file. For the test-context migration check,
+# see `test-check-migrations`.
 
 makemigrations:
 	uv run python manage.py makemigrations
@@ -114,12 +114,22 @@ migrate:
 createsuperuser:
 	uv run python manage.py createsuperuser
 
+# First-run admin provisioning. Idempotent: refuses to run if any superuser
+# already exists. Use `bootstrap-admin` for an interactive prompt, or
+# `bootstrap-admin-from-env` to consume BOOTSTRAP_ADMIN_USERNAME /
+# BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD from env (Key Vault →
+# Managed Identity → env in Azure deploys).
+bootstrap-admin:
+	uv run python manage.py bootstrap_admin
+
+bootstrap-admin-from-env:
+	uv run python manage.py bootstrap_admin --from-env
+
 # Docker-compose-exec equivalents of the three above. These run inside the
 # `app` container started by `make dev`, so the dev container must already
-# be up (`docker-compose up -d` / `make dev` in another shell). They use
-# whatever DJANGO_SETTINGS_MODULE the container's env defines (typically
-# fm_eventmanager.settings via settings.py.docker), pointing at the
-# docker-network postgres rather than a host-side DB.
+# be up (`docker compose up -d` / `make dev` in another shell). They use
+# fm_eventmanager.settings (the canonical settings module baked into the
+# image), pointing at the docker-network postgres rather than a host DB.
 
 dev-makemigrations:
 	docker-compose exec app python /app/manage.py makemigrations
@@ -136,11 +146,12 @@ dev-createsuperuser:
 # Requires: `docker compose up -d postgres redis` (to bring up the backing
 # services) and a local uv-backed venv via `make dev-setup`.
 #
-# Settings: uses `fm_eventmanager/settings.py.docker` verbatim via
-# `fm_eventmanager/settings_test.py` (an exact copy checked in for this
-# purpose). DATABASE_* / REDIS_* / CELERY_* env vars below point the test
-# run at the docker compose service hostnames resolved via 127.0.0.1 port
-# bindings — adjust if your docker compose exposes different ports.
+# Settings: uses `fm_eventmanager/settings_test.py` — a near-copy of the
+# canonical `fm_eventmanager/settings.py` with test-specific tweaks
+# (CELERY_TASK_ALWAYS_EAGER, etc.). DATABASE_* / REDIS_* / CELERY_* env
+# vars below point the test run at the docker compose service hostnames
+# resolved via 127.0.0.1 port bindings — adjust if your docker compose
+# exposes different ports.
 # --------------------------------------------------------------------------
 
 # Ports exposed by docker-compose.yaml (override from the command line if
@@ -185,7 +196,9 @@ TEST_ENV = \
 	SQUARE_APPLICATION_ID=$(SQUARE_APPLICATION_ID) \
 	SQUARE_ACCESS_TOKEN=$(SQUARE_ACCESS_TOKEN) \
 	SQUARE_LOCATION_ID=$(SQUARE_LOCATION_ID) \
-	CSRF_TRUSTED_ORIGINS='http://*,https://*' \
+	ALLOWED_HOSTS='testserver,localhost,127.0.0.1' \
+	CSRF_TRUSTED_ORIGINS='http://testserver,http://localhost,http://127.0.0.1' \
+	TRUSTED_CLIENT_IP_HEADER='' \
 	DATABASE_HOST=$(TEST_DATABASE_HOST) DATABASE_PORT=$(TEST_DATABASE_PORT) \
 	DATABASE_USER=$(TEST_DATABASE_USER) DATABASE_PASS=$(TEST_DATABASE_PASS) \
 	DATABASE_NAME=$(TEST_DATABASE_NAME) DJANGO_DATABASE_POOL=False \
@@ -369,4 +382,5 @@ e2e-ui:
 
 .PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django \
         makemigrations migrate createsuperuser \
+        bootstrap-admin bootstrap-admin-from-env \
         dev-makemigrations dev-migrate dev-createsuperuser

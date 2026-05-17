@@ -1,0 +1,69 @@
+# Horizontal Pod Autoscalers for the web and worker Deployments.
+#
+# Web: scales on CPU. Registration-opens is the burst we care about; the
+# upper bound is sized for an Azure Front Door / WAF-fronted burst.
+# Worker: scales on CPU + memory. Celery throughput per replica is roughly
+# I/O-bound (email + payment-provider HTTP), so CPU alone underestimates
+# load — memory pressure during PDF generation is the secondary signal.
+#
+# If you wire KEDA (kedacore.github.io) into the cluster you can replace
+# the worker HPA with a KEDA ScaledObject keyed on Redis list length —
+# more accurate than CPU for queue workloads. The web HPA stays as-is.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: apis-app
+  namespace: apis
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: apis-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: apis-worker
+  namespace: apis
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: apis-worker
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

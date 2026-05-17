@@ -1,0 +1,166 @@
+# --------------------------------------------------------------------------
+# Monitoring stack overlay — InfluxDB 3 + Prometheus + node-exporter +
+# Grafana. Compose with the production base file:
+#
+#   docker compose \
+#       -f docker-compose.prod.yaml \
+#       -f docker-compose.monitoring.yaml \
+#       up -d
+#
+# Design choices baked in (per the operator's earlier sign-off):
+#   - InfluxDB 3 Core (file-backed object store, single node)
+#   - Prometheus + node-exporter for infra metrics
+#   - Grafana bound to 0.0.0.0:3000 on the VM; restrict via Azure NSG to
+#     VNET-only ingress. (NSG outside compose; this file does NOT enforce
+#     the network restriction by itself — without the NSG rule Grafana
+#     is reachable from anywhere the VM is.)
+#   - 1y retention on the apis database (set via `influxdb3 create
+#     database --retention-period 1y` after first boot; see
+#     setup-monitoring.sh "Next steps" output)
+#   - Env-seeded Grafana admin password (GRAFANA_ADMIN_PASSWORD in .env)
+#   - Anonymous Grafana access OFF
+#
+# Persistent storage lives under ${APIS_DATA_DIR} alongside the postgres
+# and redis bind mounts. Pre-create with the correct owner before first
+# boot:
+#
+#     sudo mkdir -p /srv/apis/{influxdb3,prometheus,grafana}
+#     sudo chown 1500:1500 /srv/apis/influxdb3     # influxdb3-core uid
+#     sudo chown 65534:65534 /srv/apis/prometheus  # nobody/nogroup
+#     sudo chown 472:472 /srv/apis/grafana         # grafana uid
+# --------------------------------------------------------------------------
+
+services:
+  influxdb:
+    image: influxdb:3-core
+    restart: always
+    command:
+      - influxdb3
+      - serve
+      - --node-id=apis-node-0
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3
+      - --http-bind=0.0.0.0:8181
+    volumes:
+      - ${APIS_DATA_DIR:-/srv/apis}/influxdb3:/var/lib/influxdb3
+    # NO `ports:` mapping — InfluxDB is only reachable from the docker
+    # network (app + prometheus + grafana). No public exposure.
+    healthcheck:
+      test: ["CMD", "influxdb3", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --web.listen-address=0.0.0.0:9090
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${APIS_DATA_DIR:-/srv/apis}/prometheus:/prometheus
+    extra_hosts:
+      # Lets Prometheus (in the docker bridge network) reach node-exporter
+      # (in host network) by name. Required for the `node` scrape job in
+      # monitoring/prometheus.yml.
+      - "host.docker.internal:host-gateway"
+    # NO `ports:` mapping — Prometheus is only reached by Grafana via the
+    # docker network. Tighter than node-exporter (which has to live on
+    # the host network to see real host metrics).
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: always
+    command:
+      - --path.rootfs=/host
+      # Collector allowlist — keeps the metric surface focused on what
+      # actually informs an operator alert.
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.diskstats
+      - --collector.filesystem
+      - --collector.loadavg
+      - --collector.meminfo
+      - --collector.netdev
+      - --collector.pressure
+      - --collector.uname
+      - --web.listen-address=127.0.0.1:9100
+    pid: host
+    network_mode: host
+    volumes:
+      - /:/host:ro,rslave
+    # node-exporter intentionally retains a couple of bound capabilities
+    # so collectors that read /proc/<pid>/* on processes owned by other
+    # users (load, pressure) work. CAP_NET_BIND_SERVICE not needed since
+    # 9100 is > 1024.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - no-new-privileges:true
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: always
+    ports:
+      # 0.0.0.0 — VNET-private exposure is enforced via Azure NSG (allow
+      # ingress on tcp/3000 only from the VNET CIDR). If you want
+      # localhost-only instead (SSH-tunnel access), set
+      # GRAFANA_BIND=127.0.0.1 in .env.
+      - "${GRAFANA_BIND:-0.0.0.0}:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_COOKIE_SECURE: "${GRAFANA_COOKIE_SECURE:-false}"
+      GF_SECURITY_STRICT_TRANSPORT_SECURITY: "${GRAFANA_HSTS:-false}"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:3000}"
+      GF_LOG_LEVEL: info
+      GF_INSTALL_PLUGINS: ""
+      # Token read by the provisioned InfluxDB datasource (see
+      # monitoring/grafana/provisioning/datasources/influxdb.yml).
+      INFLUXDB_TOKEN: "${INFLUXDB_TOKEN}"
+    volumes:
+      - ${APIS_DATA_DIR:-/srv/apis}/grafana:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"database\": \"ok\"'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m

@@ -1,0 +1,51 @@
+# TRUSTED_PROXY_MODE=proxy
+#
+# An upstream proxy (Azure Application Gateway, Azure Front Door, an AKS
+# ingress controller, or any combination) terminates TLS and forwards traffic
+# to this nginx. $remote_addr (as nginx sees it on the TCP accept) is one of
+# the proxy's egress IPs, NOT the real client. The real client IP travels in
+# a header that the trusted proxy unconditionally overwrites.
+#
+# This file is generated at container boot by start.sh from
+# nginx.realip.proxy.conf.template. Placeholders are filled in by envsubst
+# with a strict allowlist (only the four tokens listed below are substituted;
+# nginx's own $variables pass through unchanged). Placeholder names appear
+# in this comment block as <ANGLE_BRACKETED> so envsubst does NOT expand
+# them here — only at the substitution sites further down.
+#
+#   <TRUSTED_PROXY_CIDRS_DIRECTIVES>
+#       One `set_real_ip_from <CIDR>;` per trusted upstream CIDR. Drives the
+#       ngx_http_realip_module: traffic from these IPs is allowed to set
+#       $remote_addr from the configured header.
+#
+#   <CLIENT_IP_HEADER>
+#       Header that the trusted edge writes the client IP to. Default
+#       X-Forwarded-For (Application Gateway / nginx-ingress / generic L7).
+#       Set to X-Azure-ClientIP if Azure Front Door is the only edge.
+#
+#   <REAL_IP_RECURSIVE>
+#       on|off. When the trust chain has more than one hop (e.g. Front Door
+#       in front of Application Gateway), set on so realip walks the XFF
+#       list right-to-left until it finds an untrusted IP.
+#
+#   <FDID_BLOCK>
+#       Either the no-op `geo $trusted_origin { default 1; }` (when
+#       FRONT_DOOR_ID is unset), OR a geo+map pair that sets
+#       $trusted_origin=1 only when the request arrived from a trusted
+#       proxy IP AND carries a matching X-Azure-FDID header. The server
+#       block in nginx.conf rejects requests with $trusted_origin=0.
+
+${TRUSTED_PROXY_CIDRS_DIRECTIVES}
+
+real_ip_header    ${CLIENT_IP_HEADER};
+real_ip_recursive ${REAL_IP_RECURSIVE};
+
+# Trust the upstream's X-Forwarded-Proto. Default to https because every
+# Azure-fronted topology terminates TLS upstream of this nginx.
+map $http_x_forwarded_proto $forwarded_proto {
+    default "https";
+    "http"  "http";
+    "https" "https";
+}
+
+${FDID_BLOCK}
