@@ -504,6 +504,20 @@ AXES_CLIENT_IP_CALLABLE = "fm_eventmanager.middleware.axes_client_ip"
 # Don't fail open if the DB is unreachable when checking lockout state.
 AXES_HANDLER = "axes.handlers.database.AxesDatabaseHandler"
 
+# MED-3/MED-4 (django-ratelimit) abuse controls on checkout / dealer /
+# staff submit + the payment webhooks. Same env-gated pattern as
+# AXES_ENABLED above: ON by default (production posture — absence of the
+# var means enabled, so a misconfigured prod can never silently lose the
+# control), but the unit-test runner's .env.test / .env.ci set
+# RATELIMIT_ENABLE=False because the shared `default` cache is process-
+# (LocMem) or Redis-backed and is NOT cleared between tests, so the
+# per-IP buckets would accumulate across the 500+ test client requests
+# and spuriously 429 unrelated suites. The control itself is proven by
+# registration.tests.test_ratelimit (@override_settings(
+# RATELIMIT_ENABLE=True) against the real wrapped views). ASVS V11 /
+# OWASP API4 — production behaviour unchanged.
+RATELIMIT_ENABLE = eval_bool(os.getenv("RATELIMIT_ENABLE", "True"))
+
 # allauth has its own login_failed rate limit (default 10/m/ip,5/300s/key)
 # that conflicts with django-axes. Defer to axes for failed-login lockout
 # (per-(username,ip) with configurable cooldown) and keep allauth's
