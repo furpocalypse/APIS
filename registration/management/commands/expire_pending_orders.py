@@ -77,6 +77,14 @@ class Command(BaseCommand):
                     level = PriceLevel.objects.select_for_update().get(id=pl_id)
                     level.release_slots(qty)
 
+                # S24 (SECURITY_BACKLOG P1 #5): already the prescribed
+                # Pattern A — transaction.atomic() + select_for_update()
+                # re-fetch + status==PENDING recheck above, with the
+                # capacity release done under the same lock. This is
+                # race-safe by construction; it is intentionally NOT
+                # routed through transition_order_status (that primitive
+                # would re-run the capacity transition and double-release
+                # the slots already released here).
                 order.status = Order.FAILED
                 order.notes += f"\nAuto-expired: pending order timed out after {timeout} minutes"
                 order.save()

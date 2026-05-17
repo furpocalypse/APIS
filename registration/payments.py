@@ -105,6 +105,85 @@ def update_capacity_for_status_change(order, old_status, new_status):
                 level.reserve_slots(count)
 
 
+def transition_order_status(
+    order,
+    new_status,
+    *,
+    expected=None,
+    exclude=None,
+    extra_fields=None,
+    update_capacity=True,
+    on_committed=None,
+    refresh=True,
+):
+    """Atomic compare-and-set for ``Order.status`` (S24 / SECURITY_BACKLOG
+    P1 #5 — webhook order-completion race; OWASP A04 / ASVS V11.1.2).
+
+    The transition is a single ``UPDATE registration_order SET status=...
+    WHERE pk=? [AND status IN (expected)]`` so that when N duplicate
+    webhook deliveries land on different gunicorn workers within the
+    scheduling window, **exactly one** performs the transition and the
+    rest observe a no-op. This is the fused primitive every
+    status-changing writer routes through; do not flip ``Order.status``
+    and ``save()`` by hand on a race-prone path.
+
+    Args:
+        order: the in-memory ``Order`` (its ``pk`` and current ``status``
+            are read; on success it is refreshed from the DB).
+        new_status: the target status.
+        expected: iterable of statuses the row must currently be in for
+            the transition to apply. ``None`` = unconditional set (only
+            safe where the caller already holds the authority, e.g. the
+            synchronous checkout that just created the order).
+        exclude: iterable of statuses that must NOT be the current status
+            for the transition to apply — the idempotent-webhook guard
+            ("complete unless already completed/terminal"). Combined with
+            ``expected`` via AND if both are given.
+        extra_fields: other ``Order`` columns to set in the *same* UPDATE
+            (``settledDate``, ``billingType``, ``notes``, ``apiData`` …);
+            ``F()`` expressions are allowed and are not mirrored onto the
+            in-memory instance (it is refreshed instead).
+        update_capacity: run ``update_capacity_for_status_change`` (F()-
+            based, ``select_for_update``) inside the same atomic block so
+            the capacity counters can never double-decrement on the race.
+        on_committed: zero-arg callable dispatched via
+            ``transaction.on_commit`` **only if this caller won** — the
+            duplicate-safe hook for Celery side effects (registration
+            email, etc.) so a rolled-back transaction never fires them.
+        refresh: when True (default) the in-memory ``order`` is
+            ``refresh_from_db()``-ed after a won transition. Pass False
+            when the caller has unsaved in-memory fields it must keep
+            (it is then responsible for persisting them itself).
+
+    Returns:
+        ``True`` iff this caller performed the transition; ``False`` on a
+        no-op (already transitioned / lost the race / not in ``expected``).
+    """
+    old_status = order.status
+    with transaction.atomic():
+        qs = Order.objects.filter(pk=order.pk)
+        if expected is not None:
+            qs = qs.filter(status__in=list(expected))
+        if exclude is not None:
+            qs = qs.exclude(status__in=list(exclude))
+        won = qs.update(status=new_status, **(extra_fields or {})) == 1
+        if not won:
+            return False
+        if update_capacity:
+            update_capacity_for_status_change(order, old_status, new_status)
+        if on_committed is not None:
+            transaction.on_commit(on_committed)
+    # Reflect the winning state on the in-memory instance for callers that
+    # keep using it. F() expressions can't be mirrored — refresh covers it.
+    order.status = new_status
+    for key, value in (extra_fields or {}).items():
+        if not hasattr(value, "resolve_expression"):
+            setattr(order, key, value)
+    if refresh:
+        order.refresh_from_db()
+    return True
+
+
 def get_idempotency_key(request: HttpRequest | None = None) -> str:
     """
     Gets the idempotency key from a request, generating one if none exists.

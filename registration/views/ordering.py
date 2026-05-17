@@ -27,6 +27,7 @@ from registration.models import (
 )
 from registration.payments import (
     charge_payment,
+    transition_order_status,
     update_capacity_for_status_change,
 )
 from registration.paypal_payments import (
@@ -225,13 +226,22 @@ def do_checkout(
         # always save so the DB reflects the terminal state, and we coerce
         # PENDING into a concrete terminal before the capacity call so
         # update_capacity_for_status_change doesn't see old==new==PENDING.
-        if order.status == Order.PENDING:
-            order.status = Order.COMPLETED if status else Order.FAILED
+        # Persist any in-memory fields the payment handler set (some mocks
+        # / early-return branches only mutate the instance).
         order.save()
 
-        # Uniform capacity transition PENDING→COMPLETED (confirm) or
-        # PENDING→FAILED (release).
-        update_capacity_for_status_change(order, Order.PENDING, order.status)
+        # S24 (SECURITY_BACKLOG P1 #5): finalize PENDING→terminal as an
+        # atomic compare-and-set so a PayPal/Square webhook delivery that
+        # already finalized this order in parallel is NOT clobbered back.
+        # The primitive runs the capacity transition itself; refresh=False
+        # keeps the in-memory fields just saved above.
+        if order.status == Order.PENDING:
+            target = Order.COMPLETED if status else Order.FAILED
+            transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
+        else:
+            # Handler already moved it off PENDING (and saved); mirror the
+            # original uniform PENDING→<final> capacity call.
+            update_capacity_for_status_change(order, Order.PENDING, order.status)
 
         if status:
             if discount:
@@ -245,10 +255,11 @@ def do_checkout(
         if order.id:
             try:
                 order.refresh_from_db()
+                # S24: only fail it if it's still PENDING — a parallel
+                # webhook may have legitimately completed it; CAS makes
+                # that race-safe and runs the capacity release itself.
                 if order.status == Order.PENDING:
-                    update_capacity_for_status_change(order, Order.PENDING, Order.FAILED)
-                    order.status = Order.FAILED
-                    order.save()
+                    transition_order_status(order, Order.FAILED, expected=[Order.PENDING])
             except Exception as cleanup_error:
                 logger.error(f"Error during checkout cleanup: {cleanup_error}")
         raise

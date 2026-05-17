@@ -12,12 +12,22 @@ import json
 import threading
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.db import connection
 from django.test import TransactionTestCase
 from django.utils import timezone
 
-from registration.models import Cart, Event, Order, PriceLevel
+from registration.models import (
+    Attendee,
+    Badge,
+    Cart,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+)
+from registration.payments import transition_order_status
 from registration.views.ordering import doZeroCheckout
 
 NUM_THREADS = 50
@@ -166,4 +176,129 @@ class ConcurrentCheckoutStressTest(TransactionTestCase):
             completed_orders,
             MAX_CAPACITY,
             f"Found {completed_orders} completed orders, expected {MAX_CAPACITY}",
+        )
+
+
+class TestWebhookOrderCompletionRace(TransactionTestCase):
+    """S24 / SECURITY_BACKLOG P1 #5.
+
+    Two webhook deliveries for the same order, landing on different
+    workers within the scheduling window, must NOT both complete it:
+    `transition_order_status` is a DB compare-and-set so exactly one wins
+    — registration email fires once, capacity confirms once.
+    """
+
+    NUM_THREADS = 8
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name="Race Event",
+            default=True,
+            dealerRegStart=timezone.now() - timedelta(days=1),
+            dealerRegEnd=timezone.now() + timedelta(days=30),
+            staffRegStart=timezone.now() - timedelta(days=1),
+            staffRegEnd=timezone.now() + timedelta(days=30),
+            attendeeRegStart=timezone.now() - timedelta(days=1),
+            attendeeRegEnd=timezone.now() + timedelta(days=30),
+            onsiteRegStart=timezone.now() - timedelta(days=1),
+            onsiteRegEnd=timezone.now() + timedelta(days=30),
+            eventStart=timezone.now().date() + timedelta(days=30),
+            eventEnd=timezone.now().date() + timedelta(days=33),
+            collectBillingAddress=False,
+            collectAddress=False,
+        )
+        self.tier = PriceLevel.objects.create(
+            name="Race Tier",
+            description="capacity tier",
+            basePrice=Decimal("45.00"),
+            startDate=timezone.now() - timedelta(days=1),
+            endDate=timezone.now() + timedelta(days=30),
+            maxCapacity=10,
+            public=True,
+            available_to_attendee=True,
+        )
+        # One PENDING reservation outstanding (mirrors a pre-payment order).
+        self.tier.reserve_slots(1)
+        self.tier.refresh_from_db()
+        self.assertEqual(self.tier.reservedSlots, 1)
+
+        attendee = Attendee.objects.create(
+            firstName="Race",
+            lastName="Subject",
+            email="race@example.com",
+            birthdate=timezone.now().date() - timedelta(days=365 * 30),
+        )
+        badge = Badge.objects.create(attendee=attendee, event=self.event, badgeName="RaceBadge")
+        self.order = Order.objects.create(
+            total=Decimal("45.00"),
+            reference="RACE-1",
+            status=Order.PENDING,
+            billingType=Order.CREDIT,
+            billingEmail="race@example.com",
+        )
+        OrderItem.objects.create(
+            badge=badge, priceLevel=self.tier, order=self.order, enteredBy="TEST"
+        )
+
+    def test_duplicate_completion_webhooks_complete_exactly_once(self):
+        results = []
+        results_lock = threading.Lock()
+        barrier = threading.Barrier(self.NUM_THREADS)
+        terminal = (
+            Order.COMPLETED,
+            Order.REFUNDED,
+            Order.REFUND_PENDING,
+        )
+
+        with patch("registration.tasks.send_registration_email_task.delay") as mock_delay:
+
+            def worker():
+                try:
+                    barrier.wait(timeout=10)
+                    # Each "handler" loads its own copy of the order.
+                    o = Order.objects.get(pk=self.order.pk)
+
+                    def _email():
+                        mock_delay(o.id, o.billingEmail)
+
+                    won = transition_order_status(
+                        o,
+                        Order.COMPLETED,
+                        exclude=terminal,
+                        on_committed=_email,
+                    )
+                    with results_lock:
+                        results.append(won)
+                except Exception as e:  # pragma: no cover - surfaced below
+                    with results_lock:
+                        results.append(f"exc: {e}")
+                finally:
+                    connection.close()
+
+            threads = [threading.Thread(target=worker) for _ in range(self.NUM_THREADS)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+
+        self.assertEqual(len(results), self.NUM_THREADS)
+        wins = [r for r in results if r is True]
+        losses = [r for r in results if r is False]
+        self.assertEqual(len(wins), 1, f"expected exactly one CAS winner, got {results}")
+        self.assertEqual(len(losses), self.NUM_THREADS - 1)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.COMPLETED)
+
+        # Registration email queued exactly once (no duplicate emails).
+        self.assertEqual(mock_delay.call_count, 1)
+
+        # Capacity confirmed exactly once: the single PENDING reservation
+        # is consumed, not double-decremented into the negative.
+        self.tier.refresh_from_db()
+        self.assertEqual(self.tier.reservedSlots, 0)
+        self.assertTrue(
+            self.tier.verify_and_repair_counters(),
+            f"counter drift: remaining={self.tier.remainingSlots} "
+            f"reserved={self.tier.reservedSlots}",
         )

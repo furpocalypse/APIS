@@ -34,7 +34,10 @@ from registration.models import (
     PaymentWebhookNotification,
     get_hold_type,
 )
-from registration.payments import update_capacity_for_status_change
+from registration.payments import (
+    transition_order_status,
+    update_capacity_for_status_change,
+)
 from registration.payments_sanitize import sanitize_api_data
 
 logger = logging.getLogger(__name__)
@@ -407,7 +410,6 @@ def handle_capture_completed(notification: PaymentWebhookNotification) -> bool:
             resource.get("id"),
         )
         return False
-    old_status = order.status
 
     if order.status == Order.COMPLETED:
         return True
@@ -428,19 +430,39 @@ def handle_capture_completed(notification: PaymentWebhookNotification) -> bool:
         )
         return True
 
+    # S24 (SECURITY_BACKLOG P1 #5): the read-checks above are a fast-path /
+    # observability optimization; the actual race guard is this atomic
+    # compare-and-set. Two PAYMENT.CAPTURE.COMPLETED deliveries landing on
+    # different workers can both pass the checks — only one wins the
+    # transition, so the registration email + capacity fire exactly once.
     previous_status = order.status
-    order.status = Order.COMPLETED
-    update_capacity_for_status_change(order, old_status, order.status)
-    order.save()
+    _terminal = (
+        Order.COMPLETED,
+        Order.REFUNDED,
+        Order.REFUND_PENDING,
+        Order.DISPUTE_EVIDENCE_REQUIRED,
+        Order.DISPUTE_PROCESSING,
+        Order.DISPUTE_WON,
+        Order.DISPUTE_LOST,
+        Order.DISPUTE_ACCEPTED,
+    )
 
-    if previous_status == Order.PENDING and order.email_sent is None and order.billingEmail:
-        try:
-            tasks.send_registration_email_task.delay(order.id, order.billingEmail)
-        except Exception:
-            logger.exception(
-                "Failed to queue registration email for late-completed order %s",
-                order.id,
-            )
+    def _queue_email():
+        if previous_status == Order.PENDING and order.email_sent is None and order.billingEmail:
+            try:
+                tasks.send_registration_email_task.delay(order.id, order.billingEmail)
+            except Exception:
+                logger.exception(
+                    "Failed to queue registration email for late-completed order %s",
+                    order.id,
+                )
+
+    transition_order_status(
+        order,
+        Order.COMPLETED,
+        exclude=_terminal,
+        on_committed=_queue_email,
+    )
     return True
 
 
