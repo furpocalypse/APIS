@@ -4,6 +4,7 @@ axes never observes an unresolved client IP (plan D-IP / RT-B5)."""
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 
 from django.conf import settings
@@ -63,9 +64,46 @@ class RequireClientIPMiddleware:
         # DEBUG is fixed for a process; capture once to avoid a per-request
         # settings dereference on the prod hot path.
         self._enforce = not settings.DEBUG
+        # MED-13: parse TRUSTED_PROXY_CIDRS once. When non-empty (and
+        # enforcing), the peer that connected to the app (REMOTE_ADDR)
+        # MUST be inside the allowlist before any forwarded client-IP
+        # header is honored — a request reaching the Service directly, or
+        # via a misconfigured ingress, cannot inject a spoofed XFF. Empty
+        # list = disabled (dev/test, or the nginx/T1 topology that does
+        # its own realip-based origin lock). ASVS V13.1.4.
+        self._trusted_proxy_networks = []
+        for cidr in getattr(settings, "TRUSTED_PROXY_CIDRS", []):
+            try:
+                self._trusted_proxy_networks.append(ipaddress.ip_network(cidr, strict=False))
+            except ValueError:
+                logger.warning(
+                    "RequireClientIPMiddleware: ignoring invalid TRUSTED_PROXY_CIDRS entry %r",
+                    cidr,
+                )
+
+    def _peer_is_trusted_proxy(self, request) -> bool:
+        remote_addr = request.META.get("REMOTE_ADDR")
+        if not remote_addr:
+            return False
+        try:
+            peer = ipaddress.ip_address(remote_addr)
+        except ValueError:
+            return False
+        return any(peer in net for net in self._trusted_proxy_networks)
 
     def __call__(self, request):
         if self._enforce:
+            if self._trusted_proxy_networks and not self._peer_is_trusted_proxy(request):
+                logger.warning(
+                    "RequireClientIPMiddleware: rejecting request whose peer "
+                    "is not in TRUSTED_PROXY_CIDRS. path=%s host=%s "
+                    "remote_addr=%r xff=%r",
+                    request.path,
+                    request.get_host(),
+                    request.META.get("REMOTE_ADDR"),
+                    request.headers.get("X-Forwarded-For"),
+                )
+                return HttpResponseForbidden("Forbidden: untrusted request origin.")
             ip = get_client_ip(request)
             if ip is None:
                 logger.warning(

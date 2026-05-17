@@ -50,6 +50,71 @@ class TestRequireClientIPMiddleware(TestCase):
         self.assertFalse(hasattr(req, "client_ip"))
 
 
+class TestTrustedProxyCIDREnforcement(TestCase):
+    """MED-13: peer must be inside TRUSTED_PROXY_CIDRS before any
+    forwarded client-IP header is honored."""
+
+    def setUp(self):
+        self.rf = RequestFactory()
+
+    def test_untrusted_peer_rejected_403(self):
+        with override_settings(DEBUG=False, TRUSTED_PROXY_CIDRS=["10.0.0.0/8"]):
+            mw = RequireClientIPMiddleware(_noop_get_response)
+            req = self.rf.get("/x", HTTP_X_REAL_IP="203.0.113.7", REMOTE_ADDR="198.51.100.9")
+            with override_settings(ALLAUTH_TRUSTED_CLIENT_IP_HEADER="X-Real-IP"):
+                resp = mw(req)
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn(b"untrusted request origin", resp.content)
+
+    def test_trusted_peer_passes(self):
+        with override_settings(DEBUG=False, TRUSTED_PROXY_CIDRS=["10.0.0.0/8"]):
+            mw = RequireClientIPMiddleware(_noop_get_response)
+            req = self.rf.get("/x", HTTP_X_REAL_IP="203.0.113.7", REMOTE_ADDR="10.1.2.3")
+            with override_settings(ALLAUTH_TRUSTED_CLIENT_IP_HEADER="X-Real-IP"):
+                resp = mw(req)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(req.client_ip, "203.0.113.7")
+
+    def test_empty_cidrs_disables_check(self):
+        # Default dev/test posture: no CIDR list → peer check skipped.
+        with override_settings(DEBUG=False, TRUSTED_PROXY_CIDRS=[]):
+            mw = RequireClientIPMiddleware(_noop_get_response)
+            req = self.rf.get("/x", HTTP_X_REAL_IP="203.0.113.7", REMOTE_ADDR="198.51.100.9")
+            with override_settings(ALLAUTH_TRUSTED_CLIENT_IP_HEADER="X-Real-IP"):
+                resp = mw(req)
+        self.assertEqual(resp.status_code, 200)
+
+    def test_invalid_cidr_entry_ignored(self):
+        with override_settings(DEBUG=False, TRUSTED_PROXY_CIDRS=["not-a-cidr", "10.0.0.0/8"]):
+            mw = RequireClientIPMiddleware(_noop_get_response)
+        # The bogus entry is dropped; the valid one is still enforced.
+        self.assertEqual(len(mw._trusted_proxy_networks), 1)
+
+
+class TestRefreshScriptEntrypointInvariant(TestCase):
+    """S13: the Cloudflare refresh must write the EXACT file the
+    entrypoint consumes, using the SAME geo variable the server block
+    gates on — otherwise a refresh is a silent no-op."""
+
+    def test_refresh_writes_entrypoint_file_with_matching_variable(self):
+        import pathlib
+
+        ng = pathlib.Path(__file__).resolve().parents[2] / "nginx"
+        refresh = (ng / "refresh-cloudflare-ips.sh").read_text()
+        entrypoint = (ng / "entrypoint.sh").read_text()
+        server = (ng / "server.cloudflare.conf").read_text()
+
+        # Refresh writes realip.cloudflare.conf (entrypoint copies it).
+        self.assertIn('OUT="realip.cloudflare.conf"', refresh)
+        self.assertIn("cp /etc/nginx/realip.cloudflare.conf", entrypoint)
+        # Same geo variable on both sides of the 403 origin-lock.
+        self.assertIn("$cf_source_ip", refresh)
+        self.assertIn("geo $realip_remote_addr $cf_source_ip", refresh)
+        self.assertIn("$cf_source_ip", server)
+        # The old divergent name must be gone from the refresh output.
+        self.assertNotIn("cf_trusted_source", refresh)
+
+
 class TestAxesClientIPNoSentinel(TestCase):
     def test_returns_resolver_result_never_constant_sentinel(self):
         rf = RequestFactory()

@@ -216,6 +216,18 @@ if "healthcheck.internal" not in ALLOWED_HOSTS:
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 
+# MED-13 (OWASP "HTTP Headers" cheat sheet / ASVS V13.1.4): the
+# TRUSTED_PROXY_CIDRS env var documented intent (only trust XFF from the
+# AppGW/LB subnet) but no Django code enforced it — a misconfigured
+# ingress, or an attacker reaching the Service directly, could inject a
+# spoofed X-Forwarded-For. RequireClientIPMiddleware now verifies the
+# peer (REMOTE_ADDR) is inside this allowlist before honoring any
+# client-IP header. Empty list (dev/test) = enforcement disabled (the
+# DEBUG no-op already covers that path). nginx/T1 keeps its own
+# realip-based origin lock; this is the parallel Django-side guard for
+# the T2 AKS topology where AGIC writes XFF (MED-14).
+TRUSTED_PROXY_CIDRS = _split_env("TRUSTED_PROXY_CIDRS")
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -778,8 +790,21 @@ REGISTER_DEFAULT_WEBVIEW = os.getenv(
     "REGISTER_DEFAULT_WEBVIEW", "https://www.example.com/code-of-conduct-embed/"
 )
 
-# Cron metrics recording provider and settings
-APIS_METRICS_BACKEND = os.getenv("APIS_METRICS_BACKEND", "InfluxDBReporter")
+# Cron metrics recording provider and settings.
+#
+# S12 (OWASP A09 / ASVS V7.1): a silently-defaulted metrics backend means
+# a misconfigured production silently ships cron metrics to the wrong
+# place (or a localhost InfluxDB that doesn't exist) with no signal.
+# Require it explicitly when DEBUG=False; keep the prior ergonomic
+# default for dev/test so the local/test posture is unchanged. Set
+# APIS_METRICS_BACKEND=DummyReporter in prod to deliberately disable.
+_metrics_backend = os.getenv("APIS_METRICS_BACKEND")
+if not _metrics_backend and not DEBUG:
+    raise RuntimeError(
+        "APIS_METRICS_BACKEND must be set explicitly when DEBUG=False "
+        "(e.g. DummyReporter to disable cron metrics, or InfluxDBv3Reporter)."
+    )
+APIS_METRICS_BACKEND = _metrics_backend or "InfluxDBReporter"
 APIS_METRICS_SETTINGS = {
     "database": os.getenv("INFLUXDB_DATABASE", "apis"),
     "host": os.getenv("INFLUXDB_HOST", "localhost"),
