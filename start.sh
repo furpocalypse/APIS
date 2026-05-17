@@ -12,7 +12,15 @@
 #   - tests / `docker run -p 8000:8000` work without compose
 set -eu
 
-./manage.py migrate
+# S29 / S34: single-locus migration. Running `migrate` on every container
+# (web AND worker, every replica) races N concurrent migrators on boot.
+# It now runs only when APIS_RUN_MIGRATIONS is truthy (default "1" so the
+# single-container compose/dev case Just Works); a scaled deployment runs
+# migrate exactly once from an init job / one designated locus and sets
+# APIS_RUN_MIGRATIONS=0 on the app + worker replicas.
+if [ "${APIS_RUN_MIGRATIONS:-1}" = "1" ]; then
+    ./manage.py migrate
+fi
 
 case ${1:-} in
     worker)
@@ -20,13 +28,20 @@ case ${1:-} in
         ;;
 
     *)
-        # --forwarded-allow-ips=* is safe because the only writer of the
-        # X-Forwarded-* headers we trust is whatever sits in front of this
-        # listener (apis-nginx, AGIC, a test harness). Real-IP scrubbing
-        # at that hop is the security boundary. See ASVS V13.1.4.
+        # S29: --forwarded-allow-ips is no longer hardcoded to `*`.
+        # S13 resolved to decision-table case (c) — the real Azure-LB
+        # TCP peer is not empirically established in-repo, so the edge
+        # boundary is NOT assumed airtight. FORWARDED_ALLOW_IPS is
+        # env-driven, default loopback; the compose/AKS deployment sets
+        # it to the apis-nginx sidecar / AGIC source. gunicorn only
+        # matches exact peer IPs (no CIDR), so the authoritative trust
+        # enforcement is the Django layer: RequireClientIPMiddleware
+        # rejects any peer outside TRUSTED_PROXY_CIDRS (MED-13) and nginx
+        # does its own realip origin-lock (T1). FORWARDED_ALLOW_IPS=* is
+        # an explicit, documented opt-in — never the default. ASVS V13.1.4.
         exec gunicorn fm_eventmanager.asgi:application \
             -k fm_eventmanager.worker.ApisWorker \
             --bind 0.0.0.0:8000 \
-            --forwarded-allow-ips=*
+            --forwarded-allow-ips="${FORWARDED_ALLOW_IPS:-127.0.0.1}"
         ;;
 esac

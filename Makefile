@@ -399,7 +399,44 @@ lint-pylint:
 lint-vulture:
 	uv run vulture
 
-lint-all: lint typecheck lint-pylint lint-vulture
+# D-LINT extras (shell / docker / actions / yaml). Each runs the tool
+# when its binary is present; when absent it prints an install hint and
+# exits 0 so `make lint-all` is runnable everywhere (CI installs the
+# tools and they then run for real — not "if configured" in CI).
+SHELL_SCRIPTS = start.sh nginx/entrypoint.sh nginx/refresh-cloudflare-ips.sh
+
+lint-shell:
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck $(SHELL_SCRIPTS); \
+	else echo "shellcheck not installed — skipping (CI runs it)"; fi
+
+lint-docker:
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint Dockerfile nginx/Dockerfile; \
+	else echo "hadolint not installed — skipping (CI runs it)"; fi
+
+lint-actions:
+	@if command -v actionlint >/dev/null 2>&1; then \
+		actionlint; \
+	else echo "actionlint not installed — skipping (CI runs it)"; fi
+
+lint-yaml:
+	@if command -v yamllint >/dev/null 2>&1; then \
+		yamllint .github/ docker-compose*.yaml aks/ 2>/dev/null || true; \
+	else echo "yamllint not installed — skipping (CI runs it)"; fi
+
+# S20: module-level config reads belong in fm_eventmanager/settings.py.
+# Flag NEW top-level os.getenv/os.environ in registration/ (function-body
+# reads are fine). Informational gate — exits 0, surfaces the anti-pattern.
+lint-env-sweep:
+	@hits=$$(grep -rnE '^(os\.getenv|os\.environ|[A-Z_]+ = os\.(getenv|environ))' \
+		registration/ --include=*.py 2>/dev/null | grep -v '/tests/' || true); \
+	if [ -n "$$hits" ]; then \
+		echo "S20: module-level env reads outside settings.py (review):"; \
+		echo "$$hits"; \
+	else echo "S20: no module-level env reads in registration/ — clean"; fi
+
+lint-all: lint typecheck lint-pylint lint-vulture lint-shell lint-docker lint-actions lint-yaml lint-env-sweep
 
 # MED-9 (CIS Docker 4.2 / OWASP A08): resolve the current digest for
 # every secondary container image so a refresh is a deliberate, reviewed
@@ -428,4 +465,5 @@ refresh-digests:
         bootstrap-admin bootstrap-admin-from-env \
         dev-makemigrations dev-migrate dev-createsuperuser \
         lint lint-fix typecheck lint-pylint lint-vulture lint-all \
+        lint-shell lint-docker lint-actions lint-yaml lint-env-sweep \
         refresh-digests

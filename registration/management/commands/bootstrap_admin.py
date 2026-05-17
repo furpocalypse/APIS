@@ -33,6 +33,7 @@ Security model (ASVS V2.1, V2.2, V14.1):
 from __future__ import annotations
 
 import getpass
+import logging
 import os
 
 from django.contrib.auth import get_user_model
@@ -40,6 +41,13 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+
+# S22: superuser provisioning is a security-relevant lifecycle event;
+# emit an auditable, PII-safe line on the dedicated fm_eventmanager
+# .security logger (S35: own handler, propagate=False, pinned WARNING,
+# MED-6 redactor attached) so creation and refuse-to-elevate attempts
+# survive a prod root-level tightening and reach centralized aggregation.
+_audit = logging.getLogger("fm_eventmanager.security")
 
 
 class Command(BaseCommand):
@@ -73,6 +81,10 @@ class Command(BaseCommand):
         with transaction.atomic():
             existing = User.objects.select_for_update().filter(is_superuser=True).first()
             if existing is not None:
+                _audit.warning(
+                    "bootstrap_admin: no-op, superuser already provisioned (username=%s)",
+                    existing.get_username(),
+                )
                 self.stdout.write(
                     self.style.SUCCESS(
                         f"Superuser already provisioned ({existing.get_username()!r}); "
@@ -94,6 +106,11 @@ class Command(BaseCommand):
             if User.objects.filter(username=username).exists():
                 # Pre-existing non-super user with this username — refuse rather than
                 # silently elevating. ASVS V4.1.5: never elevate without explicit intent.
+                _audit.warning(
+                    "bootstrap_admin: REFUSED implicit elevation of existing "
+                    "non-superuser (username=%s)",
+                    username,
+                )
                 raise CommandError(
                     f"A non-superuser with username {username!r} already exists. "
                     "Refusing to elevate it implicitly. Pick a different username, "
@@ -105,6 +122,7 @@ class Command(BaseCommand):
                 email=email,
                 password=password,
             )
+            _audit.warning("bootstrap_admin: superuser PROVISIONED (username=%s)", username)
 
             self.stdout.write(
                 self.style.SUCCESS(
