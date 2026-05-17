@@ -876,3 +876,7 @@ for _seclog in ("axes", "allauth", "registration.views"):
 # event_id) store (plan S38) is the actual replay defence.
 WEBHOOK_MAX_AGE_SECONDS = int(os.getenv("WEBHOOK_MAX_AGE_SECONDS", str(60 * 60 * 24 * 3)))
 WEBHOOK_FUTURE_SKEW_SECONDS = int(os.getenv("WEBHOOK_FUTURE_SKEW_SECONDS", "300"))
+
+# S20: MQTT default token lifetime (the tunable lives with its setting,
+# single source; registration.mqtt.get_token reads it at call time).
+MQTT_DEFAULT_TOKEN_EXP_SECONDS = int(os.getenv("MQTT_DEFAULT_TOKEN_EXP_SECONDS", str(60 * 60)))

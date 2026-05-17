@@ -127,20 +127,16 @@ def get_state_token(firebase: Firebase) -> dict:
     return {"user": user, "token": token}
 
 
-# Default token lifetime when a caller doesn't pass `exp`. One hour is
-# short enough to bound capture-replay damage if a token leaks, but long
-# enough that no short-flow caller (e.g. a server notification round-
-# trip) is likely to hit it. Long-lived terminal tokens (payment,
-# receipt, station, state) MUST set `exp` explicitly. ASVS V2.10.3.
-DEFAULT_TOKEN_EXP_SECONDS = 60 * 60
-
-
 def get_token(sub, exp=None, subs=None, publ=None) -> str:
     if exp is None:
-        # Fall back to a bounded default rather than the previous
-        # 2**31-1 (effectively never expires).
+        # S20: the default token lifetime is a tunable that lives with its
+        # setting in settings_base (single source); read it from
+        # django.conf.settings at call time (no module-level global, so
+        # @override_settings works). One hour bounds capture-replay if a
+        # token leaks; long-lived terminal tokens pass `exp` explicitly.
+        # ASVS V2.10.3.
         exp = datetime.now(tz=timezone.utc) + timedelta(
-            seconds=DEFAULT_TOKEN_EXP_SECONDS
+            seconds=int(settings.MQTT_DEFAULT_TOKEN_EXP_SECONDS)
         )
     else:
         exp = datetime.now(tz=timezone.utc) + timedelta(seconds=exp)
