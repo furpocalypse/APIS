@@ -979,6 +979,13 @@ class Order(models.Model):
         "Dispute Lost"  # The bank has completed processing the dispute and the seller has lost
     )
     DISPUTE_ACCEPTED = "Dispute Accepted"  # The seller has accepted the dispute
+    # Transient sentinel: a fresh onsite (pay-at-door) Order before
+    # complete_cash/complete_square moves it to a terminal status. It is
+    # deliberately NOT in STATUS_CHOICES (not a user/admin-selectable
+    # state, and adding it would needlessly churn the field's choices
+    # metadata) — it is the documented legacy onsite pre-completion value
+    # set in views.ordering and consumed by the onsite-completion CAS.
+    ONSITE_PENDING = "Onsite Pending"
     STATUS_CHOICES = (
         (PENDING, "Pending"),
         (CAPTURED, "Captured"),

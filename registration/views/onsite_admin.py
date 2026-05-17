@@ -616,7 +616,12 @@ def complete_square_transaction(request):
     won = payments.transition_order_status(
         order,
         Order.COMPLETED,
-        expected=[Order.PENDING, Order.CAPTURED],
+        # Onsite (pay-at-door) orders start at ONSITE_PENDING; a Square
+        # capture-then-complete may also arrive PENDING/CAPTURED. Omitting
+        # ONSITE_PENDING here silently dropped every onsite credit
+        # completion (status stuck, capacity unconsumed, billingType
+        # never set) — the S24 BLOCK-3 migration regression CI caught.
+        expected=[Order.PENDING, Order.CAPTURED, Order.ONSITE_PENDING],
         extra_fields={
             "billingType": Order.CREDIT,
             "settledDate": order.settledDate,
@@ -886,7 +891,11 @@ def complete_cash_transaction(request):
     payments.transition_order_status(
         order,
         Order.COMPLETED,
-        expected=[Order.PENDING, Order.CAPTURED],
+        # Onsite cash sale: the order is created at ONSITE_PENDING (pay at
+        # the door). Omitting it dropped every onsite cash completion —
+        # the till took the money but the order never moved to COMPLETED
+        # and capacity was never consumed. S24 BLOCK-3 regression.
+        expected=[Order.PENDING, Order.CAPTURED, Order.ONSITE_PENDING],
         extra_fields={
             "billingType": Order.CASH,
             "settledDate": order.settledDate,
