@@ -1401,13 +1401,12 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                 messages.error(request, "You do not have permission to issue refunds.")
                 # CodeQL py/url-redirection (alert 40) / CLAUDE.md "no open
                 # redirects": never echo request.path (it carries the
-                # user-controlled `(.+)` order_id URL segment) back into a
-                # redirect. Redirect to a route-reversed URL built from the
-                # validated DB pk (order.id, an int) — same pattern this
-                # view already uses on the success/error branches below.
-                return HttpResponseRedirect(
-                    reverse("admin:registration_order_change", args=(order.id,))
-                )
+                # user-controlled `(.+)` order_id URL segment). Re-derive
+                # the SAME refund page from the validated DB pk via
+                # reverse() (the CodeQL-recognized sanitizer) — behaviour-
+                # identical to the original request.path reload, with the
+                # taint severed (order.id is a trusted int).
+                return HttpResponseRedirect(reverse("admin:order_refund", args=(order.id,)))
 
             form = self.RefundForm(request.POST)
 
@@ -1441,9 +1440,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                 # CodeQL py/url-redirection (alert 41) / CLAUDE.md "no open
                 # redirects": route-reversed URL from the validated DB pk,
                 # never the user-controlled request.path.
-                return HttpResponseRedirect(
-                    reverse("admin:registration_order_change", args=(order.id,))
-                )
+                return HttpResponseRedirect(reverse("admin:order_refund", args=(order.id,)))
             else:
                 messages.error(request, "Invalid form data.")
 
