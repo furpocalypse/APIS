@@ -84,6 +84,25 @@ patches:
         path: /spec/minAvailable
         value: 2
 
+  # --- MED-12: real cluster egress except-CIDRs ------------------------
+  # The base allow-app-egress policy excludes the AKS *default* RFC-1918
+  # ranges from 0.0.0.0/0 egress — placeholders that do NOT segregate
+  # pod-to-pod traffic unless they match this cluster's real pod/service/
+  # node CIDRs. Replace the values below with the actual CIDRs BEFORE
+  # applying prod (see docs/deploy-preflight.md, MED-12). Unconfirmed
+  # CIDRs are a deploy blocker — the failure is silent otherwise.
+  - target:
+      kind: NetworkPolicy
+      name: allow-app-egress
+    patch: |
+      - op: replace
+        path: /spec/egress/2/to/0/ipBlock/except
+        value:
+          # PLACEHOLDER — replace with this cluster's pod/service/node CIDRs.
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+
   # --- Resource asks ---------------------------------------------------
   - target:
       kind: Deployment

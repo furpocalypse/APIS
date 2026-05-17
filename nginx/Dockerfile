@@ -7,6 +7,9 @@
 # This image is used in the Docker / docker-compose topology only. In AKS
 # we DON'T deploy this — Application Gateway Ingress Controller terminates
 # TLS at the gateway and forwards plaintext to the app service.
+# MED-9 (CIS Docker 4.2): pin by digest for prod builds —
+# `make refresh-digests` → FROM …nginx:1.27-alpine@sha256:<digest>
+# (see docs/deploy-preflight.md).
 FROM mirror.gcr.io/library/nginx:1.27-alpine
 
 # envsubst for templated boot-time rendering of server_name + upstream.

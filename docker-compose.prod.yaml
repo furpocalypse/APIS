@@ -113,11 +113,11 @@ services:
   # --------------------------------------------------------------------
   app:
     profiles: ["app","fullstack"]
-    # Pinned to a specific tag. For the strongest reproducibility (and
-    # CIS Docker 4.2), append the SHA256 digest:
+    # MED-9 (CIS Docker 4.2 / OWASP A08): for the strongest reproducibility
+    # append the SHA256 digest to EVERY image in this file (this one plus
+    # nginx/postgres/redis/gotenberg/apis-nginx). Resolve all of them with
+    # `make refresh-digests` and bake them in per docs/deploy-preflight.md:
     #   image: furpocalypse.azurecr.io/apis:0.5.3@sha256:<digest>
-    # Resolve via:
-    #   az acr repository show --name furpocalypse --image apis:0.5.3 --query 'digest'
     image: furpocalypse.azurecr.io/apis:0.5.3
     pull_policy: always
     restart: always

@@ -401,8 +401,31 @@ lint-vulture:
 
 lint-all: lint typecheck lint-pylint lint-vulture
 
+# MED-9 (CIS Docker 4.2 / OWASP A08): resolve the current digest for
+# every secondary container image so a refresh is a deliberate, reviewed
+# act (a tag swap at the registry must never silently land on the next
+# `docker compose pull`). Prints copy-paste-ready `image: <ref>@sha256:`
+# lines; the operator bakes them into docker-compose.prod.yaml,
+# nginx/Dockerfile, and the kustomize `images:` block. Uses buildx
+# imagetools (no pull). See docs/deploy-preflight.md.
+DIGEST_IMAGES = \
+	mirror.gcr.io/library/nginx:1.27-alpine \
+	mirror.gcr.io/library/postgres:16 \
+	mirror.gcr.io/library/redis:8 \
+	mirror.gcr.io/gotenberg/gotenberg:8 \
+	furpocalypse.azurecr.io/apis-nginx:0.5.2 \
+	furpocalypse.azurecr.io/apis:0.5.3
+
+refresh-digests:
+	@for img in $(DIGEST_IMAGES); do \
+		d=$$(docker buildx imagetools inspect "$$img" --format '{{.Manifest.Digest}}' 2>/dev/null) || \
+			{ echo "FAILED to resolve $$img (registry auth / network?)" >&2; continue; }; \
+		echo "$${img%%:*}:$${img##*:}@$$d"; \
+	done
+
 .PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django \
         makemigrations migrate createsuperuser \
         bootstrap-admin bootstrap-admin-from-env \
         dev-makemigrations dev-migrate dev-createsuperuser \
-        lint lint-fix typecheck lint-pylint lint-vulture lint-all
+        lint lint-fix typecheck lint-pylint lint-vulture lint-all \
+        refresh-digests

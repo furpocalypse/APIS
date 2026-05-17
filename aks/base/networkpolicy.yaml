@@ -136,8 +136,11 @@ spec:
         - protocol: TCP
           port: 6379
     # Internet egress for SMTP, payment providers, Key Vault, ACR.
-    # NOTE: the except CIDRs below MUST be adjusted to your cluster's
-    # actual pod / service / node CIDRs — these are AKS defaults.
+    # MED-12: the except CIDRs below are AKS PLACEHOLDER defaults and MUST
+    # be replaced with this cluster's actual pod/service/node CIDRs before
+    # prod (the prod overlay carries the patch + see
+    # docs/deploy-preflight.md). A mismatch is silent — traffic flows but
+    # pod-to-pod segregation is absent.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
