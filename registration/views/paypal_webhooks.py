@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 
 from registration import paypal_webhook_handlers as pph
 from registration.models import PaymentWebhookNotification
+from registration.ratelimit import rate_limited_json
 from registration.views import common
 from registration.views.webhook_age import (
     webhook_signature_bypassed,
@@ -170,6 +171,9 @@ def verify_signature(request) -> bool:
     )
 
 
+# MED-4: signature verification is the real control; cap volume so a
+# leaked signing key can't flood forged-but-valid events. 100/min/source.
+@rate_limited_json(rate="100/m")
 @require_POST
 @csrf_exempt
 def paypal_webhook(request):

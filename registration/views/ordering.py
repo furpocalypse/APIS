@@ -33,6 +33,7 @@ from registration.paypal_payments import (
     capture_paypal_payment,
     create_unpaid_paypal_order,
 )
+from registration.ratelimit import rate_limited_json
 from registration.types import BillingData, TranslatedCartItem
 
 from . import cart, common
@@ -553,6 +554,9 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
     return common.abort(400, "Cart total is zero; use the zero-checkout flow")
 
 
+# MED-3: cap deliberate registration-submit floods (enumeration / capacity
+# drain / mass-email). Idempotency keys only stop accidental retries.
+@rate_limited_json(rate="10/h")
 @idempotency_key(optional=False)
 def checkout(request):
     """

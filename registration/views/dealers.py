@@ -33,6 +33,7 @@ from registration.models import (
     timezone,
 )
 from registration.paypal_payments import create_unpaid_paypal_order
+from registration.ratelimit import rate_limited_json
 from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
@@ -433,6 +434,9 @@ def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
         return common.abort(500, message)
 
 
+# MED-3: dealer applications are low-frequency; cap abusive submission
+# floods (enumeration / mass-email) without impeding a real applicant.
+@rate_limited_json(rate="30/d")
 def add_dealer(request):
     try:
         postData = json.loads(request.body)
@@ -674,6 +678,7 @@ def checkout_dealer(request):
         return common.abort(400, message)
 
 
+@rate_limited_json(rate="30/d")  # MED-3: dealer-apply flood backstop.
 def addNewDealer(request):
     try:
         postData = json.loads(request.body)

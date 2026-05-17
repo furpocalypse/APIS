@@ -9,6 +9,7 @@ from square.utils.webhooks_helper import verify_signature
 
 from registration import payments
 from registration.models import PaymentWebhookNotification
+from registration.ratelimit import rate_limited_json
 from registration.views import common
 
 # Plan S2/S18/S19: age-window + signature-bypass primitives live in the
@@ -23,6 +24,10 @@ from registration.views.webhook_age import (
 logger = logging.getLogger(__name__)
 
 
+# MED-4: signature verification is the real control; this caps volume so a
+# leaked signing key can't be used to flood thousands of forged-but-valid
+# events/sec. 100/min/source IP is generous for legitimate Square traffic.
+@rate_limited_json(rate="100/m")
 @require_POST
 @csrf_exempt
 def square_webhook(request):

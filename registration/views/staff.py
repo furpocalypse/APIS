@@ -21,6 +21,7 @@ from registration.models import (
     StaffInvite,
     settings,
 )
+from registration.ratelimit import rate_limited_json
 from registration.services import CreateAttendeeOptions
 
 from .common import abort, to_json_safe
@@ -101,6 +102,8 @@ def staff_from_post_data(pds, attendee, event, staff):
     return staff
 
 
+# MED-3: staff registration is low-frequency; cap submission floods.
+@rate_limited_json(rate="30/d")
 @require_POST
 def add_new_staff(request):
     postData = json.loads(request.body)
@@ -251,6 +254,7 @@ def info_returning_staff(request):
     return render(request, "registration/staff/returning-staff-payment.html", context)
 
 
+@rate_limited_json(rate="30/d")  # MED-3: returning-staff submit flood backstop.
 def add_returning_staff(request):
     try:
         postData = json.loads(request.body)
