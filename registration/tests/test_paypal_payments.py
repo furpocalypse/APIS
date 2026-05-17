@@ -1421,7 +1421,7 @@ class TestPayPalRefunds(OrdersTestCase):
         mock_refund_captured_payment.return_value = create_api_response(
             self.part_refund_10_body, Refund, 201
         )
-        result, message = refund_card_payment(self.order_no_refund, 10, "some reason")
+        result, message = refund_card_payment(self.order_no_refund, Decimal(10), "some reason")
 
         mock_refund_captured_payment.assert_called_once()
         self.assertTrue(result)

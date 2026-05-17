@@ -422,7 +422,7 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
 
 def refund_payment(
     order: ApisOrder,
-    amount: float,
+    amount: Decimal,
     reason: str | None = None,
     request: HttpRequest | None = None,
 ) -> tuple[bool, str | None]:
@@ -465,7 +465,7 @@ def refund_payment(
 
 def refund_card_payment(
     order: ApisOrder,
-    amount: float,
+    amount: Decimal,
     reason: str | None = None,
     request: HttpRequest | None = None,
 ) -> tuple[bool, str]:

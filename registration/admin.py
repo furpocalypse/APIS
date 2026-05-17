@@ -840,9 +840,15 @@ class StaffAdmin(ImportExportModelAdmin):
                     count += 1
 
                 self.message_user(request, f"Successfully copied {count} staff to {event}.")
-                # CodeQL py/url-redirection: redirect to the route-bound
-                # local path only (drop the user-controlled query string).
-                return HttpResponseRedirect(request.path)
+                # Defense-in-depth (consistency with refund_view's open-
+                # redirect fix): never echo request.path back into a
+                # redirect. For an admin action this is just the model
+                # changelist — re-derive it from route metadata, which
+                # carries no request-controlled data.
+                meta = self.model._meta
+                return HttpResponseRedirect(
+                    reverse(f"admin:{meta.app_label}_{meta.model_name}_changelist")
+                )
 
         if not form:
             form = self.CopyToEvent(

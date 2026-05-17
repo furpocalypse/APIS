@@ -33,8 +33,9 @@ jobs:
       - name: S20 module-level env-read sweep
         run: make lint-env-sweep
 
-  # Non-blocking (Phase B): surfaces the backlog without gating merges.
-  # Phase C flips these to blocking once the backlog is triaged.
+  # Phase C COMPLETE: mypy, pylint and vulture backlogs are all triaged
+  # to green, so every lint job below is now blocking (no
+  # continue-on-error) — a regression in any of them fails the build.
   # Phase C: the mypy backlog has been fully triaged to zero errors
   # (real cast()/annotation fixes, no blanket type: ignore), so mypy is
   # now BLOCKING — a new type regression fails the build.
@@ -58,9 +59,9 @@ jobs:
       - name: mypy
         run: uv run mypy registration fm_eventmanager
 
+  # Phase C: pylint is green at --fail-under=9.0, now BLOCKING.
   pylint:
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install the latest version of uv
@@ -75,9 +76,9 @@ jobs:
       - name: pylint (semantics + duplicate-code/R0801)
         run: uv run pylint registration --fail-under=9.0
 
+  # Phase C: vulture (dead-code) is clean, now BLOCKING.
   vulture:
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install the latest version of uv

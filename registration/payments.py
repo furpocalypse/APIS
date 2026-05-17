@@ -488,7 +488,7 @@ def update_order_payment_data(order: Order, order_total: int, payment: Payment) 
 
 def refund_payment(
     order: Order,
-    amount: float,
+    amount: Decimal,
     reason: str | None = None,
     request: HttpRequest | None = None,
 ) -> tuple[bool, str | None]:
@@ -520,7 +520,7 @@ def refund_payment(
 
 
 def refund_cash_payment(
-    order: Order, amount: float, reason: str | None = None
+    order: Order, amount: Decimal, reason: str | None = None
 ) -> tuple[bool, None]:
     """
     Deducts the ``amount`` from the ``order``'s total and logs a `Cashdrawer`
@@ -550,7 +550,7 @@ def refund_cash_payment(
 
 def refund_card_payment(
     order: Order,
-    amount: float,
+    amount: Decimal,
     reason: str | None = None,
     request: HttpRequest | None = None,
 ) -> tuple[bool, str]:
