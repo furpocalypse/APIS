@@ -2,7 +2,7 @@ import base64
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import jwt
@@ -135,15 +135,13 @@ def get_token(sub, exp=None, subs=None, publ=None) -> str:
         # @override_settings works). One hour bounds capture-replay if a
         # token leaks; long-lived terminal tokens pass `exp` explicitly.
         # ASVS V2.10.3.
-        exp = datetime.now(tz=timezone.utc) + timedelta(
-            seconds=int(settings.MQTT_DEFAULT_TOKEN_EXP_SECONDS)
-        )
+        exp = datetime.now(tz=UTC) + timedelta(seconds=int(settings.MQTT_DEFAULT_TOKEN_EXP_SECONDS))
     else:
-        exp = datetime.now(tz=timezone.utc) + timedelta(seconds=exp)
+        exp = datetime.now(tz=UTC) + timedelta(seconds=exp)
 
     claims = {
         "sub": sub,
-        "iat": datetime.now(tz=timezone.utc),
+        "iat": datetime.now(tz=UTC),
         "exp": exp,
         "subs": subs,
         "publ": publ,
@@ -167,10 +165,7 @@ def format_topic(topic: str, allow_wildcard: bool = False) -> str:
 
     if "/" in topic:
         return "/".join(
-            [
-                format_topic(segment, allow_wildcard=allow_wildcard)
-                for segment in topic.split("/")
-            ]
+            [format_topic(segment, allow_wildcard=allow_wildcard) for segment in topic.split("/")]
         )
 
     if allow_wildcard and topic in ("+", "#"):
@@ -185,7 +180,9 @@ def format_topic(topic: str, allow_wildcard: bool = False) -> str:
     return topic.lower()
 
 
-def send_mqtt_message(topic: str, payload: dict = {}, retain: bool = False):
+def send_mqtt_message(topic: str, payload: dict | None = None, retain: bool = False):
+    if payload is None:
+        payload = {}
     payload_json = json.dumps(payload, cls=JSONDecimalEncoder)
     logger.debug(f"Sending MQTT message: {topic} ({payload_json})")
 

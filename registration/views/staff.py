@@ -1,18 +1,29 @@
 import json
 import logging
 from datetime import datetime
-from time import timezone
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.forms import model_to_dict
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Badge,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    ShirtSizes,
+    Staff,
+    StaffInvite,
+    settings,
+)
 from registration.services import CreateAttendeeOptions
 
-from .common import abort, handler, logger, to_json_safe
+from .common import abort, to_json_safe
 from .ordering import get_total
 
 logger = logging.getLogger(__name__)
@@ -25,15 +36,10 @@ def new_staff(request, guid):
     tz = timezone.get_current_timezone()
     today = datetime.now(tz=tz)
     context = {"token": guid, "event": event, "form_type": form_type}
-    if (
-        event.staffRegStart <= today <= event.staffRegEnd
-        or invite.ignore_time_window is True
-    ):
+    if event.staffRegStart <= today <= event.staffRegEnd or invite.ignore_time_window is True:
         return render(request, "registration/staff/new-staff.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to slack and email for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -70,9 +76,7 @@ def info_new_staff(request):
     try:
         context["token"] = StaffInvite.objects.get(token=token_value)
     except ObjectDoesNotExist:
-        return render(
-            request, "registration/staff/new-staff-payment.html", context, status=404
-        )
+        return render(request, "registration/staff/new-staff-payment.html", context, status=404)
     return render(request, "registration/staff/new-staff-payment.html", context)
 
 
@@ -102,10 +106,7 @@ def add_new_staff(request):
     pdp = postData["priceLevel"]
     evt = postData.get("event")
 
-    if evt:
-        event = Event.objects.get(name=evt)
-    else:
-        event = Event.objects.get(default=True)
+    event = Event.objects.get(name=evt) if evt else Event.objects.get(default=True)
 
     tz = timezone.get_current_timezone()
     birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
@@ -134,9 +135,7 @@ def add_new_staff(request):
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 
-    order_item = OrderItem.objects.create(
-        badge=badge, priceLevel=price_level, enteredBy="WEB"
-    )
+    order_item = OrderItem.objects.create(badge=badge, priceLevel=price_level, enteredBy="WEB")
 
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
@@ -164,9 +163,7 @@ def returning_staff(request, guid):
     if event.staffRegStart <= today <= event.staffRegEnd:
         return render(request, "registration/staff/returning-staff.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to slack and email for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -194,15 +191,11 @@ def find_returning_staff(request):
         # body — it carries email + registrationToken (and historically
         # has carried PII like birthdate / address) which lands in
         # plaintext logs and Sentry events. Log only the error type.
-        logger.warning(
-            "Unable to find returning staff: bad request (%s)", type(e).__name__
-        )
+        logger.warning("Unable to find returning staff: bad request (%s)", type(e).__name__)
         return abort(400, str(e))
 
     try:
-        staff = Staff.objects.get(
-            attendee__email__iexact=email, registrationToken=token
-        )
+        staff = Staff.objects.get(attendee__email__iexact=email, registrationToken=token)
     except ObjectDoesNotExist:
         return abort(404, "Staff matching query does not exist.")
 
@@ -226,9 +219,7 @@ def info_returning_staff(request):
 
     staff_id = request.session.get("staff_id")
     if staff_id is None:
-        return render(
-            request, "registration/staff/returning-staff-payment.html", context
-        )
+        return render(request, "registration/staff/returning-staff-payment.html", context)
 
     staff = Staff.objects.get(id=staff_id)
     if staff:
@@ -258,7 +249,7 @@ def info_returning_staff(request):
 def add_returning_staff(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for add_returning_staff()")
         return JsonResponse({"success": False})
 
@@ -268,10 +259,7 @@ def add_returning_staff(request):
     pdp = postData["priceLevel"]
     evt = postData.get("event")
 
-    if evt:
-        event = Event.objects.get(name=evt)
-    else:
-        event = Event.objects.get(default=True)
+    event = Event.objects.get(name=evt) if evt else Event.objects.get(default=True)
 
     # Audit P1.8 (BOLA / IDOR fix): the staff record (and the attendee
     # behind it) must be the ones bound to *this* session, not whatever
@@ -354,9 +342,7 @@ def add_returning_staff(request):
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 
-    order_item = OrderItem.objects.create(
-        badge=badge, priceLevel=price_level, enteredBy="WEB"
-    )
+    order_item = OrderItem.objects.create(badge=badge, priceLevel=price_level, enteredBy="WEB")
 
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 

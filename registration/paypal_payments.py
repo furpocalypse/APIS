@@ -2,7 +2,6 @@ import json
 import logging
 from decimal import Decimal
 from json import JSONDecodeError
-from typing import Optional
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -43,9 +42,7 @@ from .models import Order as ApisOrder
 from .payments import refund_cash_payment, update_capacity_for_status_change
 from .types import TranslatedCartItem
 
-PAYPAL_REQUESTS = Histogram(
-    "paypal_requests", "HTTP requests to Paypal API", ["endpoint"]
-)
+PAYPAL_REQUESTS = Histogram("paypal_requests", "HTTP requests to Paypal API", ["endpoint"])
 
 client = PaypalServersdkClient(
     client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
@@ -60,9 +57,7 @@ client = PaypalServersdkClient(
     logging_configuration=LoggingConfiguration(
         log_level=logging.INFO,
         request_logging_config=RequestLoggingConfiguration(log_body=settings.DEBUG),
-        response_logging_config=ResponseLoggingConfiguration(
-            log_headers=settings.DEBUG
-        ),
+        response_logging_config=ResponseLoggingConfiguration(log_headers=settings.DEBUG),
     ),
 )
 
@@ -106,7 +101,7 @@ def create_unpaid_paypal_order(
     discount: str | int | Decimal,
     cart_items: list[TranslatedCartItem],
     apis_reference: str | None = None,
-    paypal_mock_response: Optional[str] = "",
+    paypal_mock_response: str | None = "",
 ) -> ApiResponse:
     """Create an unpaid PayPal order.
 
@@ -127,9 +122,7 @@ def create_unpaid_paypal_order(
             name=item["name"],
             unit_amount=Money(currency_code="USD", value=str(item["total"])),
             quantity=1,
-            category=(
-                ItemCategory.DONATION if is_donation else ItemCategory.DIGITAL_GOODS
-            ),
+            category=(ItemCategory.DONATION if is_donation else ItemCategory.DIGITAL_GOODS),
         )
         if is_donation:
             donations.append(pp_item)
@@ -148,9 +141,9 @@ def create_unpaid_paypal_order(
     # least one purchase_unit (and to preserve the legacy behavior of the
     # total==0 empty-cart call site).
     if registrations or not donations:
-        registration_kwargs = dict(
-            reference_id="registration",
-            amount=AmountWithBreakdown(
+        registration_kwargs = {
+            "reference_id": "registration",
+            "amount": AmountWithBreakdown(
                 currency_code="USD",
                 value=str(registration_amount),
                 breakdown=AmountBreakdown(
@@ -161,8 +154,8 @@ def create_unpaid_paypal_order(
                     discount=Money(currency_code="USD", value=str(discount)),
                 ),
             ),
-            items=registrations,
-        )
+            "items": registrations,
+        }
         if apis_reference:
             registration_kwargs["invoice_id"] = apis_reference
             registration_kwargs["custom_id"] = apis_reference
@@ -174,9 +167,9 @@ def create_unpaid_paypal_order(
     # custom_id is unconstrained and carries the unsuffixed reference so
     # webhook handlers resolve the local Order via the custom_id fallback.
     if donations:
-        donation_kwargs = dict(
-            reference_id="donation",
-            amount=AmountWithBreakdown(
+        donation_kwargs = {
+            "reference_id": "donation",
+            "amount": AmountWithBreakdown(
                 currency_code="USD",
                 value=str(donation_total),
                 breakdown=AmountBreakdown(
@@ -186,8 +179,8 @@ def create_unpaid_paypal_order(
                     ),
                 ),
             ),
-            items=donations,
-        )
+            "items": donations,
+        }
         if apis_reference:
             donation_kwargs["invoice_id"] = f"{apis_reference}-don"
             donation_kwargs["custom_id"] = apis_reference
@@ -196,9 +189,7 @@ def create_unpaid_paypal_order(
     logger.debug("---- Begin PayPal Order Creation ----")
 
     params = {
-        "body": OrderRequest(
-            intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units
-        )
+        "body": OrderRequest(intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units)
     }
     # Sandbox negative testing
     if paypal_mock_response:
@@ -212,7 +203,7 @@ def create_unpaid_paypal_order(
 def capture_paypal_payment(
     paypal_order_id: int | str,
     apis_order: ApisOrder,
-    paypal_mock_response: Optional[str] = "",
+    paypal_mock_response: str | None = "",
 ) -> tuple[bool, dict]:
     params = {"id": paypal_order_id, "prefer": "return=representation"}
 
@@ -256,9 +247,7 @@ def capture_paypal_payment(
 
     order_data: PayPalOrder = PayPalOrder.from_dictionary(apis_order.apiData)
 
-    if hasattr(order_data, "payment_source") and hasattr(
-        order_data.payment_source, "card"
-    ):
+    if hasattr(order_data, "payment_source") and hasattr(order_data.payment_source, "card"):
         apis_order.lastFour = order_data.payment_source.card.last_digits
 
     apis_order.status = ApisOrder.COMPLETED
@@ -271,7 +260,7 @@ def capture_paypal_payment(
 
 
 def refresh_payment(
-    order: ApisOrder, store_api_data: dict = None
+    order: ApisOrder, store_api_data: dict | None = None
 ) -> tuple[bool, str | None]:
     """
     Queries the payment gateway to update payment information on an order.
@@ -287,8 +276,8 @@ def refresh_payment(
     else:
         api_data = order.apiData
         if not api_data:
-            logger.warning("No order data yet for {0}".format(order.reference))
-            return False, "No order data yet for {0}".format(order.reference)
+            logger.warning(f"No order data yet for {order.reference}")
+            return False, f"No order data yet for {order.reference}"
     old_status = order.status
     order_total = 0
 
@@ -319,9 +308,7 @@ def refresh_payment(
     except (AttributeError, IndexError, TypeError):
         return False, "Malformed payment data!"
 
-    if hasattr(fresh_order, "payment_source") and hasattr(
-        fresh_order.payment_source, "card"
-    ):
+    if hasattr(fresh_order, "payment_source") and hasattr(fresh_order.payment_source, "card"):
         order.lastFour = fresh_order.payment_source.card.last_digits
     else:
         order.lastFour = ""
@@ -331,16 +318,14 @@ def refresh_payment(
     message = None
     if getattr(fresh_order.purchase_units[0].payments, "refunds", None):
         order.total = order_total
-        message = update_order_refund_data(
-            order, fresh_order.purchase_units[0].payments.refunds
-        )
+        message = update_order_refund_data(order, fresh_order.purchase_units[0].payments.refunds)
 
     order.apiData = APIHelper.to_dictionary(fresh_order)
     order.total = order_total
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
-    return message == None, message
+    return message is None, message
 
 
 def update_order_payment_data(
@@ -400,7 +385,7 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
         order.charityDonation = order.total
         message = "Refunded order has caused charity and organization donation amounts to reset."
         logger.warning(message)
-        order.notes += "\n{0}: {1}".format(timezone.now(), message)
+        order.notes += f"\n{timezone.now()}: {message}"
         return message
 
     return None
@@ -409,8 +394,8 @@ def update_order_refund_data(order: ApisOrder, refunds: list[Refund]) -> str | N
 def refund_payment(
     order: ApisOrder,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str | None]:
     """
     Determines whether an order can be refunded, and processes the refund id so.
@@ -438,14 +423,14 @@ def refund_payment(
         return False, "Comped orders cannot be refunded."
     if order.billingType == ApisOrder.UNPAID:
         return False, "Unpaid orders cannot be refunded."
-    return False, "Not sure how to refund order type {0}!".format(order.billingType)
+    return False, f"Not sure how to refund order type {order.billingType}!"
 
 
 def refund_card_payment(
     order: ApisOrder,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str]:
     """Process a refund for a card-based payment.
 
@@ -458,8 +443,8 @@ def refund_card_payment(
 
     old_status = order.status
     api_data = PayPalOrder.from_dictionary(order.apiData)
-    if api_data == None:
-        return (False, "APIS Order %s has malformed or missing order data!" % order.id)
+    if api_data is None:
+        return (False, f"APIS Order {order.id} has malformed or missing order data!")
     # All APIS-generated PayPal Orders will have one purchase unit and one
     # capture per purchase unit. Multiple captures only happen when sending
     # intent=AUTHORIZE to the Orders API and we don't do that.
@@ -467,19 +452,19 @@ def refund_card_payment(
     try:
         capture = api_data.purchase_units[0].payments.captures[0]
     except (AttributeError, IndexError, TypeError):
-        return (False, "Can't find payment capture data for APIS Order %s!" % order.id)
+        return (False, f"Can't find payment capture data for APIS Order {order.id}!")
     available = get_available_refund_amount(api_data)
     if available <= 0:
         return (
             False,
-            "PayPal Order %s has already been refunded in full!" % api_data.id,
+            f"PayPal Order {api_data.id} has already been refunded in full!",
         )
     if amount > available:
         return (
             False,
             (
-                "Refund on PayPal Order %s (%d) cannot exceed available "
-                "refund amount %d!" % (api_data.id, amount, available)
+                f"Refund on PayPal Order {api_data.id} ({amount}) cannot exceed available "
+                f"refund amount {available}!"
             ),
         )
     args = {
@@ -499,7 +484,7 @@ def refund_card_payment(
         with PAYPAL_REQUESTS.labels(endpoint="refund_payment").time():
             api_response = payments_controller.refund_captured_payment(args)
     except ApiException as e:
-        message = "Error in PayPal refund: {0}".format(e.reason)
+        message = f"Error in PayPal refund: {e.reason}"
         logger.error(message)
         return False, message
 
@@ -509,7 +494,7 @@ def refund_card_payment(
     try:
         resp_raw_body = json.loads(api_response.text)
     except (ValueError, JSONDecodeError) as e:
-        message = "Error decoding PayPal refund response: {0}".format(e.msg)
+        message = f"Error decoding PayPal refund response: {e.msg}"
         logger.error(message)
         return False, message
 
@@ -521,11 +506,9 @@ def refund_card_payment(
 
     refund: Refund = api_response.body
     status: RefundStatus = refund.status
-    stored_refunds: list[Refund] = getattr(
-        api_data.purchase_units[0].payments, "refunds", []
-    )
+    stored_refunds: list[Refund] = getattr(api_data.purchase_units[0].payments, "refunds", [])
     stored_refunds.append(refund)
-    setattr(api_data.purchase_units[0].payments, "refunds", stored_refunds)
+    api_data.purchase_units[0].payments.refunds = stored_refunds
     order.apiData = APIHelper.to_dictionary(api_data)
 
     if status == RefundStatus.COMPLETED:
@@ -542,14 +525,17 @@ def refund_card_payment(
             logger.warning(
                 "Refunded order has caused charity and organization donation amounts to reset."
             )
-            order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
+            order.notes += (
+                "\nWarning: Refunded order has caused charity and organization "
+                "donation amounts to reset.\n"
+            )
 
     if status in (RefundStatus.CANCELLED, RefundStatus.FAILED):
         order.status = ApisOrder.COMPLETED
 
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
-    message = "PayPal refund has been submitted and is %s" % status
+    message = f"PayPal refund has been submitted and is {status}"
     logger.debug(message)
     return True, message
 

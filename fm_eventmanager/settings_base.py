@@ -14,7 +14,10 @@ import os
 
 from idempotency_key import status
 
-eval_bool = lambda x: x.lower() in ("true", "1", "t", "y", "yes")
+
+def eval_bool(x):
+    return x.lower() in ("true", "1", "t", "y", "yes")
+
 
 SENTRY_ENABLED = eval_bool(os.environ.get("SENTRY_ENABLED", ""))
 if SENTRY_ENABLED:
@@ -175,16 +178,13 @@ else:
         )
     if not CSRF_TRUSTED_ORIGINS:
         raise RuntimeError(
-            "CSRF_TRUSTED_ORIGINS must be set (comma-separated https:// origins) "
-            "when DEBUG=False."
+            "CSRF_TRUSTED_ORIGINS must be set (comma-separated https:// origins) when DEBUG=False."
         )
     # Reject wildcard literals in production.
-    if any(h == "*" or h.startswith("*.") and h == "*" for h in ALLOWED_HOSTS):
+    if any(h == "*" or (h.startswith("*.") and h == "*") for h in ALLOWED_HOSTS):
         raise RuntimeError("ALLOWED_HOSTS must not contain '*' in production.")
     if any(o in ("http://*", "https://*", "*") for o in CSRF_TRUSTED_ORIGINS):
-        raise RuntimeError(
-            "CSRF_TRUSTED_ORIGINS must not contain wildcards in production."
-        )
+        raise RuntimeError("CSRF_TRUSTED_ORIGINS must not contain wildcards in production.")
 
 # Always permit the in-container HEALTHCHECK probe. The probe runs as a
 # loopback urllib request inside the container and sets
@@ -287,8 +287,7 @@ if DEBUG:
     _DT_MW = "debug_toolbar.middleware.DebugToolbarMiddleware"
     if _DT_MW not in MIDDLEWARE:
         MIDDLEWARE.insert(
-            MIDDLEWARE.index("django.middleware.clickjacking.XFrameOptionsMiddleware")
-            + 1,
+            MIDDLEWARE.index("django.middleware.clickjacking.XFrameOptionsMiddleware") + 1,
             _DT_MW,
         )
 
@@ -363,12 +362,8 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_RESULT_SERIALIZER = "json"
-CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(
-    os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True")
-)
-CELERY_TASK_SEND_SENT_EVENT = eval_bool(
-    os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True")
-)
+CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True"))
+CELERY_TASK_SEND_SENT_EVENT = eval_bool(os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True"))
 
 
 # Prometheus metrics
@@ -383,9 +378,7 @@ PROMETHEUS_METRICS_EXPORT_PORT_RANGE = range(81, 90)
 #   - VNET-private Prometheus targeting only the management subnet.
 # Override with PROMETHEUS_METRICS_EXPORT_ADDRESS=0.0.0.0 only if a
 # scraper is reachable inside the container's network namespace.
-PROMETHEUS_METRICS_EXPORT_ADDRESS = os.getenv(
-    "PROMETHEUS_METRICS_EXPORT_ADDRESS", "127.0.0.1"
-)
+PROMETHEUS_METRICS_EXPORT_ADDRESS = os.getenv("PROMETHEUS_METRICS_EXPORT_ADDRESS", "127.0.0.1")
 
 
 # Password validation
@@ -532,27 +525,25 @@ IDEMPOTENCY_KEY = {
             status.HTTP_207_MULTI_STATUS,
         ],
     },
-    # The following settings deal with the process/thread lock that can be placed around the cache storage object
-    # to ensure that multiple threads do not try to call the same view/viewset method at the same time.
+    # Process/thread lock placed around the cache storage object so two
+    # threads don't call the same view/viewset method concurrently.
     "LOCK": {
-        # Specify the key object locking class to be used for locking access to the cache storage object.
-        # If not specified then defaults to 'idempotency_key.locks.basic.ThreadLock'
+        # Key object locking class for cache-storage access. Defaults to
+        # 'idempotency_key.locks.basic.ThreadLock' when unspecified.
         "CLASS": "idempotency_key.locks.redis.MultiProcessRedisLock",
-        # Location of the Redis server if MultiProcessRedisLock is used otherwise this is ignored.
-        # The host name can be specified or both the host name and the port separated by a colon ':'
+        # Redis server location (only used by MultiProcessRedisLock);
+        # "host" or "host:port".
         "LOCATION": os.getenv("IDEMPOTENCY_KEY_LOCK_LOCATION", "redis://redis:6379"),
-        # The unique name to be used across processes for the lock. Only used by the MultiProcessRedisLock class
+        # Unique cross-process lock name (MultiProcessRedisLock only).
         "NAME": os.getenv("IDEMPOTENCY_KEY_LOCK_NAME", "APISLock"),
-        # The maximum time to live for the lock. If a lock is given and is never released this timeout forces the release
-        # The lock time is in seconds and the default is None which means lock until it is manually released
+        # Lock TTL in seconds; None = hold until manually released (a
+        # never-released lock is force-released after this timeout).
         "TTL": None,
-        # The use of a lock around the storage object so that only one thread at a time can access it.
-        # By default this is set to true. WARNING: setting this to false may allow duplicate calls to occur if the timing
-        # is right.
+        # Serialize storage-object access (one thread at a time). WARNING:
+        # False may allow duplicate calls under adverse timing.
         "ENABLE": True,
-        # If the ENABLE_LOCK setting is True above then this represents the timeout (in seconds as a floating point number)
-        # to occur before the thread gives up waiting. If a timeout occurs the middleware will return a HTTP_423_LOCKED
-        # response.
+        # Seconds (float) a thread waits for the lock before giving up; on
+        # timeout the middleware returns HTTP_423_LOCKED.
         "TIMEOUT": 0.1,
     },
 }
@@ -579,7 +570,8 @@ MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
 MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
 
 if DEBUG:
-    # Adds docker NAT routers and any internal upstream proxies as internal IPs to enable the debug toolbar
+    # Add docker NAT routers + internal upstream proxies as INTERNAL_IPS
+    # so the debug toolbar renders.
     import socket  # only if you haven't already imported this
 
     INTERNAL_IPS = ["127.0.0.1"]
@@ -631,9 +623,7 @@ WHITENOISE_MANIFEST_STRICT = False
 # (plain HTTP) does not redirect-loop or refuse to send cookies.
 
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = (
-    "Lax"  # Strict would break PayPal/Square post-payment redirects.
-)
+SESSION_COOKIE_SAMESITE = "Lax"  # Strict would break PayPal/Square post-payment redirects.
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = "Lax"
 
@@ -649,9 +639,7 @@ if not DEBUG:
     # operator explicitly opts in; submitting to hstspreload.org is a
     # one-way commitment so we don't enable it implicitly.
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", str(60 * 60 * 24 * 365)))
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = eval_bool(
-        os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "True")
-    )
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = eval_bool(os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "True"))
     SECURE_HSTS_PRELOAD = eval_bool(os.getenv("SECURE_HSTS_PRELOAD", "False"))
 
 # --- Content Security Policy (report-only) ------------------------------
@@ -747,9 +735,7 @@ PAYPAL_CURRENCY = os.getenv("PAYPAL_CURRENCY", "USD")
 PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "production")  # Or "sandbox"
 
 # Sandbox values - DO NOT check in production credentials
-EMAIL_BACKEND = os.getenv(
-    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
-)
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
@@ -819,8 +805,7 @@ _IS_PROD = APIS_ENV == "production"
 _E2E_ENV = eval_bool(os.getenv("E2E_MODE", "False"))
 if _IS_PROD and _E2E_ENV:
     raise RuntimeError(
-        "E2E_MODE must never be truthy when APIS_ENV=production "
-        "(webhook signature/age bypass)."
+        "E2E_MODE must never be truthy when APIS_ENV=production (webhook signature/age bypass)."
     )
 E2E_MODE = bool(DEBUG) and _E2E_ENV
 

@@ -1,7 +1,7 @@
 from decimal import Decimal
-from typing import Literal, TypeAlias, TypedDict
+from typing import Literal, TypedDict
 
-BillingData: TypeAlias = dict[
+type BillingData = dict[
     Literal[
         "source_id",
         "cc_firstname",

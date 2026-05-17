@@ -19,30 +19,20 @@ NOW = "2026-05-17T12:00:00Z"
 class TestWebhookAgeWindow(TestCase):
     @freeze_time(NOW)
     def test_in_window(self):
-        self.assertTrue(
-            webhook_within_age_window("2026-05-17T11:30:00Z", source="t")
-        )
+        self.assertTrue(webhook_within_age_window("2026-05-17T11:30:00Z", source="t"))
 
     @freeze_time(NOW)
     def test_too_old(self):
-        self.assertFalse(
-            webhook_within_age_window("2026-05-17T10:00:00Z", source="t")
-        )
+        self.assertFalse(webhook_within_age_window("2026-05-17T10:00:00Z", source="t"))
 
     @freeze_time(NOW)
     def test_too_far_future(self):
-        self.assertFalse(
-            webhook_within_age_window("2026-05-17T12:30:00Z", source="t")
-        )
+        self.assertFalse(webhook_within_age_window("2026-05-17T12:30:00Z", source="t"))
 
     @freeze_time(NOW)
     def test_just_inside_bounds(self):
-        self.assertTrue(
-            webhook_within_age_window("2026-05-17T11:00:01Z", source="t")
-        )
-        self.assertTrue(
-            webhook_within_age_window("2026-05-17T12:04:59Z", source="t")
-        )
+        self.assertTrue(webhook_within_age_window("2026-05-17T11:00:01Z", source="t"))
+        self.assertTrue(webhook_within_age_window("2026-05-17T12:04:59Z", source="t"))
 
     @freeze_time(NOW)
     def test_none_empty_garbage_reject(self):
@@ -51,18 +41,12 @@ class TestWebhookAgeWindow(TestCase):
 
     @freeze_time(NOW)
     def test_trailing_z_and_offset_forms(self):
-        self.assertTrue(
-            webhook_within_age_window("2026-05-17T11:30:00Z", source="t")
-        )
-        self.assertTrue(
-            webhook_within_age_window("2026-05-17T11:30:00+00:00", source="t")
-        )
+        self.assertTrue(webhook_within_age_window("2026-05-17T11:30:00Z", source="t"))
+        self.assertTrue(webhook_within_age_window("2026-05-17T11:30:00+00:00", source="t"))
 
     @freeze_time(NOW)
     def test_naive_timestamp_assumed_utc(self):
-        self.assertTrue(
-            webhook_within_age_window("2026-05-17T11:30:00", source="t")
-        )
+        self.assertTrue(webhook_within_age_window("2026-05-17T11:30:00", source="t"))
 
 
 class TestWebhookSignatureBypassed(TestCase):

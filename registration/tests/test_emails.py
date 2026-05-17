@@ -54,14 +54,10 @@ class EmailTestCase(TestCase):
             birthdate="1990-01-01",
         )
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="DisStaff"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="DisStaff")
         self.badge.save()
         self.token = StaffInvite(email=self.attendee.email, validUntil="2048-12-12")
-        self.order = Order(
-            total=60, reference="HUGBUG", billingEmail=self.attendee.email
-        )
+        self.order = Order(total=60, reference="HUGBUG", billingEmail=self.attendee.email)
         self.order.save()
 
 

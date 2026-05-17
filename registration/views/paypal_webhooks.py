@@ -58,9 +58,7 @@ def _get_paypal_access_token() -> str | None:
         logger.warning("PayPal client credentials not configured")
         return None
 
-    basic = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode(
-        "ascii"
-    )
+    basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
     url = f"{_paypal_api_base()}/v1/oauth2/token"
     data = b"grant_type=client_credentials"
     req = urllib.request.Request(url, data=data, method="POST")
@@ -150,9 +148,7 @@ def verify_signature(request) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=PAYPAL_HTTP_TIMEOUT) as resp:
             if resp.status != 200:
-                logger.warning(
-                    "PayPal verify-webhook-signature returned HTTP %s", resp.status
-                )
+                logger.warning("PayPal verify-webhook-signature returned HTTP %s", resp.status)
                 return False
             payload = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
@@ -169,11 +165,9 @@ def verify_signature(request) -> bool:
     # @patch-mocked verify_signature (unit tests) or the E2E bypass
     # (returned True above) therefore bypasses freshness together with the
     # signature, which is correct: an unverified timestamp is meaningless.
-    if not webhook_within_age_window(
+    return webhook_within_age_window(
         request.headers.get("paypal-transmission-time"), source="paypal"
-    ):
-        return False
-    return True
+    )
 
 
 @require_POST

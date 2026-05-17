@@ -17,6 +17,13 @@ Commands:
 	make dev-setup                  : Sets up a venv for local development
 	make pre-commit-setup           : Installs (or updates) pre-commit hooks
 
+	make lint                       : ruff check + ruff format --check (the CI gate)
+	make lint-fix                   : ruff check --fix + ruff format (apply autofixes)
+	make typecheck                  : Run mypy (django-stubs) over registration + fm_eventmanager
+	make lint-pylint                : Run pylint (semantics + duplicate-code/R0801)
+	make lint-vulture               : Run vulture (dead-code detection)
+	make lint-all                   : Run every linter (ruff, mypy, pylint, vulture)
+
 	make makemigrations             : Create new Django migrations (host-uv, dev DB)
 	make migrate                    : Apply Django migrations (host-uv, dev DB)
 	make createsuperuser            : Create a Django superuser (host-uv, dev DB, interactive)
@@ -380,7 +387,31 @@ e2e-ui:
 	cd $(E2E_DIR) && npx playwright test --ui || true
 	bash $(E2E_DIR)/scripts/down.sh
 
+# mypy/pylint load Django via the django-stubs / pylint-django plugins, which
+# import settings_test; that needs a (throwaway) secret key and a STATIC_ROOT.
+LINT_ENV = DJANGO_SETTINGS_MODULE=fm_eventmanager.settings_test DJANGO_SECRET_KEY=lint STATIC_ROOT=$(CURDIR)/build/lint-static
+
+lint:
+	uv run ruff check .
+	uv run ruff format --check .
+
+lint-fix:
+	uv run ruff check --fix .
+	uv run ruff format .
+
+typecheck:
+	$(LINT_ENV) uv run mypy registration fm_eventmanager
+
+lint-pylint:
+	$(LINT_ENV) uv run pylint registration --fail-under=9.0
+
+lint-vulture:
+	uv run vulture
+
+lint-all: lint typecheck lint-pylint lint-vulture
+
 .PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django \
         makemigrations migrate createsuperuser \
         bootstrap-admin bootstrap-admin-from-env \
-        dev-makemigrations dev-migrate dev-createsuperuser
+        dev-makemigrations dev-migrate dev-createsuperuser \
+        lint lint-fix typecheck lint-pylint lint-vulture lint-all

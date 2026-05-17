@@ -1,10 +1,8 @@
 import json
 from decimal import Decimal
-from typing import Optional, Type
 from unittest.mock import Mock, patch
 
 from django.test import override_settings, tag
-from paypalserversdk.api_helper import APIHelper
 from paypalserversdk.exceptions.api_exception import ApiException
 from paypalserversdk.http.api_response import ApiResponse
 from paypalserversdk.http.http_response import HttpResponse
@@ -14,7 +12,7 @@ from paypalserversdk.models.order import Order as PayPalOrder
 from paypalserversdk.models.refund import Refund
 from paypalserversdk.models.refund_status import RefundStatus
 
-from registration.models import Attendee, Event, Order, PriceLevel
+from registration.models import Event, Order
 from registration.paypal_payments import (
     capture_paypal_payment,
     create_unpaid_paypal_order,
@@ -37,25 +35,21 @@ from registration.tests.common import (
 )
 
 
-def generate_refund_mock(
-    id: str, status: RefundStatus, amount: float, reason: str
-) -> str:
-    return """{
-        "id": "%(id)s",
-        "amount": {
-            "value": "%(amount).2f",
+def generate_refund_mock(id: str, status: RefundStatus, amount: float, reason: str) -> str:
+    return """{{
+        "id": "{id}",
+        "amount": {{
+            "value": "{amount:.2f}",
             "currency_code": "USD"
-        },
-        "status": "%(status)s",
-        "note_to_payer": "%(reason)s",
+        }},
+        "status": "{status}",
+        "note_to_payer": "{reason}",
         "create_time": "2018-09-11T23:24:19Z",
         "update_time": "2018-09-11T23:24:19Z"
-    }""" % locals()
+    }}""".format(**locals())
 
 
-def create_api_response(
-    body: str | dict, body_type: Type, code: Optional[int] = 200
-) -> ApiResponse:
+def create_api_response(body: str | dict, body_type: type, code: int | None = 200) -> ApiResponse:
     """Creates an ApiResponse object to be used in a mock.
 
     :param body: The response body. Should be valid JSON.
@@ -154,9 +148,7 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         }
         return create_api_response(body, PayPalOrder, 201)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_1_single_item_no_discount(self, mock_create):
         mock_create.return_value = self._mock_created_response()
 
@@ -175,9 +167,7 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         self.assertEqual("45.00", pu.amount.value)
         self.assertEqual(1, len(pu.items))
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_2_multi_item_cart(self, mock_create):
         mock_create.return_value = self._mock_created_response()
         items = [
@@ -192,9 +182,7 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         pu = call_args["body"].purchase_units[0]
         self.assertEqual(3, len(pu.items))
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_3_discount_passed_through(self, mock_create):
         mock_create.return_value = self._mock_created_response()
 
@@ -207,9 +195,7 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         self.assertEqual("5", breakdown.discount.value)
         self.assertEqual("40", breakdown.item_total.value)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_4_donation_items_split_into_own_purchase_unit(self, mock_create):
         """Donations go into a separate purchase_unit with ItemCategory.DONATION
         so PayPal receipts and merchant reporting attribute them correctly."""
@@ -238,9 +224,7 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         for item in don_pu.items:
             self.assertEqual("DONATION", item.category)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_5_empty_cart(self, mock_create):
         mock_create.return_value = self._mock_created_response()
 
@@ -250,27 +234,17 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         pu = call_args["body"].purchase_units[0]
         self.assertEqual(0, len(pu.items))
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_6_api_exception_propagates(self, mock_create):
-        mock_create.side_effect = _make_api_exception(
-            500, {"name": "INTERNAL", "message": "boom"}
-        )
+        mock_create.side_effect = _make_api_exception(500, {"name": "INTERNAL", "message": "boom"})
         with self.assertRaises(ApiException):
-            create_unpaid_paypal_order(
-                total="45", discount="0", cart_items=[self._single_item()]
-            )
+            create_unpaid_paypal_order(total="45", discount="0", cart_items=[self._single_item()])
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_7_item_category_digital_goods(self, mock_create):
         mock_create.return_value = self._mock_created_response()
 
-        create_unpaid_paypal_order(
-            total="45", discount="0", cart_items=[self._single_item()]
-        )
+        create_unpaid_paypal_order(total="45", discount="0", cart_items=[self._single_item()])
 
         call_args = mock_create.call_args[0][0]
         item = call_args["body"].purchase_units[0].items[0]
@@ -308,9 +282,7 @@ class TestCreateUnpaidPaypalOrderDonationSplit(OrdersTestCase):
         }
         return create_api_response(body, PayPalOrder, 201)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_donations_only_cart_emits_single_donation_unit(self, mock_create):
         mock_create.return_value = self._mock_created_response()
 
@@ -334,9 +306,7 @@ class TestCreateUnpaidPaypalOrderDonationSplit(OrdersTestCase):
         for item in pu.items:
             self.assertEqual("DONATION", item.category)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_registrations_only_cart_emits_single_registration_unit(self, mock_create):
         mock_create.return_value = self._mock_created_response()
 
@@ -357,12 +327,8 @@ class TestCreateUnpaidPaypalOrderDonationSplit(OrdersTestCase):
         for item in pu.items:
             self.assertEqual("DIGITAL_GOODS", item.category)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
-    def test_mixed_cart_with_discount_applies_only_to_registration_unit(
-        self, mock_create
-    ):
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
+    def test_mixed_cart_with_discount_applies_only_to_registration_unit(self, mock_create):
         mock_create.return_value = self._mock_created_response()
         items = [
             self._reg("Attendee", "50.00"),
@@ -448,15 +414,11 @@ class TestCapturePaypalPayment(OrdersTestCase):
             body["payment_source"] = {"card": {"last_digits": "4242"}}
         return body
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A2_1_happy_path_completed_card(self, mock_capture):
-        mock_capture.return_value = create_api_response(
-            self._success_body(card=True), PayPalOrder
-        )
+        mock_capture.return_value = create_api_response(self._success_body(card=True), PayPalOrder)
 
-        ok, body = capture_paypal_payment("ABCDEF1234", self.apis_order)
+        ok, _body = capture_paypal_payment("ABCDEF1234", self.apis_order)
 
         self.assertTrue(ok)
         self.apis_order.refresh_from_db()
@@ -465,9 +427,7 @@ class TestCapturePaypalPayment(OrdersTestCase):
         # apiData is the raw text
         self.assertEqual("ABCDEF1234", self.apis_order.apiData.get("id"))
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A2_2_paypal_balance_no_last_four(self, mock_capture):
         body = self._success_body(card=False)
         body["payment_source"] = {"paypal": {"email_address": "x@example.com"}}
@@ -479,9 +439,7 @@ class TestCapturePaypalPayment(OrdersTestCase):
         self.apis_order.refresh_from_db()
         self.assertEqual("", self.apis_order.lastFour)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A2_3_api_exception_uses_ex_response(self, mock_capture):
         """capture_order raises ApiException; production sets
         api_response = ex.response. We point ex.response at an
@@ -523,9 +481,7 @@ class TestCapturePaypalPayment(OrdersTestCase):
         self.assertFalse(ok)
         self.assertIn("errors", body)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A2_4_is_error_marks_failed(self, mock_capture):
         err_body = {
             "id": "ABCDEF1234",
@@ -559,22 +515,16 @@ class TestCapturePaypalPayment(OrdersTestCase):
         self.apis_order.refresh_from_db()
         self.assertEqual(Order.FAILED, self.apis_order.status)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A2_5_notes_set_on_success(self, mock_capture):
-        mock_capture.return_value = create_api_response(
-            self._success_body(), PayPalOrder
-        )
+        mock_capture.return_value = create_api_response(self._success_body(), PayPalOrder)
 
         capture_paypal_payment("ABCDEF1234", self.apis_order)
 
         self.apis_order.refresh_from_db()
         self.assertEqual("PayPal: #ABCD", self.apis_order.notes)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A2_6_missing_payment_source_key(self, mock_capture):
         body = self._success_body(card=False)
         # Ensure payment_source not present at all
@@ -671,7 +621,7 @@ class TestPaymentRefresh(OrdersTestCase):
                                     "id": "test_order_refund",
                                     "amount": {
                                         "currency_code": "USD",
-                                        "value": "%.2f" % self.price_45.basePrice,
+                                        "value": f"{self.price_45.basePrice:.2f}",
                                     },
                                 }
                             ],
@@ -705,7 +655,7 @@ class TestPaymentRefresh(OrdersTestCase):
                                     "id": "test_order_refund",
                                     "amount": {
                                         "currency_code": "USD",
-                                        "value": "%.2f" % self.price_45.basePrice,
+                                        "value": f"{self.price_45.basePrice:.2f}",
                                     },
                                 }
                             ],
@@ -755,7 +705,7 @@ class TestPaymentRefresh(OrdersTestCase):
     @patch("paypalserversdk.controllers.orders_controller.OrdersController.get_order")
     def test_A3_2_declined_capture(self, mock_get):
         mock_get.return_value = self.declined_payment_response
-        ok, _ = refresh_payment(self.test_order)
+        _ok, _ = refresh_payment(self.test_order)
         self.test_order.refresh_from_db()
         self.assertEqual(Order.FAILED, self.test_order.status)
 
@@ -783,9 +733,7 @@ class TestPaymentRefresh(OrdersTestCase):
     # --- A3.5 REFUNDED capture ---
     @patch("paypalserversdk.controllers.orders_controller.OrdersController.get_order")
     def test_A3_5_refunded_capture(self, mock_get):
-        mock_get.return_value = _make_paypal_order_response(
-            capture_status=CaptureStatus.REFUNDED
-        )
+        mock_get.return_value = _make_paypal_order_response(capture_status=CaptureStatus.REFUNDED)
         refresh_payment(self.test_order)
         self.test_order.refresh_from_db()
         self.assertEqual(Order.REFUNDED, self.test_order.status)
@@ -793,9 +741,7 @@ class TestPaymentRefresh(OrdersTestCase):
     # --- A3.6 FAILED capture ---
     @patch("paypalserversdk.controllers.orders_controller.OrdersController.get_order")
     def test_A3_6_failed_capture(self, mock_get):
-        mock_get.return_value = _make_paypal_order_response(
-            capture_status=CaptureStatus.FAILED
-        )
+        mock_get.return_value = _make_paypal_order_response(capture_status=CaptureStatus.FAILED)
         refresh_payment(self.test_order)
         self.test_order.refresh_from_db()
         self.assertEqual(Order.FAILED, self.test_order.status)
@@ -840,7 +786,7 @@ class TestPaymentRefresh(OrdersTestCase):
         self.test_order.notes = ""
         self.test_order.save()
 
-        ok, message = refresh_payment(self.test_order)
+        _ok, message = refresh_payment(self.test_order)
 
         self.test_order.refresh_from_db()
         self.assertEqual(0, self.test_order.orgDonation)
@@ -886,9 +832,7 @@ class TestPaymentRefresh(OrdersTestCase):
     # --- A3.12 ApiException from get_order ---
     @patch("paypalserversdk.controllers.orders_controller.OrdersController.get_order")
     def test_A3_12_api_exception_from_get_order(self, mock_get):
-        mock_get.side_effect = _make_api_exception(
-            500, {"name": "INTERNAL", "message": "blew up"}
-        )
+        mock_get.side_effect = _make_api_exception(500, {"name": "INTERNAL", "message": "blew up"})
         ok, message = refresh_payment(self.test_order)
         self.assertFalse(ok)
         self.assertEqual("blew up", message)
@@ -957,7 +901,7 @@ class TestPaymentRefresh(OrdersTestCase):
         try:
             refresh_payment(self.test_order)
         except Exception as exc:
-            self.fail("refresh_payment raised unexpectedly: %r" % exc)
+            self.fail(f"refresh_payment raised unexpectedly: {exc!r}")
         self.test_order.refresh_from_db()
         self.assertEqual(Order.COMPLETED, self.test_order.status)
 
@@ -976,7 +920,7 @@ class TestPaymentRefresh(OrdersTestCase):
         try:
             refresh_payment(self.test_order)
         except Exception as exc:
-            self.fail("refresh_payment raised unexpectedly: %r" % exc)
+            self.fail(f"refresh_payment raised unexpectedly: {exc!r}")
         self.test_order.refresh_from_db()
         self.assertEqual(Order.COMPLETED, self.test_order.status)
 
@@ -1001,7 +945,7 @@ class TestPaymentRefresh(OrdersTestCase):
         try:
             refresh_payment(self.test_order)
         except Exception as exc:
-            self.fail("refresh_payment raised unexpectedly: %r" % exc)
+            self.fail(f"refresh_payment raised unexpectedly: {exc!r}")
         self.test_order.refresh_from_db()
         self.assertEqual(Order.COMPLETED, self.test_order.status)
 
@@ -1034,7 +978,7 @@ class TestPaymentRefresh(OrdersTestCase):
             try:
                 ok, msg = refresh_payment(self.test_order)
             except Exception as exc:
-                self.fail("refresh_payment raised: %r" % exc)
+                self.fail(f"refresh_payment raised: {exc!r}")
             self.assertFalse(ok)
             self.assertIsInstance(msg, str)
 
@@ -1081,14 +1025,10 @@ class TestUpdateOrderPaymentData(OrdersTestCase):
     def test_A4_2_returned_total(self):
         order = self._order()
         # COMPLETED returns payment amount
-        total = update_order_payment_data(
-            order, 0, self._payment(CaptureStatus.COMPLETED, "50.00")
-        )
+        total = update_order_payment_data(order, 0, self._payment(CaptureStatus.COMPLETED, "50.00"))
         self.assertEqual(50.0, total)
         # PENDING also sets total
-        total = update_order_payment_data(
-            order, 0, self._payment(CaptureStatus.PENDING, "25.00")
-        )
+        total = update_order_payment_data(order, 0, self._payment(CaptureStatus.PENDING, "25.00"))
         self.assertEqual(25.0, total)
         # Other statuses leave passed-in total
         total = update_order_payment_data(
@@ -1207,7 +1147,7 @@ class TestRefundPaymentDispatcher(OrdersTestCase):
     def test_A6_3_cash_delegates(self, mock_cash):
         mock_cash.return_value = (True, None)
         order = self._order(billing_type=Order.CASH)
-        ok, message = refund_payment(order, 10, "r")
+        ok, _message = refund_payment(order, 10, "r")
         self.assertTrue(ok)
         mock_cash.assert_called_once()
 
@@ -1277,7 +1217,7 @@ class TestPayPalRefunds(OrdersTestCase):
                                 "id": "id4",
                                 "amount": {
                                     "currency_code": "USD",
-                                    "value": "%.2f" % self.price_45.basePrice,
+                                    "value": f"{self.price_45.basePrice:.2f}",
                                 },
                             }
                         ]
@@ -1304,7 +1244,7 @@ class TestPayPalRefunds(OrdersTestCase):
                                 "id": "successful_capture",
                                 "amount": {
                                     "currency_code": "USD",
-                                    "value": "%.2f" % self.price_45.basePrice,
+                                    "value": f"{self.price_45.basePrice:.2f}",
                                 },
                             }
                         ],
@@ -1314,7 +1254,7 @@ class TestPayPalRefunds(OrdersTestCase):
                                 "id": "successful_full_refund",
                                 "amount": {
                                     "currency_code": "USD",
-                                    "value": "%.2f" % self.price_45.basePrice,
+                                    "value": f"{self.price_45.basePrice:.2f}",
                                 },
                             }
                         ],
@@ -1332,7 +1272,7 @@ class TestPayPalRefunds(OrdersTestCase):
                     "reference_id": "registration",
                     "amount": {
                         "currency_code": "USD",
-                        "value": "%.2f" % self.price_45.basePrice,
+                        "value": f"{self.price_45.basePrice:.2f}",
                     },
                     "payments": {
                         "captures": [
@@ -1341,7 +1281,7 @@ class TestPayPalRefunds(OrdersTestCase):
                                 "id": "successful_capture",
                                 "amount": {
                                     "currency_code": "USD",
-                                    "value": "%.2f" % self.price_45.basePrice,
+                                    "value": f"{self.price_45.basePrice:.2f}",
                                 },
                             }
                         ],
@@ -1366,7 +1306,7 @@ class TestPayPalRefunds(OrdersTestCase):
                     "reference_id": "registration",
                     "amount": {
                         "currency_code": "USD",
-                        "value": "%.2f" % self.price_45.basePrice,
+                        "value": f"{self.price_45.basePrice:.2f}",
                     },
                     "payments": {
                         "captures": [
@@ -1375,7 +1315,7 @@ class TestPayPalRefunds(OrdersTestCase):
                                 "id": "successful_capture",
                                 "amount": {
                                     "currency_code": "USD",
-                                    "value": "%.2f" % self.price_45.basePrice,
+                                    "value": f"{self.price_45.basePrice:.2f}",
                                 },
                             }
                         ],
@@ -1422,18 +1362,12 @@ class TestPayPalRefunds(OrdersTestCase):
         self.order_no_refund.refresh_from_db()
 
         self.assertEqual(0, self.order_no_refund.total)
-        self.assertTrue(
-            "refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"]
-        )
-        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"][
-            "refunds"
-        ]
+        self.assertTrue("refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"])
+        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"]["refunds"]
         self.assertEqual(1, len(refund_list))
         refund_data = refund_list[0]
         self.assertEqual("SUCCESS_FULL", refund_data["id"])
-        self.assertEqual(
-            "%.2f" % self.price_45.basePrice, refund_data["amount"]["value"]
-        )
+        self.assertEqual(f"{self.price_45.basePrice:.2f}", refund_data["amount"]["value"])
         self.assertEqual(RefundStatus.COMPLETED, refund_data["status"])
         self.assertEqual("full refund", refund_data["note_to_payer"])
 
@@ -1456,18 +1390,12 @@ class TestPayPalRefunds(OrdersTestCase):
         self.order_no_refund.refresh_from_db()
 
         self.assertEqual(self.price_45.basePrice / 2, self.order_no_refund.total)
-        self.assertTrue(
-            "refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"]
-        )
-        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"][
-            "refunds"
-        ]
+        self.assertTrue("refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"])
+        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"]["refunds"]
         self.assertEqual(1, len(refund_list))
         refund_data = refund_list[0]
         self.assertEqual("SUCCESS_PARTIAL_HALF", refund_data["id"])
-        self.assertEqual(
-            "%.2f" % (self.price_45.basePrice / 2), refund_data["amount"]["value"]
-        )
+        self.assertEqual("%.2f" % (self.price_45.basePrice / 2), refund_data["amount"]["value"])
         self.assertEqual(RefundStatus.COMPLETED, refund_data["status"])
         self.assertEqual("half off", refund_data["note_to_payer"])
 
@@ -1501,23 +1429,17 @@ class TestPayPalRefunds(OrdersTestCase):
             self.price_45.basePrice - (self.price_45.basePrice / 2) - 10,
             self.order_no_refund.total,
         )
-        self.assertTrue(
-            "refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"]
-        )
-        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"][
-            "refunds"
-        ]
+        self.assertTrue("refunds" in self.order_no_refund.apiData["purchase_units"][0]["payments"])
+        refund_list = self.order_no_refund.apiData["purchase_units"][0]["payments"]["refunds"]
         self.assertEqual(2, len(refund_list))
 
         self.assertEqual("SUCCESS_PARTIAL_10", refund_list[0]["id"])
-        self.assertEqual("%.2f" % 10, refund_list[0]["amount"]["value"])
+        self.assertEqual(f"{10:.2f}", refund_list[0]["amount"]["value"])
         self.assertEqual(RefundStatus.COMPLETED, refund_list[0]["status"])
         self.assertEqual("ten dollars off", refund_list[0]["note_to_payer"])
 
         self.assertEqual("SUCCESS_PARTIAL_HALF", refund_list[1]["id"])
-        self.assertEqual(
-            "%.2f" % (self.price_45.basePrice / 2), refund_list[1]["amount"]["value"]
-        )
+        self.assertEqual("%.2f" % (self.price_45.basePrice / 2), refund_list[1]["amount"]["value"])
         self.assertEqual(RefundStatus.COMPLETED, refund_list[1]["status"])
         self.assertEqual("half off", refund_list[1]["note_to_payer"])
 
@@ -1526,9 +1448,7 @@ class TestPayPalRefunds(OrdersTestCase):
         "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
     )
     def test_A7_4_amount_exceeds_available(self, mock_refund):
-        ok, message = refund_card_payment(
-            self.order_no_refund, self.price_45.basePrice * 2, "r"
-        )
+        ok, message = refund_card_payment(self.order_no_refund, self.price_45.basePrice * 2, "r")
         self.assertFalse(ok)
         self.assertIn("cannot exceed available", message)
         mock_refund.assert_not_called()
@@ -1564,7 +1484,7 @@ class TestPayPalRefunds(OrdersTestCase):
     def test_A7_8_refund_status_pending(self, mock_refund):
         pending_body = generate_refund_mock("PEND", RefundStatus.PENDING, 10, "pending")
         mock_refund.return_value = create_api_response(pending_body, Refund, 201)
-        ok, message = refund_card_payment(self.order_no_refund, 10, "r")
+        ok, _message = refund_card_payment(self.order_no_refund, 10, "r")
         self.assertTrue(ok)
         self.order_no_refund.refresh_from_db()
         self.assertEqual(Order.REFUND_PENDING, self.order_no_refund.status)
@@ -1624,7 +1544,7 @@ class TestPayPalRefunds(OrdersTestCase):
         try:
             ok, message = refund_card_payment(self.order_no_refund, 10, "r")
         except Exception as e:
-            self.fail("refund_card_payment raised: %r" % e)
+            self.fail(f"refund_card_payment raised: {e!r}")
         self.assertFalse(ok)
         # message is the errors list from body
         self.assertEqual(err_body, message)
@@ -1654,9 +1574,7 @@ class TestPayPalRefunds(OrdersTestCase):
         "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
     )
     def test_A7_13_full_refund_sends_no_body(self, mock_refund):
-        mock_refund.return_value = create_api_response(
-            self.full_refund_body, Refund, 201
-        )
+        mock_refund.return_value = create_api_response(self.full_refund_body, Refund, 201)
         refund_card_payment(self.order_no_refund, self.price_45.basePrice, "full")
         sent_args = mock_refund.call_args[0][0]
         self.assertNotIn("body", sent_args)
@@ -1689,9 +1607,7 @@ class TestPayPalRefunds(OrdersTestCase):
         "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
     )
     def test_A7_15_respects_paypal_currency(self, mock_refund):
-        mock_refund.return_value = create_api_response(
-            self.part_refund_half_body, Refund, 201
-        )
+        mock_refund.return_value = create_api_response(self.part_refund_half_body, Refund, 201)
         refund_card_payment(self.order_no_refund, self.price_45.basePrice / 2, "r")
         sent_args = mock_refund.call_args[0][0]
         body = sent_args["body"]
@@ -1702,15 +1618,11 @@ class TestPayPalRefunds(OrdersTestCase):
         "paypalserversdk.controllers.payments_controller.PaymentsController.refund_captured_payment"
     )
     def test_A7_16_reason_none(self, mock_refund):
-        mock_refund.return_value = create_api_response(
-            self.part_refund_half_body, Refund, 201
-        )
+        mock_refund.return_value = create_api_response(self.part_refund_half_body, Refund, 201)
         try:
-            ok, _ = refund_card_payment(
-                self.order_no_refund, self.price_45.basePrice / 2, None
-            )
+            ok, _ = refund_card_payment(self.order_no_refund, self.price_45.basePrice / 2, None)
         except Exception as e:
-            self.fail("refund_card_payment raised with reason=None: %r" % e)
+            self.fail(f"refund_card_payment raised with reason=None: {e!r}")
         self.assertTrue(ok)
 
     # ------------------------------------------------------------------ A7.17
@@ -1740,9 +1652,7 @@ class TestPayPalRefunds(OrdersTestCase):
     def test_A7_18_partial_then_partial_against_remaining(self, mock_refund):
         order = Order(
             total=89.99,  # 99.99 less first 10.00 refund
-            apiData=paypal_apidata_one_partial_refund(
-                amount="10.00", capture_amount="99.99"
-            ),
+            apiData=paypal_apidata_one_partial_refund(amount="10.00", capture_amount="99.99"),
         )
         order.save()
         mock_refund.return_value = create_api_response(
@@ -1771,9 +1681,7 @@ class TestPayPalRefunds(OrdersTestCase):
     def test_A7_20_multi_partial_then_partial(self, mock_refund):
         order = Order(
             total=79.99,  # 99.99 minus 20 prior refunds
-            apiData=paypal_apidata_multi_partial(
-                ["5.00", "15.00"], capture_amount="99.99"
-            ),
+            apiData=paypal_apidata_multi_partial(["5.00", "15.00"], capture_amount="99.99"),
         )
         order.save()
         mock_refund.return_value = create_api_response(
@@ -1788,9 +1696,7 @@ class TestPayPalRefunds(OrdersTestCase):
     def test_A7_21_multi_refunds_sum_full_rejected(self):
         order = Order(
             total=0,
-            apiData=paypal_apidata_multi_full(
-                ["49.99", "50.00"], capture_amount="99.99"
-            ),
+            apiData=paypal_apidata_multi_full(["49.99", "50.00"], capture_amount="99.99"),
         )
         order.save()
         ok, message = refund_card_payment(order, 5, "r")
@@ -1823,9 +1729,9 @@ class TestPayPalRefunds(OrdersTestCase):
         ]
         for case in cases:
             try:
-                ok, msg = case()
+                ok, _msg = case()
             except Exception as e:
-                self.fail("refund_card_payment raised: %r" % e)
+                self.fail(f"refund_card_payment raised: {e!r}")
             self.assertFalse(ok)
 
     def _raise_variant(self, mock_refund):
@@ -1890,9 +1796,7 @@ class TestGetAvailableRefundAmount(OrdersTestCase):
     """Matrix section A.8 - exercises get_available_refund_amount()."""
 
     def test_A8_1_single_completed_no_refunds(self):
-        order = PayPalOrder.from_dictionary(
-            paypal_apidata_no_refunds(capture_amount="50.00")
-        )
+        order = PayPalOrder.from_dictionary(paypal_apidata_no_refunds(capture_amount="50.00"))
         self.assertEqual(50.0, get_available_refund_amount(order))
 
     def test_A8_2_capture_with_completed_refund(self):
@@ -1907,9 +1811,7 @@ class TestGetAvailableRefundAmount(OrdersTestCase):
             CaptureStatus.REFUNDED,
         ):
             with self.subTest(status=status):
-                data = paypal_apidata_no_refunds(
-                    capture_status=status, capture_amount="50.00"
-                )
+                data = paypal_apidata_no_refunds(capture_status=status, capture_amount="50.00")
                 order = PayPalOrder.from_dictionary(data)
                 self.assertEqual(50.0, get_available_refund_amount(order))
 
@@ -1920,9 +1822,7 @@ class TestGetAvailableRefundAmount(OrdersTestCase):
             CaptureStatus.PENDING,
         ):
             with self.subTest(status=status):
-                data = paypal_apidata_no_refunds(
-                    capture_status=status, capture_amount="50.00"
-                )
+                data = paypal_apidata_no_refunds(capture_status=status, capture_amount="50.00")
                 order = PayPalOrder.from_dictionary(data)
                 self.assertEqual(0.0, get_available_refund_amount(order))
 
@@ -1968,9 +1868,7 @@ class TestPayPalPaymentsCoverageGaps(OrdersTestCase):
     * capture_paypal_payment non-JSON success body (L216-220)
     """
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.create_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A9_1_apis_reference_sets_invoice_and_custom_ids(self, mock_create):
         """When apis_reference is provided it must be mirrored on the purchase
         unit as both invoice_id and custom_id so PayPal can echo it back on
@@ -1999,9 +1897,7 @@ class TestPayPalPaymentsCoverageGaps(OrdersTestCase):
         self.assertEqual("APIS-REF-123", pu.invoice_id)
         self.assertEqual("APIS-REF-123", pu.custom_id)
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A9_2_capture_api_exception_non_json_body(self, mock_capture):
         """ApiException whose .response.text is not JSON must fall through the
         except(ValueError, JSONDecodeError) branch and return the generic
@@ -2024,9 +1920,7 @@ class TestPayPalPaymentsCoverageGaps(OrdersTestCase):
             body["errors"],
         )
 
-    @patch(
-        "paypalserversdk.controllers.orders_controller.OrdersController.capture_order"
-    )
+    @patch("paypalserversdk.controllers.orders_controller.OrdersController.capture_order")
     def test_A9_3_capture_success_non_json_text_body(self, mock_capture):
         """A successful ApiResponse (is_error() False) whose .text is not
         valid JSON must hit the JSONDecodeError branch and return an error

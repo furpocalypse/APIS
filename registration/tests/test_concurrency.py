@@ -95,7 +95,7 @@ class ConcurrentCheckoutStressTest(TransactionTestCase):
             try:
                 # All threads wait here until every thread is ready
                 barrier.wait(timeout=10)
-                status, message, order = doZeroCheckout(None, [cart], [])
+                status, message, _order = doZeroCheckout(None, [cart], [])
                 with results_lock:
                     results.append((status, message))
             except Exception as e:
@@ -132,12 +132,11 @@ class ConcurrentCheckoutStressTest(TransactionTestCase):
         self.assertEqual(
             len(successes),
             MAX_CAPACITY,
-            f"Expected {MAX_CAPACITY} successes, got {len(successes)}. "
-            f"Failures: {failures[:5]}...",
+            f"Expected {MAX_CAPACITY} successes, got {len(successes)}. Failures: {failures[:5]}...",
         )
 
         # All failures should be "sold out"
-        for status, message in failures:
+        for _status, message in failures:
             self.assertIn(
                 "sold out",
                 message.lower(),

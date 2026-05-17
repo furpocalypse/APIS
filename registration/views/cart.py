@@ -5,7 +5,19 @@ from datetime import datetime
 from django.shortcuts import render
 
 from registration.forms import AttendeeForm, BadgeForm
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Badge,
+    Cart,
+    Decimal,
+    Discount,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    PriceLevelOption,
+    timezone,
+)
 from registration.services import CreateAttendeeOptions
 
 from . import common, ordering
@@ -66,9 +78,7 @@ def get_cart(request):
             evt = event.eventStart
             tz = timezone.get_current_timezone()
             try:
-                birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(
-                    tzinfo=tz
-                )
+                birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
             except ValueError:
                 logger.warning(
                     f"The required field 'birthdate' is not well-formed (got '{pda['birthdate']}')"
@@ -165,9 +175,7 @@ def saveCart(cart):
     if post_data["attendee"].get("onsite", False):
         via = "ONSITE"
 
-    order_item = OrderItem.objects.create(
-        badge=badge, priceLevel=price_level, enteredBy=via
-    )
+    order_item = OrderItem.objects.create(badge=badge, priceLevel=price_level, enteredBy=via)
 
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
@@ -211,8 +219,9 @@ def add_to_cart(request):
         registrationEmail = common.get_registration_email()
         return common.abort(
             403,
-            f"We are sorry, but you are unable to register for {event}. If you have any questions, or would like "
-            f"further information or assistance, please contact Registration at {registrationEmail}",
+            f"We are sorry, but you are unable to register for {event}. If you have any "
+            f"questions, or would like further information or assistance, please contact "
+            f"Registration at {registrationEmail}",
         )
 
     cart = Cart.objects.create(
@@ -235,15 +244,15 @@ def remove_from_cart(request):
     order = request.session.get("order_items", [])
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         return common.abort(400, "Unable to decode JSON parameters")
     if "id" not in list(postData.keys()):
         return common.abort(400, "Required parameter `id` not specified")
     id = postData["id"]
 
     # Old workflow
-    common.logger.debug("order_items: {0}".format(order))
-    common.logger.debug("delete order from session: {0}".format(id))
+    common.logger.debug(f"order_items: {order}")
+    common.logger.debug(f"delete order from session: {id}")
     if int(id) in order:
         order.remove(int(id))
         deleted = True
@@ -252,7 +261,7 @@ def remove_from_cart(request):
 
     # New cart workflow
     cartItems = request.session.get("cart_items", [])
-    common.logger.debug("cartItems: {0}".format(cartItems))
+    common.logger.debug(f"cartItems: {cartItems}")
     for item in cartItems:
         if str(item) == str(id):
             cart = Cart.objects.get(id=id)

@@ -2,7 +2,6 @@ import json
 import logging
 from collections import Counter
 from json import JSONDecodeError
-from typing import Optional
 
 from django.core.signing import TimestampSigner
 from django.db import transaction
@@ -12,7 +11,19 @@ from paypalserversdk.exceptions.api_exception import ApiException
 
 from registration import mqtt, tasks
 from registration.forms import OrderForm
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Cart,
+    DealerAsst,
+    Decimal,
+    Discount,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    PriceLevelOption,
+    settings,
+)
 from registration.payments import (
     charge_payment,
     update_capacity_for_status_change,
@@ -140,7 +151,7 @@ def do_checkout(
 
     billName = None
     if billingData.get("cc_firstname") and billingData.get("cc_lastname"):
-        billName = f"{billingData.get("cc_firstname")} {billingData.get("cc_lastname")}"
+        billName = f"{billingData.get('cc_firstname')} {billingData.get('cc_lastname')}"
     form = OrderForm(
         collect_billing_address=processor == "square" and event.collectBillingAddress,
         data={
@@ -233,9 +244,7 @@ def do_checkout(
             try:
                 order.refresh_from_db()
                 if order.status == Order.PENDING:
-                    update_capacity_for_status_change(
-                        order, Order.PENDING, Order.FAILED
-                    )
+                    update_capacity_for_status_change(order, Order.PENDING, Order.FAILED)
                     order.status = Order.FAILED
                     order.save()
             except Exception as cleanup_error:
@@ -252,7 +261,7 @@ def doZeroCheckout(discount, cartItems, orderItems):
         billingEmail = attendee["email"]
     elif orderItems:
         attendee = orderItems[0].badge.attendee
-        billingName = "{0} {1}".format(attendee.firstName, attendee.lastName)
+        billingName = f"{attendee.firstName} {attendee.lastName}"
         billingEmail = attendee.email
 
     reference = common.get_unique_confirmation_token(Order)
@@ -340,7 +349,7 @@ def get_discount_total(disc, subtotal):
     return 0
 
 
-def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Decimal:
+def get_line_item_total(item: Cart | OrderItem, disc: str | None = "") -> Decimal:
     item_total = 0
     discount = 0
     if isinstance(item, Cart):
@@ -356,10 +365,7 @@ def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Dec
         item_sub_total = item.priceLevel.basePrice
         eff_level = item.badge.effectiveLevel()
 
-        if eff_level:
-            item_total = item_sub_total - eff_level.basePrice
-        else:
-            item_total = item_sub_total
+        item_total = item_sub_total - eff_level.basePrice if eff_level else item_sub_total
 
         item_total += get_order_item_option_total(item.attendeeoptions_set.all())
 
@@ -370,7 +376,7 @@ def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Dec
 
 
 def get_total(
-    cartItems: list[Cart], orderItems: list[OrderItem], disc: Optional[str] = ""
+    cartItems: list[Cart], orderItems: list[OrderItem], disc: str | None = ""
 ) -> tuple[Decimal, Decimal]:
     total = 0
     total_discount = 0
@@ -403,21 +409,17 @@ def apply_discount(request):
 
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for apply_discount()")
         return JsonResponse({"success": False})
     dis = postData["discount"]
 
     discount = Discount.objects.filter(codeName=dis)
     if discount.count() == 0:
-        return JsonResponse(
-            {"success": False, "message": "That discount is not valid."}
-        )
+        return JsonResponse({"success": False, "message": "That discount is not valid."})
     discount = discount.first()
     if not discount.isValid():
-        return JsonResponse(
-            {"success": False, "message": "That discount is not valid."}
-        )
+        return JsonResponse({"success": False, "message": "That discount is not valid."})
 
     request.session["discount"] = discount.codeName
     return JsonResponse({"success": True})
@@ -457,9 +459,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     # Safety valve (in case session times out before checkout is complete)
     if len(cart_items) == 0 and len(order_items) == 0:
-        return common.abort(
-            400, "Session expired or no session is stored for this client"
-        )
+        return common.abort(400, "Session expired or no session is stored for this client")
 
     try:
         post_data = json.loads(request.body)
@@ -471,10 +471,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
     event = Event.objects.get(default=True)
 
     discount = Discount.objects.filter(codeName=discount_code)
-    if discount.count() > 0 and discount.first().isValid():
-        discount = discount.first()
-    else:
-        discount = None
+    discount = discount.first() if discount.count() > 0 and discount.first().isValid() else None
 
     # Process cart item data and calculate totals
     translated_cart: list[TranslatedCartItem] = []
@@ -494,7 +491,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         item_total, discount = get_line_item_total(item, discount_code)
         translated_cart.append(
             {
-                "name": "%s %s - %s" % (event, priceLevel, attendee),
+                "name": f"{event} {priceLevel} - {attendee}",
                 "total": item_total,
                 "donation": False,
             }
@@ -505,11 +502,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         badge = item.badge
         translated_cart.append(
             {
-                "name": str(event)
-                + " "
-                + str(item.priceLevel)
-                + " - "
-                + str(badge.attendee),
+                "name": str(event) + " " + str(item.priceLevel) + " - " + str(badge.attendee),
                 "total": item_total,
                 "donation": False,
             }
@@ -526,14 +519,12 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         pcharity = 0
 
     if porg > 0:
-        translated_cart.append(
-            {"name": "Donation to %s" % event, "total": porg, "donation": True}
-        )
+        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
 
     if pcharity > 0:
         translated_cart.append(
             {
-                "name": "Donation to %s" % event.charity,
+                "name": f"Donation to {event.charity}",
                 "total": pcharity,
                 "donation": True,
             }
@@ -574,7 +565,7 @@ def checkout(request):
         logger.error("Unable to decode JSON for checkout()")
         return common.abort(400, "Unable to parse input options")
 
-    event = Event.objects.get(default=True)
+    Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items = list(Cart.objects.filter(id__in=session_items))
     order_items = request.session.get("order_items", [])
@@ -582,15 +573,10 @@ def checkout(request):
 
     # Safety valve (in case session times out before checkout is complete)
     if len(session_items) == 0 and len(order_items) == 0:
-        return common.abort(
-            400, "Session expired or no session is stored for this client"
-        )
+        return common.abort(400, "Session expired or no session is stored for this client")
 
     discount = Discount.objects.filter(codeName=pdisc)
-    if discount.count() > 0 and discount.first().isValid():
-        discount = discount.first()
-    else:
-        discount = None
+    discount = discount.first() if discount.count() > 0 and discount.first().isValid() else None
 
     if order_items:
         order_items = list(OrderItem.objects.filter(id__in=order_items))
@@ -718,9 +704,7 @@ def notify_terminal(request, order):
             order_item = OrderItem.objects.filter(order_id=order.id).first()
             if order_item:
                 mqtt.send_mqtt_message(
-                    mqtt.get_topic(
-                        "web/registration/completed", name=data_obj["terminal"]
-                    ),
+                    mqtt.get_topic("web/registration/completed", name=data_obj["terminal"]),
                     {"badgeId": order_item.badge_id},
                 )
     except Exception as ex:

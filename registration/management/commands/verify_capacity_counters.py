@@ -33,8 +33,7 @@ class Command(BaseCommand):
             expected_remaining = level.maxCapacity - actual_confirmed - actual_pending
 
             ok = (
-                level.remainingSlots == expected_remaining
-                and level.reservedSlots == actual_pending
+                level.remainingSlots == expected_remaining and level.reservedSlots == actual_pending
             )
 
             if ok:
@@ -62,8 +61,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("All counters are correct."))
         else:
             verb = "Repaired" if repair else "Found"
-            self.stdout.write(
-                self.style.WARNING(f"{verb} drift in {drift_count} price level(s).")
-            )
+            self.stdout.write(self.style.WARNING(f"{verb} drift in {drift_count} price level(s)."))
             if not repair:
                 self.stdout.write("Run with --repair to fix.")

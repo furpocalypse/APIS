@@ -19,7 +19,6 @@ from django.views.decorators.cache import cache_page
 # DELETED (not re-exported with a divergent body); callers use the one
 # resolver. clientip is model-free so this import is safe here too.
 from fm_eventmanager.clientip import get_client_ip
-
 from registration.models import (
     Cart,
     Department,
@@ -101,9 +100,7 @@ def get_events(request):
         }
         for ev in events
     ]
-    return HttpResponse(
-        json.dumps(data, cls=DjangoJSONEncoder), content_type="application/json"
-    )
+    return HttpResponse(json.dumps(data, cls=DjangoJSONEncoder), content_type="application/json")
 
 
 def abort(status=400, reason="Bad request"):
@@ -113,7 +110,7 @@ def abort(status=400, reason="Bad request"):
     status: A valid HTTP status code
     reason: Human-readable explanation
     """
-    logger.info("JSON {0}: {1}".format(status, reason))
+    logger.info(f"JSON {status}: {reason}")
     return JsonResponse({"success": False, "reason": reason}, status=status)
 
 
@@ -125,10 +122,10 @@ def success(status=200, reason=None):
     reason: (Optional) human-readable explanation
     """
     if reason is None:
-        logger.debug("JSON {0}".format(status))
+        logger.debug(f"JSON {status}")
         return JsonResponse({"success": True}, status=status)
     else:
-        logger.debug("JSON {0}: {1}".format(status, reason))
+        logger.debug(f"JSON {status}: {reason}")
         return JsonResponse(
             {
                 "success": True,
@@ -174,11 +171,7 @@ def handler(obj):
             return None
     else:
         raise TypeError(
-            "Object of type %s with value of %s is not JSON serializable"
-            % (
-                type(obj),
-                repr(obj),
-            )
+            f"Object of type {type(obj)} with value of {obj!r} is not JSON serializable"
         )
 
 
@@ -222,9 +215,7 @@ def index(request):
     if event.attendeeRegStart <= today <= event.attendeeRegEnd:
         return render(request, "registration/registration-form.html", context)
     elif event.attendeeRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to our social media for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
         return render(request, "registration/closed.html", context)
     elif event.attendeeRegEnd <= today:
         context["message"] = "has ended."
@@ -284,7 +275,7 @@ def basicBadges(request):
     ssdata = sorted(staffdata, key=lambda x: x["lastName"])
 
     dealers = [att for att in sdata if att["assoc"] == "Dealer"]
-    staff = [att for att in ssdata]
+    staff = list(ssdata)
     attendees = [att for att in sdata if att["assoc"] != "Staff"]
     return render(
         request,
@@ -303,9 +294,7 @@ def vipBadges(request):
     price_levels = PriceLevel.objects.filter(Q(emailVIP=True) | Q(group__iexact="vip"))
     shirt_sizes = {str(shirt.pk): shirt.name for shirt in ShirtSizes.objects.all()}
 
-    vip_order_items = OrderItem.objects.filter(
-        priceLevel__in=price_levels, badge__event=event
-    )
+    vip_order_items = OrderItem.objects.filter(priceLevel__in=price_levels, badge__event=event)
 
     badges = [
         {

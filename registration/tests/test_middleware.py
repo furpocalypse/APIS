@@ -80,7 +80,6 @@ class TestMiddlewareOrderingAndPurity(TestCase):
         # AppRegistryNotReady cycle the lazy import once papered over
         # silently regresses).
         importlib.reload(clientip)
-        import sys
 
         # Walk the module's direct + transitive imports captured in
         # sys.modules at the time clientip is loaded; assert no
@@ -120,9 +119,7 @@ class TestAxesLockoutAtConfiguredLimit(TestCase):
     IP = "203.0.113.55"
 
     def setUp(self):
-        User.objects.create_user(
-            self.USERNAME, "lockme@example.test", self.PASSWORD
-        )
+        User.objects.create_user(self.USERNAME, "lockme@example.test", self.PASSWORD)
         self.login_url = reverse("account_login")
 
     def _post(self, password, username=None, ip=None):

@@ -15,7 +15,7 @@ from registration.views import common
 # neutral webhook_age module (settings-driven, sibling import — no
 # cross-view edge, no cycle). Re-exported so existing importers keep
 # working.
-from registration.views.webhook_age import (  # noqa: F401
+from registration.views.webhook_age import (
     webhook_signature_bypassed,
     webhook_within_age_window,
 )

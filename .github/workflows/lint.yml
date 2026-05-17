@@ -1,0 +1,66 @@
+name: Lint
+
+on:
+  push:
+    branches: [production, stage]
+  pull_request:
+    branches: [production, stage]
+
+jobs:
+  # Blocking: ruff lint + format are clean on the branch and must stay that way.
+  ruff:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: uv sync
+      - name: ruff check
+        run: uv run ruff check --output-format=github .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  # Non-blocking (Phase B): surfaces the backlog without gating merges.
+  # Phase C flips these to blocking once the backlog is triaged.
+  mypy:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      DJANGO_SECRET_KEY: ci
+      STATIC_ROOT: /tmp/static
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: uv sync
+      - name: mypy
+        run: uv run mypy registration fm_eventmanager
+
+  pylint:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      DJANGO_SECRET_KEY: ci
+      STATIC_ROOT: /tmp/static
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: uv sync
+      - name: pylint (semantics + duplicate-code/R0801)
+        run: uv run pylint registration --fail-under=9.0
+
+  vulture:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: uv sync
+      - name: vulture (dead code)
+        run: uv run vulture

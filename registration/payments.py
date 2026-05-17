@@ -2,7 +2,6 @@ import logging
 import uuid
 from collections import Counter
 from datetime import datetime
-from typing import List, Optional
 
 from django.conf import settings
 from django.db import transaction
@@ -33,12 +32,23 @@ from square.types.error import Error
 from square.types.payment import Payment
 
 from . import tasks
-from .models import *
+from .models import (
+    BanList,
+    Cashdrawer,
+    Decimal,
+    Event,
+    F,
+    Order,
+    OrderItem,
+    PaymentWebhookNotification,
+    PriceLevel,
+    SquareDevice,
+    get_hold_type,
+    timezone,
+)
 from .types import BillingData
 
-SQUARE_REQUESTS = Histogram(
-    "square_requests", "HTTP requests to Square API", ["endpoint"]
-)
+SQUARE_REQUESTS = Histogram("square_requests", "HTTP requests to Square API", ["endpoint"])
 
 logger = logging.getLogger("registration.payments")
 
@@ -58,9 +68,7 @@ def update_capacity_for_status_change(order, old_status, new_status):
     if old_status == new_status:
         return
 
-    items = OrderItem.objects.filter(order=order).values_list(
-        "priceLevel_id", flat=True
-    )
+    items = OrderItem.objects.filter(order=order).values_list("priceLevel_id", flat=True)
     counts = Counter(pl_id for pl_id in items if pl_id is not None)
 
     if not counts:
@@ -96,7 +104,7 @@ def update_capacity_for_status_change(order, old_status, new_status):
                 level.reserve_slots(count)
 
 
-def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
+def get_idempotency_key(request: HttpRequest | None = None) -> str:
     """
     Gets the idempotency key from a request, generating one if none exists.
 
@@ -112,7 +120,7 @@ def get_idempotency_key(request: Optional[HttpRequest] = None) -> str:
 
 
 def charge_payment(
-    order: Order, cc_data: BillingData, request: Optional[HttpRequest] = None
+    order: Order, cc_data: BillingData, request: HttpRequest | None = None
 ) -> tuple[bool, dict]:
     """
     Submits payment data on an order to the payment processor.
@@ -181,11 +189,7 @@ def charge_payment(
     # Square still returns data for failed payments
     order.apiData = api_response.model_dump()
 
-    if (
-        api_response.payment
-        and api_response.payment.id
-        and api_response.payment.status != "FAILED"
-    ):
+    if api_response.payment and api_response.payment.id and api_response.payment.status != "FAILED":
         if api_response.payment.card_details and api_response.payment.card_details.card:
             order.lastFour = str(api_response.payment.card_details.card.last4)
 
@@ -202,7 +206,7 @@ def charge_payment(
         return False, {"errors": [e.model_dump() for e in api_response.errors or []]}
 
 
-def format_errors(errors: List[Error]) -> str:
+def format_errors(errors: list[Error]) -> str:
     """
     Formats a list of Square API errors to lines of text.
 
@@ -236,8 +240,8 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
     else:
         api_data = order.apiData
         if not api_data:
-            logger.warning("No order data yet for {0}".format(order.reference))
-            return False, "No order data yet for {0}".format(order.reference)
+            logger.warning(f"No order data yet for {order.reference}")
+            return False, f"No order data yet for {order.reference}"
     old_status = order.status
     order_total = 0
 
@@ -255,14 +259,12 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
 
     if payments_response.payment:
         api_data["payment"] = payments_response.payment.model_dump()
-        order_total = update_order_payment_data(
-            order, order_total, payments_response.payment
-        )
+        order_total = update_order_payment_data(order, order_total, payments_response.payment)
     else:
         return False, format_errors(payments_response.errors or [])
 
-    # FIXME: Payments API call includes references to any refunds associated with that payment in `refund_ids`
-    # We should use that here instead.
+    # FIXME: Payments API call includes references to any refunds associated with that
+    # payment in `refund_ids`. We should use that here instead.
     refunds = []
     refund_errors = []
     refunded_money = payments_response.payment.refunded_money
@@ -272,7 +274,8 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
     refund_ids = payments_response.payment.refund_ids or []
 
     stored_refunds = api_data.get("refunds")
-    # Keep any potentially pending refunds that may fail (which wouldn't show up in payment.refund_ids)
+    # Keep any potentially pending refunds that may fail (which wouldn't show up in
+    # payment.refund_ids)
     if stored_refunds:
         stored_refund_ids = [
             refund["id"] for refund in stored_refunds if refund["id"] not in refund_ids
@@ -309,7 +312,7 @@ def refresh_payment(order: Order, store_api_data=None) -> tuple[bool, str | None
         order.charityDonation = order.total
         message = "Refunded order has caused charity and organization donation amounts to reset."
         logger.warning(message)
-        order.notes += "\n{0}: {1}".format(timezone.now(), message)
+        order.notes += f"\n{timezone.now()}: {message}"
         update_capacity_for_status_change(order, old_status, order.status)
         order.save()
         return False, message
@@ -359,8 +362,8 @@ def update_order_payment_data(order: Order, order_total: int, payment: Payment) 
 def refund_payment(
     order: Order,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str | None]:
     """
     Determines whether an order can be refunded, and processes the refund id so.
@@ -384,11 +387,11 @@ def refund_payment(
         return False, "Comped orders cannot be refunded."
     if order.billingType == Order.UNPAID:
         return False, "Unpaid orders cannot be refunded."
-    return False, "Not sure how to refund order type {0}!".format(order.billingType)
+    return False, f"Not sure how to refund order type {order.billingType}!"
 
 
 def refund_cash_payment(
-    order: Order, amount: float, reason: Optional[str] = None
+    order: Order, amount: float, reason: str | None = None
 ) -> tuple[bool, None]:
     """
     Deducts the ``amount`` from the ``order``'s total and logs a `Cashdrawer`
@@ -402,7 +405,7 @@ def refund_cash_payment(
     old_status = order.status
     # Change order status
     order.status = Order.REFUNDED
-    order.notes += "\nRefund issued {0}: {1}".format(timezone.now(), reason)
+    order.notes += f"\nRefund issued {timezone.now()}: {reason}"
 
     # Reset order total
     order.total -= amount
@@ -418,8 +421,8 @@ def refund_cash_payment(
 def refund_card_payment(
     order: Order,
     amount: float,
-    reason: Optional[str] = None,
-    request: Optional[HttpRequest] = None,
+    reason: str | None = None,
+    request: HttpRequest | None = None,
 ) -> tuple[bool, str]:
     """Process a refund for a card-based payment.
 
@@ -450,12 +453,12 @@ def refund_card_payment(
             )
     except ApiError as e:
         errors = format_errors(e.errors)
-        logger.error("Error in square refund: {0}".format(errors))
+        logger.error(f"Error in square refund: {errors}")
         return False, errors
 
     if api_response.errors:
         errors = format_errors(api_response.errors)
-        logger.error("Error in square refund: {0}".format(errors))
+        logger.error(f"Error in square refund: {errors}")
         return False, errors
 
     stored_refunds = api_data.get("refunds", [])
@@ -479,14 +482,17 @@ def refund_card_payment(
             logger.warning(
                 "Refunded order has caused charity and organization donation amounts to reset."
             )
-            order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
+            order.notes += (
+                "\nWarning: Refunded order has caused charity and organization "
+                "donation amounts to reset.\n"
+            )
 
     if status in ("REJECTED", "FAILED"):
         order.status = Order.COMPLETED
 
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
-    message = "Square refund has been submitted and is {0}".format(status)
+    message = f"Square refund has been submitted and is {status}"
     logger.debug(message)
     return True, message
 
@@ -498,9 +504,7 @@ def process_webhook_refund_update(notification: PaymentWebhookNotification) -> b
         order = Order.objects.get(apiData__refunds__contains=[{"id": refund_id}])
         # The above is not supported on all DB backends.
     except Order.DoesNotExist:
-        logger.warning(
-            f"Got refund.updated webhook update for a refund id not found: {refund_id}"
-        )
+        logger.warning(f"Got refund.updated webhook update for a refund id not found: {refund_id}")
         return False
     except NotSupportedError:
         orders = [
@@ -594,7 +598,10 @@ def process_webhook_refund_created(notification: PaymentWebhookNotification) -> 
             logger.warning(
                 "Refunded order has caused charity and organization donation amounts to reset."
             )
-            order.notes += "\nWarning: Refunded order has caused charity and organization donation amounts to reset.\n"
+            order.notes += (
+                "\nWarning: Refunded order has caused charity and organization "
+                "donation amounts to reset.\n"
+            )
 
     if status in ("REJECTED", "FAILED"):
         order.status = Order.COMPLETED
@@ -634,8 +641,8 @@ def process_webhook_dispute_created_or_updated(
     update_capacity_for_status_change(order, old_status, order.status)
     order.save()
 
-    # Place a hold on all new disputed orders, and add attendee to the ban list.  Should only do this once,
-    # when the dispute is created (with state EVIDENCE_REQUIRED).
+    # Place a hold on all new disputed orders, and add attendee to the ban list.
+    # Should only do this once, when the dispute is created (with state EVIDENCE_REQUIRED).
     if webhook_dispute["state"] == "EVIDENCE_REQUIRED":
         dispute_hold = get_hold_type("Chargeback")
         order_items = OrderItem.objects.filter(order=order)
@@ -661,7 +668,7 @@ def process_webhook_dispute_created_or_updated(
     return True
 
 
-def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
+def create_square_order(terminal_name: str, data: dict) -> str | None:
     """Creates an order in Square.
 
     :param terminal_name: The name of the terminal device from which the order
@@ -704,9 +711,7 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
                     )
                 )
 
-            badge_applied_discounts.append(
-                OrderLineItemAppliedDiscountParams(discount_uid=uid)
-            )
+            badge_applied_discounts.append(OrderLineItemAppliedDiscountParams(discount_uid=uid))
 
         line_items.append(
             OrderLineItemParams(
@@ -777,9 +782,7 @@ def create_square_order(terminal_name: str, data: dict) -> Optional[str]:
         return None
 
 
-def print_payment_receipt(
-    request, square_device: SquareDevice, payment_id: str
-) -> bool:
+def print_payment_receipt(request, square_device: SquareDevice, payment_id: str) -> bool:
     """Tells a terminal to print a reciept for a given payment.
 
     :param request: Original HTTP request from Django
@@ -811,7 +814,7 @@ def print_payment_receipt(
         return True
 
 
-def get_terminals() -> List[Device]:
+def get_terminals() -> list[Device]:
     """
     Gets the list of terminals defined in the payment processor.
 
@@ -836,7 +839,7 @@ def prompt_terminal_payment(
     total: int,
     reference: str,
     note: str,
-    order_id: Optional[str],
+    order_id: str | None,
 ) -> CreateTerminalCheckoutResponse:
     """Sends a checkout request to a payment terminal.
 

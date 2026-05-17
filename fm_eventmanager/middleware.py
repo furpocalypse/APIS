@@ -76,9 +76,7 @@ class RequireClientIPMiddleware:
                     request.headers.get("X-Forwarded-For"),
                     request.headers.get("X-Real-IP"),
                 )
-                return HttpResponseForbidden(
-                    "Forbidden: client identity could not be determined."
-                )
+                return HttpResponseForbidden("Forbidden: client identity could not be determined.")
             request.client_ip = ip
 
         return self.get_response(request)

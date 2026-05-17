@@ -27,7 +27,7 @@ Design (plan S2):
 from __future__ import annotations
 
 import logging
-from datetime import timezone as dt_timezone
+from datetime import UTC
 
 from django.conf import settings
 from django.utils import timezone
@@ -66,8 +66,8 @@ def _parse_utc(value):
     if dt is None:
         return None
     if timezone.is_naive(dt):
-        dt = timezone.make_aware(dt, dt_timezone.utc)
-    return dt.astimezone(dt_timezone.utc)
+        dt = timezone.make_aware(dt, UTC)
+    return dt.astimezone(UTC)
 
 
 def webhook_within_age_window(timestamp_iso, *, source) -> bool:
@@ -100,8 +100,7 @@ def webhook_within_age_window(timestamp_iso, *, source) -> bool:
         return False
     if age < -future_skew:
         logger.warning(
-            "webhook[%s]: timestamp %s is %.0fs in the future (> %ds skew); "
-            "rejecting",
+            "webhook[%s]: timestamp %s is %.0fs in the future (> %ds skew); rejecting",
             source,
             ts.isoformat(),
             -age,

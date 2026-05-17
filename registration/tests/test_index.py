@@ -1,13 +1,10 @@
-import datetime
-
-from django.template.loader import render_to_string
-from django.test import Client, TestCase
-from django.urls import reverse
 from http import HTTPStatus
 
-from registration.models import *
+from django.test import Client, TestCase
+from django.urls import reverse
+
 from registration.templatetags import site as site_tags
-from registration.tests.common import *
+from registration.tests.common import DEFAULT_EVENT_ARGS, Event, now, one_day, ten_days
 
 
 class Index(TestCase):

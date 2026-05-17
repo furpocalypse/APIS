@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import getpass
 import os
-import sys
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -72,9 +71,7 @@ class Command(BaseCommand):
         # are about to inspect; a parallel invocation will block on the
         # same query and see the just-created superuser, exiting cleanly.
         with transaction.atomic():
-            existing = (
-                User.objects.select_for_update().filter(is_superuser=True).first()
-            )
+            existing = User.objects.select_for_update().filter(is_superuser=True).first()
             if existing is not None:
                 self.stdout.write(
                     self.style.SUCCESS(
@@ -142,7 +139,7 @@ class Command(BaseCommand):
             if password != confirm:
                 raise CommandError("Passwords do not match.")
         except (EOFError, KeyboardInterrupt):
-            raise CommandError("Aborted by user.")
+            raise CommandError("Aborted by user.") from None
 
         return username, email, password
 
@@ -156,11 +153,9 @@ class Command(BaseCommand):
                 f"--from-env requires BOOTSTRAP_ADMIN_USERNAME, "
                 f"BOOTSTRAP_ADMIN_EMAIL, and BOOTSTRAP_ADMIN_PASSWORD; "
                 f"missing: {exc.args[0]}"
-            )
+            ) from exc
         if not username or not email or not password:
-            raise CommandError(
-                "BOOTSTRAP_ADMIN_USERNAME / EMAIL / PASSWORD must all be non-empty."
-            )
+            raise CommandError("BOOTSTRAP_ADMIN_USERNAME / EMAIL / PASSWORD must all be non-empty.")
 
         # Best-effort scrub from this process's env so a later os.environ
         # read in a downstream library doesn't surface it. Child processes
@@ -183,4 +178,4 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR("Password rejected:"))
             for msg in exc.messages:
                 self.stderr.write(self.style.ERROR(f"  - {msg}"))
-            raise CommandError("Provide a stronger password and re-run.")
+            raise CommandError("Provide a stronger password and re-run.") from exc

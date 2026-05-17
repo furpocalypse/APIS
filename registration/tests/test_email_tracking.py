@@ -79,9 +79,7 @@ class TestRegistrationEmailTracking(TestCase):
         self.assertIs(self.order.email_sent, True)
 
     @patch("registration.emails.send_dealer_assistant_email")
-    def test_dealer_assistant_success_updates_order_when_order_id_given(
-        self, mock_send
-    ):
+    def test_dealer_assistant_success_updates_order_when_order_id_given(self, mock_send):
         from registration.models import Attendee, Dealer, Event
         from registration.tests.common import (
             DEFAULT_EVENT_ARGS,

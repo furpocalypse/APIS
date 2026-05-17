@@ -1,5 +1,4 @@
 from django import template
-from django.utils.timezone import timedelta
 
 register = template.Library()
 

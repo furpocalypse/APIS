@@ -78,9 +78,7 @@ class Command(BaseCommand):
                     level.release_slots(qty)
 
                 order.status = Order.FAILED
-                order.notes += (
-                    f"\nAuto-expired: pending order timed out after {timeout} minutes"
-                )
+                order.notes += f"\nAuto-expired: pending order timed out after {timeout} minutes"
                 order.save()
                 expired += 1
                 self.stdout.write(f"  Expired: {order.reference}")

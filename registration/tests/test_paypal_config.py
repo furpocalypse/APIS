@@ -6,6 +6,7 @@ runs at import time, each test uses ``importlib.reload`` under
 ``override_settings`` to observe the effect of different settings.
 """
 
+import contextlib
 import importlib
 import logging
 from unittest.mock import patch
@@ -21,10 +22,8 @@ def _unregister_paypal_metrics():
     for collector in list(REGISTRY._collector_to_names.keys()):
         names = REGISTRY._collector_to_names.get(collector, [])
         if any(n.startswith("paypal_requests") for n in names):
-            try:
+            with contextlib.suppress(KeyError):
                 REGISTRY.unregister(collector)
-            except KeyError:
-                pass
 
 
 @tag("paypal")

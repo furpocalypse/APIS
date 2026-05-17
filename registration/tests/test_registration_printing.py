@@ -36,9 +36,9 @@ def patch_gotenberg(have_gotenberg_host):
 
     try:
         with respx.mock:
-            convert_route = respx.post(
-                "https://localhost:9125/forms/chromium/convert/html"
-            ).mock(return_value=httpx.Response(204))
+            convert_route = respx.post("https://localhost:9125/forms/chromium/convert/html").mock(
+                return_value=httpx.Response(204)
+            )
 
             yield
 
@@ -52,14 +52,10 @@ class TestRegistrationPrinting(TestCase):
         self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
         self.admin_user.save()
 
-        self.badge_template = BadgeTemplate(
-            template="<script>window.badgeReady = true;</script>"
-        )
+        self.badge_template = BadgeTemplate(template="<script>window.badgeReady = true;</script>")
         self.badge_template.save()
 
-        self.event = Event(
-            defaultBadgeTemplate=self.badge_template, **DEFAULT_EVENT_ARGS
-        )
+        self.event = Event(defaultBadgeTemplate=self.badge_template, **DEFAULT_EVENT_ARGS)
         self.event.save()
 
         self.priceLevel = PriceLevel(

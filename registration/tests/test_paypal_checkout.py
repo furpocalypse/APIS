@@ -7,7 +7,6 @@ from django.test import Client
 from django.test.utils import tag
 from django.urls import reverse
 from paypalserversdk.exceptions.api_exception import ApiException
-from paypalserversdk.http.http_response import HttpResponse
 from paypalserversdk.models.order import Order as PayPalOrder
 
 from registration.models import (
@@ -17,7 +16,6 @@ from registration.models import (
     Discount,
     Order,
     OrderItem,
-    PriceLevel,
 )
 from registration.tests.common import OrdersTestCase
 from registration.tests.test_paypal_payments import create_api_response
@@ -79,15 +77,11 @@ class TestCreatePaypalOrder(OrdersTestCase):
 
         self.assertEqual(response.status_code, 200)
         args, _ = mock_create.call_args
-        total_arg, discount_arg, translated_cart = args
-        donation_names = [
-            item["name"] for item in translated_cart if item.get("donation")
-        ]
+        _total_arg, _discount_arg, translated_cart = args
+        donation_names = [item["name"] for item in translated_cart if item.get("donation")]
         self.assertEqual(len(donation_names), 2)
         # Ensure both donation line items are present with the correct totals
-        donation_totals = sorted(
-            [item["total"] for item in translated_cart if item["donation"]]
-        )
+        donation_totals = sorted([item["total"] for item in translated_cart if item["donation"]])
         self.assertEqual(donation_totals, [Decimal("5"), Decimal("7")])
 
     @patch("registration.views.ordering.create_unpaid_paypal_order")
@@ -448,9 +442,7 @@ class TestCheckoutEndpointPayPal(OrdersTestCase):
 
     @patch("registration.tasks.send_registration_email_task.delay")
     @patch("registration.views.ordering.capture_paypal_payment")
-    def test_happy_path_success_sends_registration_email(
-        self, mock_capture, mock_email
-    ):
+    def test_happy_path_success_sends_registration_email(self, mock_capture, mock_email):
         mock_capture.return_value = (
             True,
             {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},

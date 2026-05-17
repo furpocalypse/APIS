@@ -68,8 +68,12 @@ dev = [
     "coverage[toml]>=7.6.0",
     "coveralls>=4.1.0",
     "django-debug-toolbar~=6.2.0",
-    "django-types>=0.22.0",
+    "django-stubs[compatible-mypy]>=6.0.4",
+    "mypy>=2.0.0",
+    "pylint>=4.0.5",
+    "pylint-django>=2.7.0",
     "ruff>=0.15.4",
+    "vulture>=2.16",
     "werkzeug>=3.1.5",
 ]
 test = [
@@ -78,6 +82,81 @@ test = [
     "httpx>=0.27.0",
     "respx>=0.22.0",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [
+    "*/migrations/*",
+    "registration/frontend/*",
+    "venv",
+    ".venv",
+    "vulture_whitelist.py",  # intentionally bare names for vulture; not real code
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "DJ", "SIM", "RUF"]
+ignore = [
+    "E203",    # whitespace-before-punctuation, conflicts with the formatter
+    "RUF012",  # Django model/admin/form classes use mutable class attrs by design
+               # (Meta, list_display, fields, fieldsets, actions); ClassVar is wrong here
+    "DJ001",   # null=True on string fields: changing it requires a DB migration and
+               # alters None/"" query semantics -- deliberate Phase C work, not a lint fix
+    "DJ012",   # model body element ordering: pure convention, high churn, low value
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*" = ["E501", "RUF012"]
+"registration/tests/*" = ["E501"]
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["registration", "fm_eventmanager"]
+combine-as-imports = true
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main"]
+ignore_missing_imports = true
+exclude = ['/migrations/', 'registration/frontend/']
+# Introduced lenient; tighten in Phase C (check_untyped_defs, then disallow_untyped_defs).
+check_untyped_defs = false
+disallow_untyped_defs = false
+
+[tool.django-stubs]
+django_settings_module = "fm_eventmanager.settings_test"
+
+[tool.pylint.main]
+load-plugins = ["pylint_django"]
+django-settings-module = "fm_eventmanager.settings_test"
+ignore-paths = ["^.*/migrations/.*$", "^registration/frontend/.*$"]
+jobs = 0
+
+[tool.pylint."messages control"]
+# Style/formatting is owned by ruff; keep pylint focused on semantics, design,
+# and the cross-file duplicate-code (R0801) check ruff cannot do.
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+    "C0301",  # line-too-long (ruff/E501)
+    "C0103",  # invalid-name (ruff/N, project uses camelCase model fields)
+    "R0903",  # too-few-public-methods (noisy for Django models/forms)
+    "W0511",  # fixme (TODO/FIXME comments are tracked elsewhere)
+]
+
+[tool.pylint.similarities]
+min-similarity-lines = 8
+ignore-imports = true
+ignore-signatures = true
+
+[tool.vulture]
+paths = ["registration", "fm_eventmanager", "vulture_whitelist.py"]
+exclude = ["*/migrations/*", "registration/frontend/*"]
+min_confidence = 80
 
 [tool.coverage.run]
 branch = true

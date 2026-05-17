@@ -41,7 +41,7 @@ class TestSquareRefundWebhooks(TestCase):
             reverse("registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE}
+            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE},
         )
 
         self.assertTrue(response.status_code, 200)
@@ -59,7 +59,7 @@ class TestSquareRefundWebhooks(TestCase):
             reverse("registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE}
+            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE},
         )
 
         self.assertTrue(response.status_code, 403)
@@ -68,9 +68,7 @@ class TestSquareRefundWebhooks(TestCase):
     @override_settings(SQUARE_WEBHOOK_SIGNATURE_KEY=SIGNATURE_KEY)
     @patch("square.utils.webhooks_helper.verify_signature")
     @patch("django.http.request.HttpRequest.build_absolute_uri")
-    def test_square_webhook_invalid_json(
-        self, mock_build_absolute_uri, mock_verify_signature
-    ):
+    def test_square_webhook_invalid_json(self, mock_build_absolute_uri, mock_verify_signature):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
         mock_verify_signature.return_value = True
 
@@ -78,7 +76,9 @@ class TestSquareRefundWebhooks(TestCase):
             reverse("registration:square_webhook"),
             '{"foo',
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": "J8FS8Z6adAbeYmo0MXzUv92Gu6Mr+AiCfqdFHih8jKo="}
+            headers={
+                "x-square-hmacsha256-signature": "J8FS8Z6adAbeYmo0MXzUv92Gu6Mr+AiCfqdFHih8jKo="
+            },
         )
 
         self.assertTrue(response.status_code, 400)
@@ -88,9 +88,7 @@ class TestSquareRefundWebhooks(TestCase):
     @override_settings(SQUARE_WEBHOOK_SIGNATURE_KEY=SIGNATURE_KEY)
     @patch("square.utils.webhooks_helper.verify_signature")
     @patch("django.http.request.HttpRequest.build_absolute_uri")
-    def test_square_webhook_missing_event_id(
-        self, mock_build_absolute_uri, mock_verify_signature
-    ):
+    def test_square_webhook_missing_event_id(self, mock_build_absolute_uri, mock_verify_signature):
         mock_build_absolute_uri.return_value = self.NOTIFICATION_URL
         mock_verify_signature.return_value = True
 
@@ -98,7 +96,9 @@ class TestSquareRefundWebhooks(TestCase):
             reverse("registration:square_webhook"),
             '{"foo":"bar"}',
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": "iQ2pFa3wzzKi48XdexDtLGeHxItD/Kf7tlmzrcS6a/s="}
+            headers={
+                "x-square-hmacsha256-signature": "iQ2pFa3wzzKi48XdexDtLGeHxItD/Kf7tlmzrcS6a/s="
+            },
         )
 
         self.assertTrue(response.status_code, 400)
@@ -109,7 +109,7 @@ class TestSquareRefundWebhooks(TestCase):
     @patch("django.http.request.HttpRequest.build_absolute_uri")
     def test_square_webhook_idempotency(self, mock_build_absolute_uri):
         notification = PaymentWebhookNotification(
-            event_id=self.EVENT_ID, body=self.WEBHOOK_BODY, headers=dict()
+            event_id=self.EVENT_ID, body=self.WEBHOOK_BODY, headers={}
         )
         notification.save()
 
@@ -119,7 +119,7 @@ class TestSquareRefundWebhooks(TestCase):
             reverse("registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE}
+            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE},
         )
 
         self.assertTrue(response.status_code, 409)
@@ -241,13 +241,9 @@ class TestSquareDisputeWebhookCreate(TestCase):
         self.order.save()
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="Banned 4 Lyfe"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="Banned 4 Lyfe")
         self.badge.save()
-        self.order_item = OrderItem(
-            order=self.order, badge=self.badge, enteredBy="Test"
-        )
+        self.order_item = OrderItem(order=self.order, badge=self.badge, enteredBy="Test")
         self.order_item.save()
         self.order.refresh_from_db()
 
@@ -261,7 +257,7 @@ class TestSquareDisputeWebhookCreate(TestCase):
             reverse("registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE}
+            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE},
         )
 
         self.assertTrue(response.status_code, 200)
@@ -295,7 +291,7 @@ class TestSquareDisputeWebhookCreate(TestCase):
             reverse("registration:square_webhook"),
             self.WEBHOOK_BODY,
             content_type="application/json",
-            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE}
+            headers={"x-square-hmacsha256-signature": self.SHA256_SIGNATURE},
         )
 
         self.assertTrue(response.status_code, 200)

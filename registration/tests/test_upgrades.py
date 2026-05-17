@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.test import tag
 from django.urls import reverse
 
-from registration.models import *
+from registration.models import Attendee, Badge, Decimal, Order, OrderItem
 from registration.tests.common import OrdersTestCase
 
 
@@ -205,7 +205,7 @@ class TestUpgrades(OrdersTestCase):
             {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
         )
         badge, attendee = self.setup_upgrade()
-        cart, checkout = self.upgrade_add_and_checkout(
+        cart, _checkout = self.upgrade_add_and_checkout(
             self.price_90, self.attendee_form_upgrade_checkout, badge, attendee
         )
         self.assertEqual(cart.status_code, 200)
@@ -224,7 +224,7 @@ class TestUpgrades(OrdersTestCase):
             {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
         )
         badge, attendee = self.setup_upgrade()
-        cart, checkout = self.upgrade_add_and_checkout(
+        _cart, checkout = self.upgrade_add_and_checkout(
             self.price_45, self.attendee_form_upgrade_checkout, badge, attendee
         )
         self.assertEqual(checkout.status_code, 200)
@@ -233,16 +233,12 @@ class TestUpgrades(OrdersTestCase):
         attendee.delete()
 
     @tag("square")
-    @unittest.skip(
-        "Square checkout removed; rewrite against PayPal capture failure path"
-    )
+    @unittest.skip("Square checkout removed; rewrite against PayPal capture failure path")
     def test_upgrade_card_declined(self):
         form = self.attendee_form_upgrade_checkout
         form["nonce"] = "cnon:card-nonce-declined"
         badge, attendee = self.setup_upgrade()
-        cart, checkout = self.upgrade_add_and_checkout(
-            self.price_45, form, badge, attendee
-        )
+        _cart, checkout = self.upgrade_add_and_checkout(self.price_45, form, badge, attendee)
         self.assertEqual(checkout.status_code, 200)
         self.assertEqual(badge.effectiveLevel(), self.price_45)
         badge.delete()
@@ -265,9 +261,7 @@ class TestUpgrades(OrdersTestCase):
         form = dict(self.attendee_form_upgrade_checkout)
         form["processor"] = "paypal"
         form["billingData"]["source_id"] = "TEST-PAYPAL-UPGRADE-ORDER"
-        cart, checkout = self.upgrade_add_and_checkout(
-            self.price_90, form, badge, attendee
-        )
+        cart, checkout = self.upgrade_add_and_checkout(self.price_90, form, badge, attendee)
         self.assertEqual(cart.status_code, 200)
         self.assertEqual(checkout.status_code, 200, checkout.content)
         self.assertEqual(mock_capture.call_count - setup_call_count, 1)
@@ -312,9 +306,7 @@ class TestUpgrades(OrdersTestCase):
         form = dict(self.attendee_form_upgrade_checkout)
         form["processor"] = "paypal"
         form["billingData"]["source_id"] = "TEST-PAYPAL-UPGRADE-ORDER"
-        cart, checkout = self.upgrade_add_and_checkout(
-            self.price_90, form, badge, attendee
-        )
+        _cart, checkout = self.upgrade_add_and_checkout(self.price_90, form, badge, attendee)
         self.assertEqual(checkout.status_code, 400, checkout.content)
 
         badge.refresh_from_db()

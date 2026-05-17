@@ -29,12 +29,8 @@ from registration.models import Firebase
 
 # Migration modules are named with a leading digit (not a valid Python
 # identifier) so they must be imported by string path.
-_m0121 = importlib.import_module(
-    "registration.migrations.0121_alter_event_dealeremail_and_more"
-)
-_m0122 = importlib.import_module(
-    "registration.migrations.0122_firebase_token_hash"
-)
+_m0121 = importlib.import_module("registration.migrations.0121_alter_event_dealeremail_and_more")
+_m0122 = importlib.import_module("registration.migrations.0122_firebase_token_hash")
 
 # The QR is produced by qrcode's SvgPathFillImage; this exact prefix is
 # unique to it and will not collide with any admin-theme inline SVG.
@@ -54,12 +50,8 @@ def _admin_request(user, method="post"):
 
 class TestFirebaseAdmin(TestCase):
     def setUp(self):
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )
-        self.normal_user = User.objects.create_user(
-            "john", "john@thebeatles.com", "john"
-        )
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
+        self.normal_user = User.objects.create_user("john", "john@thebeatles.com", "john")
         self.normal_user.staff_member = False
         self.normal_user.save()
 
@@ -96,9 +88,10 @@ class TestFirebaseAdmin(TestCase):
             return pt
 
         obj = Firebase(name="Fresh", background_color="#0099cc")
-        with patch.object(Firebase, "mint_token", _spy), patch(
-            "registration.views.onsite_admin.send_mqtt_message_to_terminal"
-        ) as push:
+        with (
+            patch.object(Firebase, "mint_token", _spy),
+            patch("registration.views.onsite_admin.send_mqtt_message_to_terminal") as push,
+        ):
             req = _admin_request(self.admin_user)
             self.admin.save_model(req, obj, None, change=False)
             msgs = [str(m) for m in req._messages]
@@ -116,9 +109,7 @@ class TestFirebaseAdmin(TestCase):
 
     def test_save_model_routine_edit_pushes_no_token(self):
         self.terminal_blue.name = "Blue Renamed"
-        with patch(
-            "registration.views.onsite_admin.send_mqtt_message_to_terminal"
-        ) as push:
+        with patch("registration.views.onsite_admin.send_mqtt_message_to_terminal") as push:
             req = _admin_request(self.admin_user)
             self.admin.save_model(req, self.terminal_blue, None, change=True)
         pushed_payload = push.call_args[0][2]
@@ -126,23 +117,17 @@ class TestFirebaseAdmin(TestCase):
         self.terminal_blue.refresh_from_db()
         self.assertEqual(self.terminal_blue.name, "Blue Renamed")
         # The unchanged token still authenticates after a routine edit.
-        self.assertEqual(
-            Firebase.find_by_token(self.blue_token).pk, self.terminal_blue.pk
-        )
+        self.assertEqual(Firebase.find_by_token(self.blue_token).pk, self.terminal_blue.pk)
 
     # --- TC-2: explicit rotation invalidates the prior token ----------
     def test_provision_view_get_renders_no_token_qr(self):
         self.client.force_login(self.admin_user)
-        resp = self.client.get(
-            reverse("admin:firebase_provision", args=(self.terminal_blue.id,))
-        )
+        resp = self.client.get(reverse("admin:firebase_provision", args=(self.terminal_blue.id,)))
         self.assertEqual(resp.status_code, 200)
         # No QR on GET (token is not stored); prior token untouched.
         self.assertNotIn(_QR_MARKER, resp.content)
         self.assertIn(b"Rotate token", resp.content)
-        self.assertEqual(
-            Firebase.find_by_token(self.blue_token).pk, self.terminal_blue.pk
-        )
+        self.assertEqual(Firebase.find_by_token(self.blue_token).pk, self.terminal_blue.pk)
 
     def test_provision_view_post_rotates_and_invalidates_prior(self):
         captured = {}
@@ -154,35 +139,26 @@ class TestFirebaseAdmin(TestCase):
             return pt
 
         self.client.force_login(self.admin_user)
-        with patch.object(Firebase, "mint_token", _spy), patch(
-            "registration.views.onsite_admin.send_mqtt_message_to_terminal"
+        with (
+            patch.object(Firebase, "mint_token", _spy),
+            patch("registration.views.onsite_admin.send_mqtt_message_to_terminal"),
         ):
             resp = self.client.post(
-                reverse(
-                    "admin:firebase_provision", args=(self.terminal_blue.id,)
-                )
+                reverse("admin:firebase_provision", args=(self.terminal_blue.id,))
             )
         self.assertEqual(resp.status_code, 200)
         self.assertIn(_QR_MARKER, resp.content)  # QR shown once on rotate
         new_token = captured["plaintext"]
         # Old token no longer resolves; the new one does.
         self.assertIsNone(Firebase.find_by_token(self.blue_token))
-        self.assertEqual(
-            Firebase.find_by_token(new_token).pk, self.terminal_blue.pk
-        )
+        self.assertEqual(Firebase.find_by_token(new_token).pk, self.terminal_blue.pk)
 
     def test_provision_view_post_by_non_superuser_does_not_rotate(self):
         self.client.force_login(self.normal_user)
-        resp = self.client.post(
-            reverse("admin:firebase_provision", args=(self.terminal_blue.id,))
-        )
-        self.assertIn(
-            b"You must be a superuser to access this URL", resp.content
-        )
+        resp = self.client.post(reverse("admin:firebase_provision", args=(self.terminal_blue.id,)))
+        self.assertIn(b"You must be a superuser to access this URL", resp.content)
         # No rotation occurred: the original token still authenticates.
-        self.assertEqual(
-            Firebase.find_by_token(self.blue_token).pk, self.terminal_blue.pk
-        )
+        self.assertEqual(Firebase.find_by_token(self.blue_token).pk, self.terminal_blue.pk)
 
     # --- non-disruptive backfill invariant ----------------------------
     def test_existing_token_still_authenticates_post_migration(self):
@@ -245,9 +221,7 @@ class TestFirebaseAdmin(TestCase):
         response = self.client.get(
             reverse("admin:firebase_provision", args=(self.terminal_blue.id,))
         )
-        self.assertIn(
-            b"You must be a superuser to access this URL", response.content
-        )
+        self.assertIn(b"You must be a superuser to access this URL", response.content)
 
     def test_change_form_superuser(self):
         self.client.force_login(self.admin_user)

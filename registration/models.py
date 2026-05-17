@@ -2,8 +2,6 @@ import hashlib
 import logging
 import random
 import secrets
-import string
-import uuid
 from datetime import datetime
 from decimal import Decimal
 
@@ -59,9 +57,7 @@ class Discount(models.Model):
     oneTime = models.BooleanField(default=False)
     used = models.IntegerField(default=0)
     reason = models.CharField(max_length=100, blank=True)
-    sponsoring_department = models.ForeignKey(
-        "Department", on_delete=models.SET_NULL, null=True
-    )
+    sponsoring_department = models.ForeignKey("Department", on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
         return self.codeName
@@ -70,9 +66,7 @@ class Discount(models.Model):
         now = timezone.now()
         if self.startDate > now or self.endDate < now:
             return False
-        if self.oneTime and self.used > 0:
-            return False
-        return True
+        return not (self.oneTime and self.used > 0)
 
     @property
     def status(self):
@@ -117,7 +111,7 @@ class PriceLevelOption(models.Model):
         verbose_name_plural = "Price level options (merchandise)"
 
     def __str__(self):
-        return "{0} (${1})".format(self.optionName, self.optionPrice)
+        return f"{self.optionName} (${self.optionPrice})"
 
     def getList(self):
         if self.optionExtraType in ["int", "bool", "string"]:
@@ -144,9 +138,7 @@ class PriceLevel(models.Model):
     basePrice = models.DecimalField(max_digits=6, decimal_places=2)
     startDate = models.DateTimeField()
     endDate = models.DateTimeField()
-    maxCapacity = models.IntegerField(
-        blank=True, null=True, help_text="Leave blank for no limit"
-    )
+    maxCapacity = models.IntegerField(blank=True, null=True, help_text="Leave blank for no limit")
     remainingSlots = models.IntegerField(
         blank=True,
         null=True,
@@ -164,14 +156,10 @@ class PriceLevel(models.Model):
     emailVIPEmails = models.CharField(max_length=400, blank=True, default="")
     isMinor = models.BooleanField(default=False)
     min_age = models.IntegerField(default=0)
-    max_age = models.IntegerField(
-        blank=True, null=True, help_text="Leave blank for no limit"
-    )
+    max_age = models.IntegerField(blank=True, null=True, help_text="Leave blank for no limit")
     accompanied = models.BooleanField(default=False)
     available_to_attendee = models.BooleanField(default=False, verbose_name="Attendee")
-    available_to_marketplace = models.BooleanField(
-        default=False, verbose_name="Marketplace"
-    )
+    available_to_marketplace = models.BooleanField(default=False, verbose_name="Marketplace")
     available_to_staff = models.BooleanField(default=False, verbose_name="Staff")
 
     class Meta:
@@ -183,9 +171,7 @@ class PriceLevel(models.Model):
     def get_level_active_status(self):
         tz = timezone.get_current_timezone()
         today = datetime.now(tz=tz)
-        if self.startDate <= today <= self.endDate:
-            return True
-        return False
+        return self.startDate <= today <= self.endDate
 
     get_level_active_status.boolean = True
     get_level_active_status.short_description = "Active"
@@ -211,9 +197,7 @@ class PriceLevel(models.Model):
         """
         from registration.models import Order, OrderItem
 
-        return OrderItem.objects.filter(
-            priceLevel=self, order__status=Order.PENDING
-        ).count()
+        return OrderItem.objects.filter(priceLevel=self, order__status=Order.PENDING).count()
 
     # ---- Counter-based methods (fast path) ----
 
@@ -352,10 +336,7 @@ class PriceLevel(models.Model):
         actual_pending = self.verify_pending_count()
         expected_remaining = self.maxCapacity - actual_confirmed - actual_pending
 
-        if (
-            self.remainingSlots != expected_remaining
-            or self.reservedSlots != actual_pending
-        ):
+        if self.remainingSlots != expected_remaining or self.reservedSlots != actual_pending:
             logger.warning(
                 "Counter drift detected for PriceLevel %d '%s': "
                 "remainingSlots=%s (expected %s), "
@@ -392,18 +373,15 @@ class PriceLevel(models.Model):
                         self.reservedSlots = pending
             except PriceLevel.DoesNotExist:
                 pass  # New instance
-        elif not self.pk and self.maxCapacity is not None:
+        elif not self.pk and self.maxCapacity is not None and self.remainingSlots is None:
             # Brand new instance with capacity — initialize counters
-            if self.remainingSlots is None:
-                self.remainingSlots = self.maxCapacity
-                self.reservedSlots = 0
+            self.remainingSlots = self.maxCapacity
+            self.reservedSlots = 0
         return super().save(*args, **kwargs)
 
 
 class Charity(LookupTable):
-    url = models.CharField(
-        max_length=500, verbose_name="URL", help_text="Charity link", blank=True
-    )
+    url = models.CharField(max_length=500, verbose_name="URL", help_text="Charity link", blank=True)
     donations = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -432,17 +410,11 @@ class BadgeTemplate(models.Model):
     name = models.CharField(max_length=100)
     template = models.TextField()
     paperWidth = models.CharField(max_length=10, null=True, verbose_name="Paper Width")
-    paperHeight = models.CharField(
-        max_length=10, null=True, verbose_name="Paper Height"
-    )
+    paperHeight = models.CharField(max_length=10, null=True, verbose_name="Paper Height")
     marginTop = models.CharField(max_length=10, null=True, verbose_name="Margin Top")
-    marginBottom = models.CharField(
-        max_length=10, null=True, verbose_name="Margin Bottom"
-    )
+    marginBottom = models.CharField(max_length=10, null=True, verbose_name="Margin Bottom")
     marginLeft = models.CharField(max_length=10, null=True, verbose_name="Margin Left")
-    marginRight = models.CharField(
-        max_length=10, null=True, verbose_name="Margin Right"
-    )
+    marginRight = models.CharField(max_length=10, null=True, verbose_name="Margin Right")
     landscape = models.BooleanField(default=True)
     scale = models.FloatField(default=1.0)
 
@@ -459,12 +431,8 @@ class Event(LookupTable):
         verbose_name="Staff Registration Start",
     )
     staffRegEnd = models.DateTimeField(verbose_name="Staff Registration End")
-    attendeeRegStart = models.DateTimeField(
-        verbose_name="Online Attendee Registration Start"
-    )
-    attendeeRegEnd = models.DateTimeField(
-        verbose_name="Online Attendee Registration End"
-    )
+    attendeeRegStart = models.DateTimeField(verbose_name="Online Attendee Registration Start")
+    attendeeRegEnd = models.DateTimeField(verbose_name="Online Attendee Registration End")
     onsiteRegStart = models.DateTimeField(
         "On-Site Registration Start",
         help_text="Start time for /registration/onsite form",
@@ -475,7 +443,9 @@ class Event(LookupTable):
     default = models.BooleanField(
         default=False,
         verbose_name="Default",
-        help_text="The first default event will be used as the basis for all current event configuration",
+        help_text=(
+            "The first default event will be used as the basis for all current event configuration"
+        ),
     )
     venue = models.ForeignKey(
         Venue,
@@ -534,7 +504,7 @@ class Event(LookupTable):
     collectAddress = models.BooleanField(
         default=True,
         verbose_name="Collect Address",
-        help_text="Disable to skip collecting a mailing address for each " "attendee.",
+        help_text="Disable to skip collecting a mailing address for each attendee.",
     )
     collectBillingAddress = models.BooleanField(
         default=True,
@@ -584,9 +554,7 @@ class Event(LookupTable):
         help_text="URL to the homepage for the convention's primary website.",
         blank=True,
     )
-    charity = models.ForeignKey(
-        Charity, null=True, blank=True, on_delete=models.SET_NULL
-    )
+    charity = models.ForeignKey(Charity, null=True, blank=True, on_delete=models.SET_NULL)
     donations = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -638,9 +606,7 @@ class Department(models.Model):
 
 
 def get_random_token(length):
-    return "".join(
-        random.SystemRandom().choice(VISUALLY_UNAMBIGUOUS_CHARS) for _ in range(length)
-    )
+    return "".join(random.SystemRandom().choice(VISUALLY_UNAMBIGUOUS_CHARS) for _ in range(length))
 
 
 def get_registration_token():
@@ -660,7 +626,11 @@ class StaffInvite(models.Model):
     ignore_time_window = models.BooleanField(
         default=False,
         verbose_name="Ignore Registration Time Window",
-        help_text="Enabling this option will allow this invite code to disregard the open and close date and time specified in the event. The Valid Until setting on this form will still apply",
+        help_text=(
+            "Enabling this option will allow this invite code to disregard "
+            "the open and close date and time specified in the event. The "
+            "Valid Until setting on this form will still apply"
+        ),
     )
     validUntil = models.DateTimeField()
     used = models.BooleanField(default=False)
@@ -692,9 +662,7 @@ class Attendee(models.Model):
     surveyOk = models.BooleanField(default=False)
     volunteerContact = models.BooleanField(default=False)
     volunteerDepts = models.CharField(max_length=1000, blank=True)
-    holdType = models.ForeignKey(
-        HoldType, null=True, blank=True, on_delete=models.SET_NULL
-    )
+    holdType = models.ForeignKey(HoldType, null=True, blank=True, on_delete=models.SET_NULL)
     notes = models.TextField(blank=True)
     parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL)
     parentFirstName = models.CharField(max_length=200, blank=True)
@@ -718,15 +686,11 @@ class Attendee(models.Model):
 
 
 def badge_signature_svg_path(instance, filename):
-    return "event_{0}/badge_{1}/sig_svg_{2}".format(
-        instance.event.id, instance.id, filename
-    )
+    return f"event_{instance.event.id}/badge_{instance.id}/sig_svg_{filename}"
 
 
 def badge_signature_bitmap_path(instance, filename):
-    return "event_{0}/badge_{1}/sig_bmp_{2}".format(
-        instance.event.id, instance.id, filename
-    )
+    return f"event_{instance.event.id}/badge_{instance.id}/sig_bmp_{filename}"
 
 
 class Badge(models.Model):
@@ -736,9 +700,7 @@ class Badge(models.Model):
     PAID = "Paid"
     STAFF = "Staff"
     UNPAID = "Unpaid"
-    attendee = models.ForeignKey(
-        Attendee, null=True, blank=True, on_delete=models.CASCADE
-    )
+    attendee = models.ForeignKey(Attendee, null=True, blank=True, on_delete=models.CASCADE)
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     registeredDate = models.DateTimeField(null=True)
     registrationToken = models.CharField(max_length=200, default=get_registration_token)
@@ -750,14 +712,12 @@ class Badge(models.Model):
 
     def __str__(self):
         if self.badgeNumber is not None or self.badgeNumber == "":
-            return '"{0}" #{1} ({2})'.format(
-                self.badgeName, self.badgeNumber, self.event
-            )
+            return f'"{self.badgeName}" #{self.badgeNumber} ({self.event})'
         if self.badgeName != "":
-            return '"{0}" ({1})'.format(self.badgeName, self.event)
+            return f'"{self.badgeName}" ({self.event})'
         if self.registeredDate is not None:
-            return "[Orphan {0}]".format(self.registeredDate)
-        return "Badge object {0}".format(self.registrationToken)
+            return f"[Orphan {self.registeredDate}]"
+        return f"Badge object {self.registrationToken}"
 
     def isMinor(self):
         birthdate = self.attendee.birthdate
@@ -767,9 +727,7 @@ class Badge(models.Model):
             - birthdate.year
             - ((eventdate.month, eventdate.day) < (birthdate.month, birthdate.day))
         )
-        if age_at_event < 18:
-            return True
-        return False
+        return age_at_event < 18
 
     def getDiscount(self):
         discount = ""
@@ -808,9 +766,7 @@ class Badge(models.Model):
         for oi in orderItems:
             if oi.order.billingType == Order.UNPAID:
                 return Badge.UNPAID
-            if not level:
-                level = oi.priceLevel
-            elif oi.priceLevel.basePrice > level.basePrice:
+            if not level or oi.priceLevel.basePrice > level.basePrice:
                 level = oi.priceLevel
         return level
 
@@ -825,26 +781,18 @@ class Badge(models.Model):
     def save(self, *args, **kwargs):
         if not self.id and not self.registeredDate:
             self.registeredDate = timezone.now()
-        return super(Badge, self).save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
 
 class Staff(models.Model):
-    attendee = models.ForeignKey(
-        Attendee, null=True, blank=True, on_delete=models.CASCADE
-    )
+    attendee = models.ForeignKey(Attendee, null=True, blank=True, on_delete=models.CASCADE)
     registrationToken = models.CharField(max_length=200, default=get_registration_token)
-    department = models.ForeignKey(
-        Department, null=True, blank=True, on_delete=models.SET_NULL
-    )
-    supervisor = models.ForeignKey(
-        "self", null=True, blank=True, on_delete=models.SET_NULL
-    )
+    department = models.ForeignKey(Department, null=True, blank=True, on_delete=models.SET_NULL)
+    supervisor = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL)
     title = models.CharField(max_length=200, blank=True)
     twitter = models.CharField(max_length=200, blank=True)
     telegram = models.CharField(max_length=200, blank=True)
-    shirtsize = models.ForeignKey(
-        ShirtSizes, null=True, blank=True, on_delete=models.SET_NULL
-    )
+    shirtsize = models.ForeignKey(ShirtSizes, null=True, blank=True, on_delete=models.SET_NULL)
     timesheetAccess = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     specialSkills = models.TextField(blank=True)
@@ -863,7 +811,7 @@ class Staff(models.Model):
 
     def __str__(self):
         if self.attendee:
-            return "%s %s" % (self.attendee.firstName, self.attendee.lastName)
+            return f"{self.attendee.firstName} {self.attendee.lastName}"
         return f"<Staff(registrationToken={self.registrationToken})>"
 
     def getBadge(self):
@@ -877,9 +825,7 @@ class Staff(models.Model):
 
 
 class Dealer(models.Model):
-    attendee = models.ForeignKey(
-        Attendee, null=True, blank=True, on_delete=models.SET_NULL
-    )
+    attendee = models.ForeignKey(Attendee, null=True, blank=True, on_delete=models.SET_NULL)
     registrationToken = models.CharField(max_length=200, default=get_registration_token)
     approved = models.BooleanField(default=False)
     tableNumber = models.IntegerField(null=True, blank=True)
@@ -913,7 +859,7 @@ class Dealer(models.Model):
 
     def __str__(self):
         if self.attendee:
-            return "%s %s" % (self.attendee.firstName, self.attendee.lastName)
+            return f"{self.attendee.firstName} {self.attendee.lastName}"
         return "<Dealer(orphan)>"
 
     def getPartnerCount(self):
@@ -945,9 +891,7 @@ class Dealer(models.Model):
 
 class DealerAsst(models.Model):
     dealer = models.ForeignKey(Dealer, on_delete=models.CASCADE)
-    attendee = models.ForeignKey(
-        Attendee, null=True, blank=True, on_delete=models.CASCADE
-    )
+    attendee = models.ForeignKey(Attendee, null=True, blank=True, on_delete=models.CASCADE)
     registrationToken = models.CharField(max_length=200, default=get_registration_token)
     name = models.CharField(max_length=400)
     email = models.CharField(max_length=200)
@@ -987,7 +931,7 @@ class Cart(models.Model):
     transferedDate = models.DateTimeField(null=True)
 
     def __str__(self):
-        return "{0} {1}".format(self.form, self.enteredDate)
+        return f"{self.form} {self.enteredDate}"
 
 
 class Order(models.Model):
@@ -1010,9 +954,15 @@ class Order(models.Model):
     DISPUTE_EVIDENCE_REQUIRED = (
         "Dispute Evidence Required"  # Initial state of a dispute with evidence required
     )
-    DISPUTE_PROCESSING = "Dispute Processing"  # Dispute evidence has been submitted and the bank is processing
-    DISPUTE_WON = "Dispute Won"  # The bank has completed processing the dispute and the seller has won
-    DISPUTE_LOST = "Dispute Lost"  # The bank has completed processing the dispute and the seller has lost
+    DISPUTE_PROCESSING = (
+        "Dispute Processing"  # Dispute evidence has been submitted and the bank is processing
+    )
+    DISPUTE_WON = (
+        "Dispute Won"  # The bank has completed processing the dispute and the seller has won
+    )
+    DISPUTE_LOST = (
+        "Dispute Lost"  # The bank has completed processing the dispute and the seller has lost
+    )
     DISPUTE_ACCEPTED = "Dispute Accepted"  # The seller has accepted the dispute
     STATUS_CHOICES = (
         (PENDING, "Pending"),
@@ -1046,15 +996,9 @@ class Order(models.Model):
     total = models.DecimalField(max_digits=8, decimal_places=2)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default=PENDING)
     reference = models.CharField(max_length=50)
-    createdDate = models.DateTimeField(
-        auto_now_add=True, null=True, verbose_name="Created Date"
-    )
-    settledDate = models.DateTimeField(
-        auto_now_add=True, null=True, verbose_name="Settled Date"
-    )
-    discount = models.ForeignKey(
-        Discount, null=True, on_delete=models.SET_NULL, blank=True
-    )
+    createdDate = models.DateTimeField(auto_now_add=True, null=True, verbose_name="Created Date")
+    settledDate = models.DateTimeField(auto_now_add=True, null=True, verbose_name="Settled Date")
+    discount = models.ForeignKey(Discount, null=True, on_delete=models.SET_NULL, blank=True)
     orgDonation = models.DecimalField(
         max_digits=8,
         decimal_places=2,
@@ -1073,20 +1017,12 @@ class Order(models.Model):
     )
     notes = models.TextField(blank=True)
     billingName = models.CharField(max_length=200, blank=True, verbose_name="Name")
-    billingAddress1 = models.CharField(
-        max_length=200, blank=True, verbose_name="Address 1"
-    )
-    billingAddress2 = models.CharField(
-        max_length=200, blank=True, verbose_name="Address 2"
-    )
+    billingAddress1 = models.CharField(max_length=200, blank=True, verbose_name="Address 1")
+    billingAddress2 = models.CharField(max_length=200, blank=True, verbose_name="Address 2")
     billingCity = models.CharField(max_length=200, blank=True, verbose_name="City")
     billingState = models.CharField(max_length=200, blank=True, verbose_name="State")
-    billingCountry = models.CharField(
-        max_length=200, blank=True, verbose_name="Country"
-    )
-    billingPostal = models.CharField(
-        max_length=20, blank=True, verbose_name="Postal Code"
-    )
+    billingCountry = models.CharField(max_length=200, blank=True, verbose_name="Country")
+    billingPostal = models.CharField(max_length=20, blank=True, verbose_name="Postal Code")
     billingEmail = models.CharField(max_length=200, blank=True, verbose_name="Email")
     billingType = models.CharField(
         max_length=20,
@@ -1101,9 +1037,7 @@ class Order(models.Model):
     email_error = models.TextField(blank=True, default="")
 
     def __str__(self):
-        return "${0} {1} ({2}) [{3}]".format(
-            self.total, self.billingType, self.status, self.reference
-        )
+        return f"${self.total} {self.billingType} ({self.status}) [{self.reference}]"
 
     class Meta:
         permissions = (
@@ -1152,23 +1086,16 @@ class OrderItem(models.Model):
         db_table = "registration_order_item"
 
     def getOptions(self):
-        return list(
-            AttendeeOptions.objects.filter(orderItem=self).order_by(
-                "option__optionName"
-            )
-        )
+        return list(AttendeeOptions.objects.filter(orderItem=self).order_by("option__optionName"))
 
     def __str__(self):
         try:
-            return '{} (${}) - "{}"'.format(
-                self.order.status,
-                self.order.total,
-                self.badge.badgeName,
-            )
+            return f'{self.order.status} (${self.order.total}) - "{self.badge.badgeName}"'
         except BaseException:
             try:
-                return 'Incomplete from {}: "{}" ({})'.format(
-                    self.enteredBy, self.badge.badgeName, self.priceLevel
+                return (
+                    f"Incomplete from {self.enteredBy}: "
+                    f'"{self.badge.badgeName}" ({self.priceLevel})'
                 )
             except BaseException:
                 return "OrderItem object"
@@ -1195,7 +1122,7 @@ class AttendeeOptions(models.Model):
 
     def __str__(self):
         # return "[{0}] - {1}".format(self.orderItem.decode("utf-8"), 1).encode("utf-8")
-        return "[{0}] - {1}".format(str(self.orderItem), self.option)
+        return f"[{self.orderItem!s}] - {self.option}"
 
 
 class BanList(models.Model):
@@ -1203,6 +1130,9 @@ class BanList(models.Model):
     lastName = models.CharField(max_length=200, blank=True)
     email = models.CharField(max_length=400, blank=True)
     reason = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.firstName} {self.lastName} <{self.email}>"
 
     class Meta:
         db_table = "registration_ban_list"
@@ -1242,7 +1172,9 @@ class Firebase(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         verbose_name="Print via MQTT",
-        help_text="Which terminal to use for printing via MQTT, if it should be used at this terminal.",
+        help_text=(
+            "Which terminal to use for printing via MQTT, if it should be used at this terminal."
+        ),
     )
     print_via_payment = models.BooleanField(
         default=False,
@@ -1265,9 +1197,7 @@ class Firebase(models.Model):
         blank=True,
         verbose_name="Square Terminal",
     )
-    payment_type = models.CharField(
-        max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True
-    )
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_CHOICES, null=True, blank=True)
 
     def __str__(self):
         return str(self.name)
@@ -1327,7 +1257,9 @@ class Cashdrawer(models.Model):
     DEPOSIT = "Deposit"  # additional cash (eg, change) added to drawer
     DROP = "Drop"  # removed excess cash from drawer and added to safe
     PICKUP = "Pickup"  # cash removed from drawer custody by cash office
-    ADJUSTMENT = "Adjustment"  # an adjustment made when the count is known to be off, to reset the counters
+    ADJUSTMENT = (
+        "Adjustment"  # an adjustment made when the count is known to be off, to reset the counters
+    )
     ACTION_CHOICES = (
         (OPEN, "Open"),
         (CLOSE, "Close"),
@@ -1341,9 +1273,7 @@ class Cashdrawer(models.Model):
     # Action: one of - ['OPEN', 'CLOSE', 'TRANSACTION', 'DEPOSIT', 'DROP', 'PICKUP']
     action = models.CharField(max_length=20, choices=ACTION_CHOICES, default=OPEN)
     total = models.DecimalField(max_digits=8, decimal_places=2)
-    tendered = models.DecimalField(
-        max_digits=8, decimal_places=2, blank=True, default=0
-    )
+    tendered = models.DecimalField(max_digits=8, decimal_places=2, blank=True, default=0)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
@@ -1354,6 +1284,9 @@ class Cashdrawer(models.Model):
         blank=True,
         related_name="firebase_cashdrawer",
     )
+
+    def __str__(self):
+        return f"{self.action} {self.total} @ {self.timestamp}"
 
 
 class ReservedBadgeNumbers(models.Model):
@@ -1382,6 +1315,9 @@ class PrintHistory(models.Model):
     )
     source = models.CharField(choices=SOURCE_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"PrintHistory(badge={self.badge_id}, source={self.source})"
 
     class Meta:
         db_table = "registration_print_history"

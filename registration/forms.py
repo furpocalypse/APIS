@@ -15,9 +15,7 @@ def check_state(data: dict, country_field: str, state_field: str):
     if country in COUNTRIES_REQUIRING_STATE and not state:
         raise ValidationError(
             {
-                state_field: ValidationError(
-                    f"State is required in {country}", code="required"
-                ),
+                state_field: ValidationError(f"State is required in {country}", code="required"),
             }
         )
 
@@ -112,7 +110,8 @@ class AttendeeForm(forms.ModelForm):
             "aslRequest",
             "address2",
             "state",
-        ) + required_address_fields
+            *required_address_fields,
+        )
 
 
 class BadgeForm(forms.ModelForm):
@@ -162,4 +161,5 @@ class OrderForm(forms.ModelForm):
             "apiData",
             "billingAddress2",
             "billingState",
-        ) + required_billing_fields
+            *required_billing_fields,
+        )
