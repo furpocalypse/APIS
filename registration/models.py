@@ -1035,6 +1035,17 @@ class Order(models.Model):
     onsite_reference = models.UUIDField(null=True, blank=True)
     email_sent = models.BooleanField(null=True, blank=True, default=None)
     email_error = models.TextField(blank=True, default="")
+    # S33 HIGH-2 (OWASP API1 BOLA): the terminal that opened this order, if
+    # any. Fail-safe by design — null/legacy orders retain current behavior;
+    # the cross-terminal completion guard only engages when this is set, so
+    # an existing checkout can never be broken by enabling the binding.
+    opened_at_terminal = models.ForeignKey(
+        "Firebase",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="opened_orders",
+    )
 
     def __str__(self):
         return f"${self.total} {self.billingType} ({self.status}) [{self.reference}]"

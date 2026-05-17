@@ -516,6 +516,14 @@ def complete_square_transaction(request):
     store_api_data = {}
 
     order = orders[0]
+
+    # S33 HIGH-2 (OWASP API1 BOLA): if this order was opened at a specific
+    # terminal, only that terminal may complete it. Fail-safe — the guard is
+    # inert for legacy/null orders, so it cannot break an existing checkout.
+    # Collapse to a generic 404 to avoid a cross-terminal order oracle.
+    if order.opened_at_terminal_id and order.opened_at_terminal_id != terminal.id:
+        return JsonResponse({"success": False, "reason": "Not found"}, status=404)
+
     order.billingType = Order.CREDIT
 
     # Lookup the payment(s?) associated with this order:
@@ -734,6 +742,20 @@ def complete_cash_transaction(request):
     combine_orders(orders)
 
     order = orders[0]
+
+    # S33 HIGH-2 (OWASP API1 BOLA): if the order is bound to a terminal and
+    # the active session terminal is resolvable and differs, reject. Cash is
+    # already @staff_member_required + @permission_required("order.cash");
+    # if the active terminal can't be resolved we fail open (skip the guard)
+    # rather than block a permitted staff cash sale on a session edge case.
+    active_terminal = get_active_terminal(request)
+    if (
+        order.opened_at_terminal_id
+        and active_terminal is not None
+        and order.opened_at_terminal_id != active_terminal.id
+    ):
+        return JsonResponse({"success": False, "reason": "Not found"}, status=404)
+
     order.billingType = Order.CASH
     order.status = Order.COMPLETED
     order.settledDate = timezone.now()
@@ -1146,7 +1168,14 @@ def attendee_details(request):
             {"success": False, "reason": "ID parameter must be integer"}, status=400
         )
 
-    attendee = Badge.objects.get(id=id).attendee
+    # BOLA (S33 HIGH-1 / OWASP API1): scope the badge lookup to the active
+    # onsite event and collapse any miss to a generic 404 so a staff session
+    # at one event cannot enumerate or read attendee PII from another event.
+    event = Event.objects.get(default=True)
+    try:
+        attendee = Badge.objects.get(id=id, event=event).attendee
+    except Badge.DoesNotExist:
+        return JsonResponse({"success": False, "reason": "Not found"}, status=404)
 
     return JsonResponse(
         {

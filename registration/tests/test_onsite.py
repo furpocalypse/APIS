@@ -9,6 +9,7 @@ from django.test.utils import override_settings
 from registration.models import Cashdrawer, Firebase, HoldType
 from registration.tests.common import (
     DEFAULT_EVENT_ARGS,
+    Attendee,
     Badge,
     Client,
     Decimal,
@@ -562,3 +563,130 @@ class TestSearchFields(OnsiteBaseTestCase):
         self.assertEqual(fields.query, "")
         self.assertIsNone(fields.birthday)
         self.assertEqual(fields.badge_ids, [123, 456])
+
+
+class TestTerminalOrderBinding(OnsiteBaseTestCase):
+    """S33 HIGH-1 + HIGH-2 (OWASP API1 BOLA).
+
+    HIGH-1: attendee_details must scope its Badge lookup to the active
+    onsite event and return a generic 404 across events (no cross-event
+    PII oracle). HIGH-2: an order opened at one terminal must not be
+    completable from another terminal, while legacy/null orders remain
+    completable (fail-safe — the binding cannot break an existing
+    checkout).
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Second terminal with its own hash-only bearer token (Decision #8).
+        self.terminal_b = Firebase(name="Terminal 2")
+        self.terminal_b_token = self.terminal_b.mint_token()
+        self.terminal_b.save()
+        self.assertTrue(self.client.login(username="admin", password="admin"))
+
+    def _make_badge(self, event):
+        attendee = Attendee.objects.create(
+            firstName="Jane",
+            lastName="Doe",
+            email=f"jane{Attendee.objects.count()}@example.com",
+            birthdate=now.date() - ten_days,
+        )
+        return Badge.objects.create(
+            attendee=attendee, event=event, badgeName=f"B{Badge.objects.count()}"
+        )
+
+    def _make_order(self, reference, opened_at=None):
+        return Order.objects.create(
+            total=Decimal("45.00"),
+            reference=reference,
+            status=Order.PENDING,
+            billingType=Order.CREDIT,
+            opened_at_terminal=opened_at,
+        )
+
+    # ---- HIGH-1: attendee_details event scoping ----
+
+    def test_attendee_details_same_event_ok(self):
+        badge = self._make_badge(self.event)
+        response = self.client.get(
+            reverse("registration:onsite_attendee_details"), {"id": badge.id}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(response.json()["attendee"]["firstName"], "Jane")
+
+    def test_attendee_details_cross_event_404(self):
+        other_event = Event.objects.create(
+            **{**DEFAULT_EVENT_ARGS, "default": False, "name": "Other Event 2051!"}
+        )
+        badge = self._make_badge(other_event)
+        response = self.client.get(
+            reverse("registration:onsite_attendee_details"), {"id": badge.id}
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        self.assertEqual(response.json()["reason"], "Not found")
+
+    # ---- HIGH-2: square (bearer-auth) terminal binding ----
+
+    @patch("registration.mqtt.send_mqtt_message")
+    @patch("registration.payments.refresh_payment")
+    def _complete_square(self, reference, token, mock_refresh, mock_mqtt):
+        mock_refresh.return_value = (True, None)
+        return self.client.post(
+            reverse("registration:complete_square_transaction"),
+            json.dumps({"reference": reference, "paymentId": "JUNK"}),
+            content_type="application/json",
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+    def test_square_bound_order_blocks_other_terminal(self):
+        order = self._make_order("BIND-A", opened_at=self.terminal)
+        response = self._complete_square("BIND-A", self.terminal_b_token)
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.PENDING)
+
+    def test_square_bound_order_allows_owning_terminal(self):
+        self._make_order("BIND-OK", opened_at=self.terminal)
+        response = self._complete_square("BIND-OK", self.terminal_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+
+    def test_square_legacy_null_order_still_completes(self):
+        # Fail-safe invariant: an unbound (legacy) order completes from any
+        # authenticated terminal, so the binding cannot break checkout.
+        self._make_order("LEGACY", opened_at=None)
+        response = self._complete_square("LEGACY", self.terminal_b_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+
+    # ---- HIGH-2: cash (session-terminal) binding ----
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_cash_mismatch_rejected_when_both_known(self, mock_mqtt):
+        order = self._make_order("CASH-MM", opened_at=self.terminal)
+        # Active session terminal = terminal_b, order bound to terminal A.
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal_b.id})
+        args = {"reference": "CASH-MM", "total": order.total, "tendered": order.total}
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.PENDING)
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_cash_match_completes(self, mock_mqtt):
+        order = self._make_order("CASH-OK", opened_at=self.terminal)
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
+        args = {"reference": "CASH-OK", "total": order.total, "tendered": order.total}
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.COMPLETED)

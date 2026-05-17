@@ -18,6 +18,7 @@ from registration.models import (
     Decimal,
     Discount,
     Event,
+    Firebase,
     Order,
     OrderItem,
     PriceLevel,
@@ -699,6 +700,14 @@ def notify_terminal(request, order):
         if associated_terminal:
             signer = TimestampSigner()
             data_obj = signer.unsign_object(associated_terminal, max_age=60 * 30)
+            # S33 HIGH-2 (OWASP API1 BOLA): bind the order to the terminal
+            # that opened it, on first notify only. Best-effort — the
+            # surrounding try/except swallows failures so a binding miss
+            # never blocks completion of a legitimate checkout.
+            terminal = Firebase.objects.filter(name=data_obj["terminal"]).first()
+            if terminal and order.opened_at_terminal_id is None:
+                order.opened_at_terminal = terminal
+                order.save(update_fields=["opened_at_terminal"])
             # We only need one badge ID as onsite will automatically add all
             # badges attached to the order.
             order_item = OrderItem.objects.filter(order_id=order.id).first()
