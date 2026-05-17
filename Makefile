@@ -153,10 +153,11 @@ dev-createsuperuser:
 # Requires: `docker compose up -d postgres redis` (to bring up the backing
 # services) and a local uv-backed venv via `make dev-setup`.
 #
-# Settings: uses `fm_eventmanager/settings_test.py` — a near-copy of the
-# canonical `fm_eventmanager/settings.py` with test-specific tweaks
-# (CELERY_TASK_ALWAYS_EAGER, etc.). DATABASE_* / REDIS_* / CELERY_* env
-# vars below point the test run at the docker compose service hostnames
+# Settings (Decision #11): the ONE canonical
+# `fm_eventmanager/settings.py` driven by the tracked `.env.test`
+# (CELERY_TASK_ALWAYS_EAGER etc. come from that env file, not a separate
+# settings module). DATABASE_* / REDIS_* / CELERY_* env vars below point
+# the test run at the docker compose service hostnames
 # resolved via 127.0.0.1 port bindings — adjust if your docker compose
 # exposes different ports.
 # --------------------------------------------------------------------------
@@ -375,7 +376,8 @@ e2e-ui:
 	bash $(E2E_DIR)/scripts/down.sh
 
 # mypy/pylint load Django via the django-stubs / pylint-django plugins, which
-# import settings_test; that needs a (throwaway) secret key and a STATIC_ROOT.
+# import the canonical settings.py; that needs a (throwaway) secret key
+# and a STATIC_ROOT.
 # Decision #11: mypy/pylint import the Django settings (django plugins),
 # so they need a clean importable env (DEBUG/ALLOWED_HOSTS/…). Reuse the
 # tracked .env.test posture rather than a partial inline env that would

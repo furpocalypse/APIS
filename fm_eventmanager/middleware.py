@@ -1,4 +1,4 @@
-"""Project-wide middleware. Ordering is pinned in settings_base.MIDDLEWARE:
+"""Project-wide middleware. Ordering is pinned in settings.MIDDLEWARE:
 RequireClientIPMiddleware is positioned strictly before AxesMiddleware so
 axes never observes an unresolved client IP (plan D-IP / RT-B5)."""
 

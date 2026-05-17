@@ -19,6 +19,49 @@ The codebase has a **strong security posture overall**. The CLAUDE.md standards 
 | **Medium** | 14 | Rate-limit gaps on registration & webhooks; PII in logs; image-digest pin drift |
 | **Low / Info** | 7 | Unused unsafe form; dev-overlay debug mode; HPA/PDB mismatch |
 
+---
+
+## Remediation status (S25 — updated 2026-05-17, PR #41 `pr41-remediation`)
+
+Per Decision #9 every embedded HIGH/MED/LOW was remediated **in-band** in
+this PR (not deferred to backlog), each with a mandated locking test.
+This table is the truthful audit record; a row says *Resolved* only
+because its test exists and passes the local gates (DB/concurrency tests
+are the CI oracle — no local Postgres).
+
+| Finding | Status | Commit |
+|---|---|---|
+| HIGH-1 attendee_details BOLA | Resolved | `5710553` |
+| HIGH-2 per-terminal order auth | Resolved | `5710553` |
+| HIGH-3 JS-context XSS templates | Resolved | `1ad7670` |
+| HIGH-4 ban-list email in log | Resolved | `020479f` (S33-g) |
+| HIGH-5 plaintext terminal token | Resolved | `60c5d92` |
+| HIGH-6 no SCA in CI | Resolved | `772a3d1` (+ `34aef69`) |
+| HIGH-7 no backup/PITR | Deferred (ops-infra, rationale recorded above & in plan) | n/a |
+| MED-1 terminal authz model undocumented | Resolved | `7a7bbd4` |
+| MED-2 session-terminal flip | Resolved | `d24f869` |
+| MED-3 reg/dealer/staff rate limit | Resolved | `a3da813` |
+| MED-4 webhook rate limit | Resolved | `a3da813` |
+| MED-5 MQTT key strength | Resolved | `7a7bbd4` |
+| MED-6 central PII log redaction | Resolved | `7a7bbd4` (S33-h) |
+| MED-7 PayPal token cache | Resolved | `bc76af0` |
+| MED-8 apiData PII | Resolved | `95eb1d3` |
+| MED-9 secondary image digests | Resolved (tooling + preflight) | `e96c386` |
+| MED-10 actions not SHA-pinned | Resolved | `34aef69` |
+| MED-11 AKS imagePullPolicy | Resolved | `b03473e` |
+| MED-12 netpol CIDRs | Resolved (preflight + overlay patch) | `e96c386` |
+| MED-13 TRUSTED_PROXY_CIDRS enforcement | Resolved | `a2232f4` |
+| MED-14 two-header convention | Resolved (documented) | `a2232f4` |
+| LOW-1 bare except | Resolved | `020479f` |
+| LOW-2 unused SignatureUploadForm | Resolved | `7a7bbd4` |
+| LOW-3 PayPal verify backoff | Resolved | `bc76af0` |
+| LOW-4 cash-drawer audit log | Resolved | `58cc256` (S33-j) |
+| LOW-5 HPA/PDB mismatch | Resolved | `b03473e` |
+| LOW-6 dev-overlay DEBUG | Resolved (documented) | `b03473e` |
+| INFO-1 MI/tenant ids in overlay | Acknowledged (public identifiers, info-only) | n/a |
+
+---
+
 **Top 5 things to fix first** (effort vs. impact ranked):
 
 1. **[HIGH-3]** Quote `{{ event.*Email }}` in `<script>` blocks (4 templates, 30 min)

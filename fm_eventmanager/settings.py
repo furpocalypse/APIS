@@ -805,9 +805,13 @@ if not _metrics_backend and not DEBUG:
         "(e.g. DummyReporter to disable cron metrics, or InfluxDBv3Reporter)."
     )
 APIS_METRICS_BACKEND = _metrics_backend or "InfluxDBReporter"
+# S20/S28: settings.py is the ONE locus that reads env for the metrics
+# backend; the reporter receives this dict and must NOT touch os.environ.
 APIS_METRICS_SETTINGS = {
     "database": os.getenv("INFLUXDB_DATABASE", "apis"),
     "host": os.getenv("INFLUXDB_HOST", "localhost"),
+    "url": os.getenv("INFLUXDB_URL", "http://influxdb:8181"),
+    "token": os.getenv("INFLUXDB_TOKEN", ""),
 }
 
 # MQTT for cash-drawer worker

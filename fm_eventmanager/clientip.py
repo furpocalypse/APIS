@@ -20,7 +20,7 @@ Why re-export the one allauth symbol rather than (a) re-implement it or
 Documented behaviour of the underlying allauth resolver (verified against
 the installed source): when ``ALLAUTH_TRUSTED_CLIENT_IP_HEADER`` is
 non-empty it returns *only* that header (``None`` if absent); when empty
-it falls back through XFF then ``REMOTE_ADDR``. settings_base enforces a
+it falls back through XFF then ``REMOTE_ADDR``. settings.py enforces a
 non-empty header under ``APIS_ENV=production`` so the trust property holds
 in prod; tests/dev intentionally run with it empty (REMOTE_ADDR fallback).
 

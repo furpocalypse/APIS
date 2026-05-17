@@ -21,7 +21,7 @@ Design (plan S2):
   ``(integration, event_id)`` store (plan S38), so the window is sized to
   cover provider retry horizons (Square ≈ 72h, PayPal ≈ 3 days) and must
   never silently drop a legitimate *first* delivery — see
-  ``WEBHOOK_MAX_AGE_SECONDS`` default in settings_base.
+  ``WEBHOOK_MAX_AGE_SECONDS`` default in settings.py.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def webhook_signature_bypassed(request) -> bool:
     """The single shared predicate for "signature verification is bypassed".
 
     True only on the E2E mock path: ``settings.E2E_MODE`` (which
-    settings_base forces False unless DEBUG, and hard-fails under
+    settings.py forces False unless DEBUG, and hard-fails under
     ``APIS_ENV=production`` — plan S2b/RT-B2) AND the explicit
     ``X-E2E-Mock-Signature: 1`` header. Used by both providers'
     signature checks and by the age-window guards so the two can never

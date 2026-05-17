@@ -48,7 +48,7 @@ jobs:
         ports:
           - 3000:3000
 
-      # settings_base wires cache / sessions(cached_db) / celery /
+      # settings.py wires cache / sessions(cached_db) / celery /
       # idempotency-lock / maintenance-mode to Redis (the canonical
       # `make test` path uses it via docker-compose). The build job had
       # no Redis service -> ~1600 "connecting to redis: name resolution"

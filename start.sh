@@ -12,22 +12,28 @@
 #   - tests / `docker run -p 8000:8000` work without compose
 set -eu
 
-# S29 / S34: single-locus migration. Running `migrate` on every container
-# (web AND worker, every replica) races N concurrent migrators on boot.
-# It now runs only when APIS_RUN_MIGRATIONS is truthy (default "1" so the
-# single-container compose/dev case Just Works); a scaled deployment runs
-# migrate exactly once from an init job / one designated locus and sets
-# APIS_RUN_MIGRATIONS=0 on the app + worker replicas.
-if [ "${APIS_RUN_MIGRATIONS:-1}" = "1" ]; then
-    ./manage.py migrate
-fi
+# S34: single-locus migration. `migrate` runs ONLY on the web entrypoint,
+# never the worker (the worker waits on DB readiness and must not race a
+# schema change). Even among web replicas it is gated on
+# APIS_RUN_MIGRATIONS (default "1" so the single-container compose/dev
+# case Just Works); a scaled deployment runs migrate exactly once from a
+# dedicated init job / one designated locus and sets APIS_RUN_MIGRATIONS=0
+# on every app + worker replica. This removes the start.sh:15 cold-start
+# race where web AND worker both ran `migrate` concurrently.
 
 case ${1:-} in
     worker)
+        # No migrate here by design (S34). Celery tasks are idempotent /
+        # retry; a brief wait for the web locus to finish migrating is
+        # preferable to a second concurrent migrator.
         exec celery -A fm_eventmanager worker --loglevel=info
         ;;
 
     *)
+        if [ "${APIS_RUN_MIGRATIONS:-1}" = "1" ]; then
+            ./manage.py migrate
+        fi
+
         # S29: --forwarded-allow-ips is no longer hardcoded to `*`.
         # S13 resolved to decision-table case (c) — the real Azure-LB
         # TCP peer is not empirically established in-repo, so the edge

@@ -345,17 +345,17 @@ OSS 1.x line went EOL October 2025). Registered as `InfluxDBv3Reporter`
 in METRICS_BACKENDS in cron_metrics.py — set
 ``APIS_METRICS_BACKEND=InfluxDBv3Reporter`` in env to switch.
 
-Configured by environment variables:
+S20/S28: configured ONLY via ``settings.APIS_METRICS_SETTINGS`` (the
+single env-reading locus is settings.py); this module never touches
+``os.environ``. The dict carries:
 
-    INFLUXDB_URL        e.g. http://influxdb:8181 (v3 default port)
-    INFLUXDB_TOKEN      operator/admin token created after first-boot via
-                        `influxdb3 create token --admin`
-    INFLUXDB_DATABASE   target database (default: "apis")
+    url        e.g. http://influxdb:8181 (v3 default port; INFLUXDB_URL)
+    token      operator/admin token (INFLUXDB_TOKEN) — required
+    database   target database (INFLUXDB_DATABASE, default "apis")
 """
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 from django.contrib.sites.models import Site
@@ -375,15 +375,18 @@ class InfluxDBv3Reporter:
     """
 
     def __init__(self, config: dict):
-        # `config` is the legacy `APIS_METRICS_SETTINGS` dict, accepted for
-        # signature compatibility with `InfluxDBReporter`. Every real value
-        # comes from env so an operator can rotate the token without
-        # redeploying.
-        host = os.environ.get("INFLUXDB_URL", config.get("url", "http://influxdb:8181"))
-        token = os.environ["INFLUXDB_TOKEN"]  # required
-        self._database = os.environ.get(
-            "INFLUXDB_DATABASE", config.get("database", "apis")
-        )
+        # S20/S28: `config` IS settings.APIS_METRICS_SETTINGS (cron_metrics
+        # passes it in). Read every value from it — never os.environ —
+        # so the single env-reading locus stays settings.py. Token
+        # rotation is a settings/env change picked up on next boot.
+        host = config.get("url") or "http://influxdb:8181"
+        token = config.get("token") or ""
+        if not token:
+            raise RuntimeError(
+                "InfluxDBv3Reporter: APIS_METRICS_SETTINGS['token'] "
+                "(INFLUXDB_TOKEN) is required."
+            )
+        self._database = config.get("database", "apis")
 
         self._client = InfluxDBClient3(
             host=host,

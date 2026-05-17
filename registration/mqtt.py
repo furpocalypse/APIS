@@ -130,7 +130,7 @@ def get_state_token(firebase: Firebase) -> dict:
 def get_token(sub, exp=None, subs=None, publ=None) -> str:
     if exp is None:
         # S20: the default token lifetime is a tunable that lives with its
-        # setting in settings_base (single source); read it from
+        # setting in settings.py (single source); read it from
         # django.conf.settings at call time (no module-level global, so
         # @override_settings works). One hour bounds capture-replay if a
         # token leaks; long-lived terminal tokens pass `exp` explicitly.
