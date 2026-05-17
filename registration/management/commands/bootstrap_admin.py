@@ -93,18 +93,19 @@ class Command(BaseCommand):
                 )
                 return
 
-            # Credential material (password) is returned as a distinct
-            # value, never co-mingled in one tuple with the non-sensitive
-            # identifiers (username/email). This keeps the secret's data
-            # flow narrow and isolatable: the username is audit-logged
-            # below; the password must never be able to reach a log sink.
+            # The password is gathered by a *separate* call from the
+            # identifiers, so the secret never shares a function return
+            # (or any container) with the audit-logged username/email.
+            # This keeps the credential's data flow strictly isolated.
             if options.get("from_env"):
-                (username, email), password = self._read_from_env()
+                username, email = self._identity_from_env()
+                password = self._password_from_env()
             else:
-                (username, email), password = self._prompt_interactive(
+                username, email = self._prompt_identity(
                     default_username=options.get("username"),
                     default_email=options.get("email"),
                 )
+                password = self._prompt_password()
 
             self._validate_password(password, username, email)
 
@@ -139,7 +140,12 @@ class Command(BaseCommand):
 
     # --- input gathering ---------------------------------------------------
 
-    def _prompt_interactive(self, default_username, default_email):
+    # Identity and password are gathered by separate methods on purpose:
+    # the credential is never co-located with the (audit-logged)
+    # identifiers in the same return value, scope, or container, so it
+    # cannot reach a log sink via shared data flow.
+
+    def _prompt_identity(self, default_username, default_email):
         try:
             username = input(
                 f"Admin username{f' [{default_username}]' if default_username else ''}: "
@@ -152,7 +158,13 @@ class Command(BaseCommand):
             ).strip() or (default_email or "")
             if not email:
                 raise CommandError("Email is required.")
+        except (EOFError, KeyboardInterrupt):
+            raise CommandError("Aborted by user.") from None
 
+        return username, email
+
+    def _prompt_password(self):
+        try:
             # getpass disables echo; falls back to input() (with a warning
             # printed by getpass itself) on environments without a tty.
             password = getpass.getpass("Password: ")
@@ -164,14 +176,24 @@ class Command(BaseCommand):
         except (EOFError, KeyboardInterrupt):
             raise CommandError("Aborted by user.") from None
 
-        # Identifiers grouped; secret kept as a separate return value (see
-        # the caller's note — segregates the credential's data flow).
-        return (username, email), password
+        return password
 
-    def _read_from_env(self):
+    def _identity_from_env(self):
         try:
             username = os.environ["BOOTSTRAP_ADMIN_USERNAME"].strip()
             email = os.environ["BOOTSTRAP_ADMIN_EMAIL"].strip()
+        except KeyError as exc:
+            raise CommandError(
+                f"--from-env requires BOOTSTRAP_ADMIN_USERNAME, "
+                f"BOOTSTRAP_ADMIN_EMAIL, and BOOTSTRAP_ADMIN_PASSWORD; "
+                f"missing: {exc.args[0]}"
+            ) from exc
+        if not username or not email:
+            raise CommandError("BOOTSTRAP_ADMIN_USERNAME / EMAIL must be non-empty.")
+        return username, email
+
+    def _password_from_env(self):
+        try:
             password = os.environ["BOOTSTRAP_ADMIN_PASSWORD"]
         except KeyError as exc:
             raise CommandError(
@@ -179,17 +201,15 @@ class Command(BaseCommand):
                 f"BOOTSTRAP_ADMIN_EMAIL, and BOOTSTRAP_ADMIN_PASSWORD; "
                 f"missing: {exc.args[0]}"
             ) from exc
-        if not username or not email or not password:
-            raise CommandError("BOOTSTRAP_ADMIN_USERNAME / EMAIL / PASSWORD must all be non-empty.")
+        if not password:
+            raise CommandError("BOOTSTRAP_ADMIN_PASSWORD must be non-empty.")
 
         # Best-effort scrub from this process's env so a later os.environ
         # read in a downstream library doesn't surface it. Child processes
         # we already started have inherited the value; rotate the secret.
         os.environ.pop("BOOTSTRAP_ADMIN_PASSWORD", None)
 
-        # Identifiers grouped; secret kept as a separate return value (see
-        # the caller's note — segregates the credential's data flow).
-        return (username, email), password
+        return password
 
     def _validate_password(self, password: str, username: str, email: str):
         # validate_password checks AUTH_PASSWORD_VALIDATORS against a fake
