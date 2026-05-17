@@ -834,7 +834,9 @@ class StaffAdmin(ImportExportModelAdmin):
                     count += 1
 
                 self.message_user(request, f"Successfully copied {count} staff to {event}.")
-                return HttpResponseRedirect(request.get_full_path())
+                # CodeQL py/url-redirection: redirect to the route-bound
+                # local path only (drop the user-controlled query string).
+                return HttpResponseRedirect(request.path)
 
         if not form:
             form = self.CopyToEvent(
@@ -1390,7 +1392,9 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         if "amount" in request.POST:
             if not request.user.has_perm("registration.issue_refund"):
                 messages.error(request, "You do not have permission to issue refunds.")
-                return HttpResponseRedirect(request.get_full_path())
+                # CodeQL py/url-redirection: redirect to the route-bound
+                # local path only (drop the user-controlled query string).
+                return HttpResponseRedirect(request.path)
 
             form = self.RefundForm(request.POST)
 
@@ -1421,7 +1425,9 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                     return HttpResponseRedirect(
                         reverse("admin:registration_order_change", args=(order_id,))
                     )
-                return HttpResponseRedirect(request.get_full_path())
+                # CodeQL py/url-redirection: redirect to the route-bound
+                # local path only (drop the user-controlled query string).
+                return HttpResponseRedirect(request.path)
             else:
                 messages.error(request, "Invalid form data.")
 

@@ -110,7 +110,12 @@ def abort(status=400, reason="Bad request"):
     status: A valid HTTP status code
     reason: Human-readable explanation
     """
-    logger.info(f"JSON {status}: {reason}")
+    # OWASP A09 / CodeQL py/clear-text-logging-sensitive-data: callers pass
+    # `reason` that may carry exception text / PII. Log only the status; the
+    # reason is still returned to the client (the API contract) but never
+    # written to server logs. Callers MUST pass a generic, non-sensitive
+    # reason (never str(exc)) — see the stack-trace-exposure remediations.
+    logger.info("JSON abort %s", status)
     return JsonResponse({"success": False, "reason": reason}, status=status)
 
 
@@ -122,10 +127,10 @@ def success(status=200, reason=None):
     reason: (Optional) human-readable explanation
     """
     if reason is None:
-        logger.debug(f"JSON {status}")
+        logger.debug("JSON %s", status)
         return JsonResponse({"success": True}, status=status)
     else:
-        logger.debug(f"JSON {status}: {reason}")
+        logger.debug("JSON %s (with reason)", status)
         return JsonResponse(
             {
                 "success": True,

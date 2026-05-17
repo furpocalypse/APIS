@@ -69,7 +69,11 @@ dev = [
     "coveralls>=4.1.0",
     "django-debug-toolbar~=6.2.0",
     "django-stubs[compatible-mypy]>=6.0.4",
-    "mypy>=2.0.0",
+    # mypy 2.0.0 INTERNAL-ERRORs on this codebase (CI lint.yml mypy job
+    # crashed with exit 2). Pin to the stable 1.x line until 2.x is
+    # crash-free; mypy is a Phase-B continue-on-error job so this only
+    # affects whether it produces usable (non-blocking) output.
+    "mypy>=1.15,<2",
     "pylint>=4.0.5",
     "pylint-django>=2.7.0",
     "ruff>=0.15.4",

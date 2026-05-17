@@ -80,10 +80,11 @@ def get_cart(request):
             try:
                 birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
             except ValueError:
-                logger.warning(
-                    f"The required field 'birthdate' is not well-formed (got '{pda['birthdate']}')"
-                )
-                logger.warning(f"Removing malformed cart from session: {cart}")
+                # OWASP A09 / CodeQL py/clear-text-logging-sensitive-data:
+                # birthdate is PII and `cart` stringifies its formData
+                # (attendee email/address/birthdate). Log neither value.
+                logger.warning("The required field 'birthdate' is not well-formed")
+                logger.warning("Removing malformed cart %s from session", cart.id)
                 request.session["cart_items"].pop(idx)
                 cart.delete()
                 del cartItems[idx]
@@ -215,7 +216,9 @@ def add_to_cart(request):
     pda = attendee_form.cleaned_data
 
     if check_ban_list(pda["firstName"], pda["lastName"], pda["email"]):
-        logger.error(f"***ban list registration attempt: {pda['email']}***")
+        # OWASP A09 / S35: keep the audit signal (rate-detectable) but do
+        # NOT log the email/PII in clear text.
+        logger.error("ban list registration attempt blocked (identity redacted)")
         registrationEmail = common.get_registration_email()
         return common.abort(
             403,

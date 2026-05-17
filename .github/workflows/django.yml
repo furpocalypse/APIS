@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [production, stage]
 
+# CodeQL actions/missing-workflow-permissions: least privilege. Tests +
+# coveralls submission need read only (coveralls posts to coveralls.io).
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04

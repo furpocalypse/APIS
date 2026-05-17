@@ -14,6 +14,12 @@ on:
   #  workflows: ["Django CI"]
   #  types: [completed]
 
+# CodeQL actions/missing-workflow-permissions: least privilege. The build
+# pushes images to ghcr.io (packages:write); nothing writes repo contents.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build_docker:
     runs-on: ubuntu-latest

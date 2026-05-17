@@ -1,3 +1,5 @@
+from collections import Counter
+
 from django.core.management.base import BaseCommand
 
 from registration.models import (
@@ -39,31 +41,20 @@ class Command(BaseCommand):
         selected_options = AttendeeOptions.objects.filter(
             option=options[selection], orderItem__badge__event=event
         )
-        bins = {}
-        levels = {}
+        levels = Counter(str(ao.orderItem.priceLevel) for ao in selected_options)
+        bins = Counter()
         print(
             f"{selected_options.count()} orders with {options[selection]} "
             f"option selected for {event}"
         )
         for attendee_option in selected_options:
-            try:
-                levels[str(attendee_option.orderItem.priceLevel)] += 1
-            except KeyError:
-                levels[str(attendee_option.orderItem.priceLevel)] = 1
-
             if attendee_option.option.optionExtraType == "ShirtSizes":
                 assert str(attendee_option.optionValue) in list(SHIRT_SIZES.keys()), (
                     f"Invalid response in AttendeeOption(id={attendee_option.id})"
                 )
-                try:
-                    bins[SHIRT_SIZES[str(attendee_option.optionValue)]] += 1
-                except KeyError:
-                    bins[SHIRT_SIZES[str(attendee_option.optionValue)]] = 1
+                bins[SHIRT_SIZES[str(attendee_option.optionValue)]] += 1
             else:
-                try:
-                    bins[str(attendee_option.optionValue)] += 1
-                except KeyError:
-                    bins[str(attendee_option.optionValue)] = 1
+                bins[str(attendee_option.optionValue)] += 1
         for k, v in bins.items():
             print(f"{k}, {v}")
         print("Levels:")

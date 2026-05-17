@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [production, stage]
 
+# CodeQL actions/missing-workflow-permissions: least privilege. These jobs
+# only checkout + run linters; no write scope is needed.
+permissions:
+  contents: read
+
 jobs:
   # Blocking: ruff lint + format are clean on the branch and must stay that way.
   ruff:

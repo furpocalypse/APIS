@@ -329,7 +329,9 @@ def send_email(reply_address, to_address_list, subject, message, html_message, b
         reply_to=[reply_address],
         bcc=bcc,
     )
-    logger.debug(f"Message to: {to_address_list}")
+    # OWASP A09 / ASVS V7 / CodeQL py/clear-text-logging-sensitive-data:
+    # recipient addresses are PII — log only the count, never the list.
+    logger.debug("Message to %d recipient(s)", len(to_address_list))
     mail_message.attach_alternative(html_message, "text/html")
     logger.debug("Sending...")
     mail_message.send()

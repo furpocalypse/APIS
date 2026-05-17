@@ -66,7 +66,11 @@ def find_new_staff(request):
     except ObjectDoesNotExist:
         return abort(404, "No staff found")
     except json.JSONDecodeError as e:
-        return abort(400, e.msg)
+        # CodeQL py/stack-trace-exposure: never echo the parser's message
+        # (it can quote the raw request body). Generic client reason; log
+        # only the type server-side.
+        logger.warning("find_new_staff bad JSON: %s", type(e).__name__)
+        return abort(400, "Invalid request")
 
 
 def info_new_staff(request):
@@ -192,7 +196,8 @@ def find_returning_staff(request):
         # has carried PII like birthdate / address) which lands in
         # plaintext logs and Sentry events. Log only the error type.
         logger.warning("Unable to find returning staff: bad request (%s)", type(e).__name__)
-        return abort(400, str(e))
+        # CodeQL py/stack-trace-exposure: generic client reason, not str(e).
+        return abort(400, "Invalid request")
 
     try:
         staff = Staff.objects.get(attendee__email__iexact=email, registrationToken=token)
@@ -313,9 +318,11 @@ def add_returning_staff(request):
 
     try:
         attendee.save()
-    except Exception as e:
+    except Exception:
         logger.exception("Error saving staff attendee record.")
-        return JsonResponse({"success": False, "message": "Attendee not saved: " + e})
+        # CodeQL py/stack-trace-exposure: detail is in the server log
+        # (logger.exception above); never echo the exception to the client.
+        return JsonResponse({"success": False, "message": "Attendee not saved"})
 
     # `staff` and `attendee` are already resolved from session above
     # (P1.8 BOLA fix) — don't re-fetch from the body.
@@ -323,9 +330,9 @@ def add_returning_staff(request):
 
     try:
         staff.save()
-    except Exception as e:
+    except Exception:
         logger.exception("Error saving staff record.")
-        return JsonResponse({"success": False, "message": "Staff not saved: " + str(e)})
+        return JsonResponse({"success": False, "message": "Staff not saved"})
 
     badges = Badge.objects.filter(attendee=attendee, event=event)
     if badges.count() == 0:
@@ -336,9 +343,9 @@ def add_returning_staff(request):
 
     try:
         badge.save()
-    except Exception as e:
+    except Exception:
         logger.exception("Error saving staff badge record.")
-        return JsonResponse({"success": False, "message": "Badge not saved: " + str(e)})
+        return JsonResponse({"success": False, "message": "Badge not saved"})
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 

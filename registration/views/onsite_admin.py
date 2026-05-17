@@ -666,9 +666,11 @@ def close_drawer(request):
 
 def cash_receipt_payload(order: Order, tendered: str, total: str) -> dict:
     order_items = OrderItem.objects.filter(order=order)
-    attendee_options = []
-    for item in order_items:
-        attendee_options.extend(get_line_items(item.attendeeoptions_set.all()))
+    attendee_options = [
+        line_item
+        for item in order_items
+        for line_item in get_line_items(item.attendeeoptions_set.all())
+    ]
 
     # discounts
     if order.discount:

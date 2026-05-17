@@ -678,7 +678,9 @@ def addNewDealer(request):
     try:
         postData = json.loads(request.body)
     except ValueError as e:
-        logger.warning(f"Unable to decode JSON for addNewDealer(): {e}")
+        # OWASP A09: a JSON decode error message can echo back the raw
+        # request body (PII). Log only the exception type.
+        logger.warning("Unable to decode JSON for addNewDealer(): %s", type(e).__name__)
         return common.abort(400, "Unable to decode JSON")
 
     # create attendee from request post
