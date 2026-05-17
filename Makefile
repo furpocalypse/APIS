@@ -45,6 +45,7 @@ Commands:
 
 	make services-up                : Start postgres + redis + gotenberg via docker compose and wait until ready
 	make services-down              : Stop those services (volumes preserved)
+	make build-push					: Build & push to Azure repo
 
 endef
 export HELP
@@ -343,6 +344,11 @@ test-frontend-coverage:
 
 # Aggregate target: run the Django suite under coverage, then the SPA tests.
 test-all: test-coverage test-frontend
+
+build-push:
+	docker build -t apis:latest .
+	docker tag apis:latest furpocalypse.azurecr.io/apis:latest
+	docker push furpocalypse.azurecr.io/apis:latest
 
 # --------------------------------------------------------------------------
 # Playwright end-to-end suite (e2e/playwright/)
