@@ -43,6 +43,21 @@ jobs:
         ports:
           - 3000:3000
 
+      # settings_base wires cache / sessions(cached_db) / celery /
+      # idempotency-lock / maintenance-mode to Redis (the canonical
+      # `make test` path uses it via docker-compose). The build job had
+      # no Redis service -> ~1600 "connecting to redis: name resolution"
+      # errors. Mirror the e2e/Makefile expectation.
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python ${{ matrix.python-version }}
@@ -58,7 +73,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Install Dependencies
         run: |
-          uv sync
+          uv sync --all-groups
       - name: Build frontend
         run: |
           cd registration/frontend
@@ -101,6 +116,10 @@ jobs:
           DJANGO_DATABASE_POOL: "False"
           STATIC_ROOT: /tmp/apis-ci-static
           GOTENBERG_HOST: http://localhost:3000
+          DJANGO_REDIS_URL: redis://localhost:6379/1
+          CELERY_BROKER_URL: redis://localhost:6379/2
+          CELERY_RESULT_BACKEND: redis://localhost:6379/2
+          IDEMPOTENCY_KEY_LOCK_LOCATION: redis://localhost:6379
           SQUARE_APPLICATION_ID: ${{ secrets.SQUARE_APPLICATION_ID }}
           SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}
           SQUARE_LOCATION_ID: ${{ secrets.SQUARE_LOCATION_ID }}

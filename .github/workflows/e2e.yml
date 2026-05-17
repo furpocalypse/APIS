@@ -59,7 +59,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install Python deps
-        run: uv sync
+        run: uv sync --all-groups
 
       - name: Set up Node
         uses: actions/setup-node@v4
