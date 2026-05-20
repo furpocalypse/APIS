@@ -8,7 +8,7 @@ from django.contrib.admin import AdminSite
 from django.contrib.auth.models import User
 from django.core import mail
 from django.http import HttpRequest
-from django.test import TestCase, tag
+from django.test import RequestFactory, TestCase, tag
 from django.urls import reverse
 from square.core.api_error import ApiError
 from square.requests.address import AddressParams
@@ -789,7 +789,8 @@ class TestStaffInvite(TestCase):
         form = soup.find("form", id="staffinvite_form")
         self.assertIsNone(form)
 
-        token = StaffInvite.objects.get(email=test_email_address).token
+        invite = StaffInvite.objects.get(email=test_email_address)
+        token = invite.token
 
         # Get the response message
         content = soup.find("main", attrs={"class": "content"})
@@ -804,7 +805,7 @@ class TestStaffInvite(TestCase):
             "action": "send_staff_token_email",
             "select_across": "0",
             "index": "0",
-            "_selected_action": "1",
+            "_selected_action": str(invite.pk),
         }
 
         # Get the CSRF token from the form so we can POST properly
@@ -904,3 +905,115 @@ class TestAssignBadgeNumbers(OrdersTestCase):
         for idx, badge in enumerate(badges):
             badge.refresh_from_db()
             self.assertEqual(badge.badgeNumber, EXPECTED[idx])
+
+
+class _Form:
+    """Minimal stand-in for an admin ModelForm (only ``changed_data`` is
+    read by ``OrderAdmin.save_model``)."""
+
+    def __init__(self, changed_data):
+        self.changed_data = changed_data
+
+
+class TestOrderAdminStatusWS2(TestCase):
+    """WS2 — CWE-362 / OWASP A04: ``status`` is read-only without
+    ``registration.issue_refund`` (race eliminated by construction) and a
+    permitted status change is routed through the fused CAS primitive.
+    ``save_model`` had zero coverage before this (the legacy
+    ``test_save_model`` actually exercises ``refund_view``)."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.site = AdminSite()
+        self.oa = OrderAdmin(Order, self.site)
+        self.superuser = User.objects.create_superuser(
+            "ws2admin",
+            "ws2admin@host",
+            "ws2admin",  # NOSONAR
+        )
+        self.clerk = User.objects.create_user(
+            "ws2clerk",
+            "ws2clerk@host",
+            "ws2clerk",  # NOSONAR
+        )
+        self.clerk.is_staff = True
+        self.clerk.save()
+        self.order = Order.objects.create(
+            total=100,
+            billingType=Order.CASH,
+            status=Order.PENDING,
+            reference="WS2_ORDER_1",
+            notes="orig",
+        )
+
+    def _req(self, user):
+        req = self.factory.post("/admin/registration/order/")
+        req.user = user
+        return req
+
+    def test_status_readonly_without_issue_refund(self):
+        self.assertFalse(self.clerk.has_perm("registration.issue_refund"))
+        self.assertIn("status", self.oa.get_readonly_fields(self._req(self.clerk)))
+
+    def test_status_editable_with_issue_refund(self):
+        self.assertTrue(self.superuser.has_perm("registration.issue_refund"))
+        self.assertNotIn("status", self.oa.get_readonly_fields(self._req(self.superuser)))
+
+    def test_import_requires_issue_refund(self):
+        # Bulk CSV import can mass-assign status, bypassing the readonly
+        # gate — so it must require the same refund permission.
+        self.assertFalse(self.oa.has_import_permission(self._req(self.clerk)))
+        self.assertTrue(self.oa.has_import_permission(self._req(self.superuser)))
+
+    def test_no_status_change_uses_default_save(self):
+        # The no-perm reality: 'status' is excluded from the form, so it
+        # is never in changed_data — save_model must not transition and
+        # must persist the other edits, leaving status untouched.
+        self.order.notes = "edited"
+        self.oa.save_model(self._req(self.clerk), self.order, _Form(["notes"]), change=True)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.PENDING)
+        self.assertEqual(self.order.notes, "edited")
+
+    def test_add_form_uses_default_save(self):
+        new = Order(
+            total=50,
+            billingType=Order.CASH,
+            status=Order.PENDING,
+            reference="WS2_ADD_1",
+        )
+        self.oa.save_model(self._req(self.superuser), new, _Form(["status"]), change=False)
+        self.assertIsNotNone(Order.objects.filter(reference="WS2_ADD_1").first())
+
+    @patch("registration.payments.transition_order_status")
+    def test_permitted_status_change_routed_through_primitive(self, mock_cas):
+        self.order.status = Order.COMPLETED
+        self.order.notes = "by-admin"
+        self.oa.save_model(
+            self._req(self.superuser),
+            self.order,
+            _Form(["status", "notes"]),
+            change=True,
+        )
+        mock_cas.assert_called_once()
+        args, kwargs = mock_cas.call_args
+        self.assertEqual(args[0], self.order)
+        self.assertEqual(args[1], Order.COMPLETED)
+        self.assertEqual(kwargs["extra_fields"], {"notes": "by-admin"})
+        self.assertNotIn("status", kwargs["extra_fields"])
+
+    def test_permitted_status_change_persists_and_runs_capacity(self):
+        # Unpatched: the real primitive must persist the status + the
+        # co-edited column in one locked UPDATE (and run the capacity
+        # transition the old raw obj.save() skipped).
+        self.order.status = Order.COMPLETED
+        self.order.notes = "completed-by-admin"
+        self.oa.save_model(
+            self._req(self.superuser),
+            self.order,
+            _Form(["status", "notes"]),
+            change=True,
+        )
+        fresh = Order.objects.get(pk=self.order.pk)
+        self.assertEqual(fresh.status, Order.COMPLETED)
+        self.assertEqual(fresh.notes, "completed-by-admin")

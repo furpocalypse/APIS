@@ -502,7 +502,8 @@
           {% if not event.allowOnlineMinorReg %}
               let age = getAgeByEventStart(birthdate);
               if (age < 18) {
-                  alert("You must be 18 by the first day of {{event}} to register online.");
+                  {# S33 HIGH-3: str(Event)=admin-set name in a JS string literal — escapejs (Django auto-escapes HTML, not JS). #}
+                  alert("You must be 18 by the first day of {{ event|escapejs }} to register online.");
                   $("#register").one('click', register_click);
                   return;
               }
@@ -530,7 +531,8 @@
                   'signature_bitmap': signature.jSignature("getData", "image")[1]
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
-              'event': '{{event}}'
+              {# S33 HIGH-3: str(Event)=admin-set name in a JS string literal — escapejs (Django auto-escapes HTML, not JS). #}
+              'event': '{{ event|escapejs }}'
           };
           $.ajax({
               "type": "POST",
@@ -550,9 +552,10 @@
                       $("#register").one('click', register_click);
                   }
               },
+              {# S33 HIGH-3: alert() string literals use |escapejs; structured payloads in this file use json_script — each is XSS-safe for its sink (Django auto-escapes HTML, not JS). #}
               "error": function (result, status) {
                   alert("An error has occurred. (" + result.status + ": " + result.responseText + ").\n\nCheck your information and try again.  " +
-                      "If the issue persists, please contact {{ event.registrationEmail }} for assistance.");
+                      "If the issue persists, please contact {{ event.registrationEmail|escapejs }} for assistance.");
                   $("#register").one('click', register_click);
               }
           });

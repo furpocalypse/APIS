@@ -1,0 +1,9 @@
+{
+  // Repo-local markdownlint profile pinned by the changelog spec (§3.7):
+  // MD013 line length 120; MD024 disabled because each Keep a Changelog
+  // release block legitimately repeats the canonical section headings
+  // (Added/Changed/.../Security) as siblings across releases.
+  "default": true,
+  "MD013": { "line_length": 120, "code_blocks": false, "tables": false },
+  "MD024": false
+}

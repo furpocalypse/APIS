@@ -230,7 +230,7 @@ class BanListAdmin(admin.ModelAdmin):
 @admin.action(description="Send New Staff registration email")
 def send_staff_token_email(modeladmin, request, queryset):
     if queryset.count() == 0:
-        messages.error("Invalid token selected")
+        messages.error(request, "Invalid token selected")
         return
 
     for token in queryset:
@@ -1310,6 +1310,33 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         ("Notes", {"fields": ("notes",), "classes": ("collapse",)}),
     )
 
+    def get_readonly_fields(self, request, obj=None):
+        """Make ``status`` non-editable without ``registration.issue_refund``.
+
+        CWE-362 / OWASP A04: this closes the refund-permission status race
+        *by construction* — Django excludes a read-only field from the
+        generated form, so a user lacking the permission cannot submit a
+        ``status`` change at all (no revert logic, no unlocked
+        read-modify-write to clobber a concurrent webhook transition).
+        """
+        ro = list(super().get_readonly_fields(request, obj))
+        if not request.user.has_perm("registration.issue_refund") and ("status" not in ro):
+            ro.append("status")
+        return ro
+
+    def has_import_permission(self, request):
+        """Gate bulk CSV import behind ``registration.issue_refund``.
+
+        OrderAdmin has no field-restricted import resource, so a bulk
+        import can set ``Order.status`` directly — bypassing
+        ``get_readonly_fields`` and the ``save_model`` CAS routing
+        (mass-assignment / CWE-862). Require the same refund permission
+        that governs status edits before allowing import.
+        """
+        return super().has_import_permission(request) and request.user.has_perm(
+            "registration.issue_refund"
+        )
+
     def render_change_form(self, request, context, *args, **kwargs):
         obj = kwargs.get("obj")
         if obj and obj.billingType == Order.CREDIT:
@@ -1344,21 +1371,34 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        no_refund_perm = not request.user.has_perm("registration.issue_refund")
-        if no_refund_perm and form.data["status"] in (
-            Order.REFUNDED,
-            Order.REFUND_PENDING,
-        ):
-            status = Order.PENDING
-            if obj.id:
-                status = Order.objects.get(id=obj.id).status
-            messages.error(
-                request,
-                "You do not have permission to issue refunds. "
-                f"The order status has been reverted to {status}",
-            )
-            obj.status = status
-        obj.save()
+        """Route a permitted status change through the fused CAS primitive.
+
+        CWE-362 / OWASP A04. The has-perm fall-through used to be a raw
+        full-row ``obj.save()`` that could clobber a concurrent webhook
+        ``transition_order_status`` write (last-writer-wins on
+        ``Order.status``) and silently skipped the capacity transition.
+        When the change form actually edits ``status`` we now perform it
+        through ``payments.transition_order_status``: one atomic,
+        row-locked UPDATE that sets ``status`` + the admin's other edited
+        columns together, runs the capacity transition, and serialises
+        against webhook writers. ``expected=None`` (unconditional): a
+        permitted admin is an authoritative writer and the row lock — not
+        a CAS predicate — provides the safety. ``status`` being read-only
+        without ``registration.issue_refund`` (see ``get_readonly_fields``)
+        means the non-permitted path never reaches here with a status
+        change. Add-form and non-status edits keep Django's default save;
+        inline/related changes are persisted by ``save_related`` after
+        this returns.
+        """
+        if change and "status" in form.changed_data:
+            other = {
+                f.attname: getattr(obj, f.attname)
+                for f in obj._meta.local_concrete_fields
+                if f.name in form.changed_data and f.name != "status"
+            }
+            payments.transition_order_status(obj, obj.status, extra_fields=other)
+            return
+        super().save_model(request, obj, form, change)
 
     def refresh_view(self, request, order_id, extra_context=None):
         # Get Square Order ID, and grab latest info from the transactions API

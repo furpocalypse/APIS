@@ -388,10 +388,11 @@
                   $.ajaxSettings.beforeSend(xhr, settings);
               },
               "error": function (result, status, error) {
+                  {# S33 HIGH-3: alert() string literals use |escapejs; structured payloads in this file use json_script — each is XSS-safe for its sink (Django auto-escapes HTML, not JS). #}
                   if (result.responseText == "") {
                       alert("Your session has expired.");
                   } else {
-                      alert("An error has occurred. Please check the form and your payment information for errors. If this error continues, please contact {{ event.registrationEmail }} for assistance.")
+                      alert("An error has occurred. Please check the form and your payment information for errors. If this error continues, please contact {{ event.registrationEmail|escapejs }} for assistance.")
                   }
                   $("#checkout").removeAttr("disabled").one('click', doRegister);
               },
@@ -400,7 +401,7 @@
                       window.location = "{% url 'registration:invoice_upgrade' %}";
                   } else {
                       $("#checkout").removeAttr("disabled").one('click', doRegister);
-                      alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{ event.registrationEmail }} for assistance.");
+                      alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{ event.registrationEmail|escapejs }} for assistance.");
                   }
               }
           });

@@ -497,7 +497,8 @@
                   'onsite': true
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
-              'jersey': {}, 'event': '{{ event }}'
+              {# S33 HIGH-3: str(Event)=admin-set name in a JS string literal — escapejs (Django auto-escapes HTML, not JS). #}
+              'jersey': {}, 'event': '{{ event|escapejs }}'
           };
           $.ajax({
               "type": "POST",

@@ -244,8 +244,9 @@
 
       $("body").ready(function () {
           $("form").fadeIn();
-          $("#state").val("{{attendee.state}}");
-          $("#country").val("{{attendee.country}}");
+          {# S33 HIGH-3: attendee-supplied CharFields in JS string literals — escapejs (Django auto-escapes HTML, not JS). #}
+          $("#state").val("{{ attendee.state|escapejs }}");
+          $("#country").val("{{ attendee.country|escapejs }}");
       });
 
       window.getExtraOrderData = function () {
