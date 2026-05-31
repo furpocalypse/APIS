@@ -158,7 +158,6 @@
                   $.ajaxSettings.beforeSend(xhr, settings);
               },
               "error": function (result, status, error) {
-                  {# S33 HIGH-3: alert() string literals use |escapejs; structured payloads in this file use json_script — each is XSS-safe for its sink (Django auto-escapes HTML, not JS). #}
                   if (result.responseText == "") {
                       alert("Your session has expired.");
                   } else {
