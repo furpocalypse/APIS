@@ -15,7 +15,7 @@
   path: /spec/tls
   value:
     - hosts:
-        - register.furpocalypse.org
+        - registration.furpocalypse.org
       secretName: apis-tls
 - op: replace
   path: /spec/rules
