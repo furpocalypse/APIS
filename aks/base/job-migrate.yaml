@@ -1,0 +1,71 @@
+# S34 / Decision #10 peer-review (General Opinion BLOCK): single-locus
+# database migration for the AKS topology.
+#
+# Previously start.sh ran `manage.py migrate` on every web pod, and with
+# replicas: 2 (HPA min 2) both app pods raced `migrate` on every rollout
+# — a non-deterministic boot, and a destructive RunPython (e.g. 0122
+# token backfill + RemoveField) racing across two pods is the worst case.
+#
+# Now: app + worker pods skip migrate (APIS_RUN_MIGRATIONS=0 in
+# apis-config.env; start.sh honors it). This Job is the ONE locus that
+# migrates, invoking manage.py directly (independent of the flag),
+# exactly once per deploy.
+#
+# Deploy order (see aks/README.md): the Job is immutable on spec, so a
+# redeploy must `kubectl delete job apis-migrate --ignore-not-found`
+# then `kubectl apply` it (or `kubectl replace --force`), wait for
+# completion, THEN roll the app/worker Deployments.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: apis-migrate
+  namespace: apis
+  labels:
+    app.kubernetes.io/name: apis
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apis
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: apis-app
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # Overlay patches the digest; never deploy `:latest`.
+          image: furpocalypse.azurecr.io/apis:0.5.3
+          imagePullPolicy: IfNotPresent
+          # Override the image entrypoint: migrate once and exit. Does
+          # NOT go through start.sh, so APIS_RUN_MIGRATIONS is irrelevant
+          # here — this Job always migrates.
+          command: ["./manage.py"]
+          args: ["migrate", "--no-input"]
+          envFrom:
+            - configMapRef:
+                name: apis-config
+            - secretRef:
+                name: apis-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

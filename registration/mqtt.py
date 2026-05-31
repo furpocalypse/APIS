@@ -2,14 +2,18 @@ import base64
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING, cast
 
 import jwt
 from django.conf import settings
 from paho.mqtt import publish as mqtt_publish
 
 from registration.models import Firebase
+
+if TYPE_CHECKING:
+    from paho.mqtt.publish import AuthParameter, TLSParameter
 
 FORMAT_TOPIC_SYS_RE = re.compile(r"^\$")
 FORMAT_TOPIC_WILDCARD_RE = re.compile(r"[\#\+ /]")
@@ -119,21 +123,29 @@ def get_state_token(firebase: Firebase) -> dict:
     sub = get_topic("payment/state", name=str(firebase.name))
 
     user = format_topic(str(firebase.name))
-    token = get_token(user, subs=[sub], publ=[])
+    # Match the other terminal tokens (payment / receipt / station): 7 days.
+    # Previously this caller relied on get_token's never-expires default,
+    # which violated ASVS V2.10.3 (bearer tokens must have a bounded TTL).
+    token = get_token(user, subs=[sub], publ=[], exp=60 * 60 * 24 * 7)
 
     return {"user": user, "token": token}
 
 
 def get_token(sub, exp=None, subs=None, publ=None) -> str:
     if exp is None:
-        # Never expires
-        exp = 2**31 - 1
+        # S20: the default token lifetime is a tunable that lives with its
+        # setting in settings.py (single source); read it from
+        # django.conf.settings at call time (no module-level global, so
+        # @override_settings works). One hour bounds capture-replay if a
+        # token leaks; long-lived terminal tokens pass `exp` explicitly.
+        # ASVS V2.10.3.
+        exp = datetime.now(tz=UTC) + timedelta(seconds=int(settings.MQTT_DEFAULT_TOKEN_EXP_SECONDS))
     else:
-        exp = datetime.now(tz=timezone.utc) + timedelta(seconds=exp)
+        exp = datetime.now(tz=UTC) + timedelta(seconds=exp)
 
     claims = {
         "sub": sub,
-        "iat": datetime.now(tz=timezone.utc),
+        "iat": datetime.now(tz=UTC),
         "exp": exp,
         "subs": subs,
         "publ": publ,
@@ -141,7 +153,7 @@ def get_token(sub, exp=None, subs=None, publ=None) -> str:
 
     return jwt.encode(
         claims,
-        base64.b64decode(settings.MQTT_JWT_SECRET),
+        base64.b64decode(cast(str, settings.MQTT_JWT_SECRET)),
         algorithm=settings.MQTT_JWT_ALGORITHM,
     )
 
@@ -157,10 +169,7 @@ def format_topic(topic: str, allow_wildcard: bool = False) -> str:
 
     if "/" in topic:
         return "/".join(
-            [
-                format_topic(segment, allow_wildcard=allow_wildcard)
-                for segment in topic.split("/")
-            ]
+            [format_topic(segment, allow_wildcard=allow_wildcard) for segment in topic.split("/")]
         )
 
     if allow_wildcard and topic in ("+", "#"):
@@ -175,7 +184,9 @@ def format_topic(topic: str, allow_wildcard: bool = False) -> str:
     return topic.lower()
 
 
-def send_mqtt_message(topic: str, payload: dict = {}, retain: bool = False):
+def send_mqtt_message(topic: str, payload: dict | None = None, retain: bool = False):
+    if payload is None:
+        payload = {}
     payload_json = json.dumps(payload, cls=JSONDecimalEncoder)
     logger.debug(f"Sending MQTT message: {topic} ({payload_json})")
 
@@ -190,8 +201,8 @@ def send_mqtt_message(topic: str, payload: dict = {}, retain: bool = False):
         topic,
         payload_json,
         retain=retain,
-        hostname=settings.MQTT_BROKER["host"],
-        port=settings.MQTT_BROKER["port"],
-        auth=auth,
-        tls=tls,
+        hostname=cast(str, settings.MQTT_BROKER["host"]),
+        port=cast(int, settings.MQTT_BROKER["port"]),
+        auth=cast("AuthParameter", auth),
+        tls=cast("TLSParameter | None", tls),
     )

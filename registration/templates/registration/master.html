@@ -50,11 +50,18 @@
   </div>
 </footer>
 
+{% comment %}
+S33 HIGH-3: event.name / registrationEmail are admin-controlled and were
+interpolated into JS string literals (XSS in JS-string context — Django
+auto-escapes for HTML, NOT for JS). Emit via json_script (script-context-
+safe) and JSON.parse in the block below.
+{% endcomment %}
+{% if event %}{{ event.name|json_script:"event-name" }}{{ event.registrationEmail|json_script:"event-registration-email" }}{% endif %}
 <script>
     {% if event %}
         const event_start_date = new {% event_start_date event %};
-        const EVENT_NAME = "{{ event.name }}";
-        const EVENT_REGISTRATION_EMAIL = "{{ event.registrationEmail }}";
+        const EVENT_NAME = JSON.parse(document.getElementById("event-name").textContent);
+        const EVENT_REGISTRATION_EMAIL = JSON.parse(document.getElementById("event-registration-email").textContent);
         const EVENT_COLLECT_ADDRESS = {% if event.collectAddress %}true{% else %}false{% endif %};
     {% else %}
         const EVENT_COLLECT_ADDRESS = false;

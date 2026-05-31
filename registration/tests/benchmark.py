@@ -9,7 +9,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
-from typing import Optional
 
 import httpx
 from django.test import LiveServerTestCase, tag
@@ -31,7 +30,7 @@ class TierConfig:
 
     name: str
     price: Decimal
-    max_capacity: Optional[int]  # None = unlimited
+    max_capacity: int | None  # None = unlimited
     num_users: int
 
 
@@ -120,9 +119,7 @@ class BenchmarkReport:
 
         out.write("Tiers:\n")
         for t in self.scenario.tiers:
-            cap = (
-                f"{t.max_capacity} slots" if t.max_capacity is not None else "unlimited"
-            )
+            cap = f"{t.max_capacity} slots" if t.max_capacity is not None else "unlimited"
             out.write(f"  {t.name} (${t.price}, {cap}): {t.num_users} users\n")
         out.write(
             f"Ramp-up: {self.scenario.ramp_up_seconds}s | "
@@ -164,12 +161,7 @@ class BenchmarkReport:
         out.write("Latency (ms):\n")
         out.write(f"  {'Endpoint':<25} {'p50':>7} {'p95':>7} {'p99':>7} {'max':>7}\n")
         for ep in endpoints:
-            latencies = [
-                t.latency_ms
-                for r in self.results
-                for t in r.timings
-                if t.endpoint == ep
-            ]
+            latencies = [t.latency_ms for r in self.results for t in r.timings if t.endpoint == ep]
             if latencies:
                 out.write(
                     f"  {ep:<25} "
@@ -193,14 +185,10 @@ class BenchmarkReport:
         all_valid = True
         for t in self.scenario.tiers:
             if t.max_capacity is not None:
-                successes = sum(
-                    1 for r in self.tier_results(t.name) if r.outcome == "success"
-                )
+                successes = sum(1 for r in self.tier_results(t.name) if r.outcome == "success")
                 ok = successes <= t.max_capacity
                 mark = "OK" if ok else "OVERSOLD"
-                out.write(
-                    f"  {t.name}: {successes} registered / {t.max_capacity} max  {mark}\n"
-                )
+                out.write(f"  {t.name}: {successes} registered / {t.max_capacity} max  {mark}\n")
                 if not ok:
                     all_valid = False
         if all_valid:
@@ -264,8 +252,8 @@ class UserSimulator:
                     )
                 )
 
-                csrf_token = client.cookies.get("csrftoken", "")
-                csrf_headers = {"X-CSRFToken": csrf_token}
+                csrf_token: str = client.cookies.get("csrftoken") or ""
+                csrf_headers: dict[str, str] = {"X-CSRFToken": csrf_token}
 
                 # Step 2: POST get price levels (csrf_exempt, but header is harmless)
                 await asyncio.sleep(random.uniform(*self.think_times.after_landing))
@@ -325,9 +313,7 @@ class UserSimulator:
 
                 if resp.status_code != 200:
                     result.outcome = "error"
-                    result.error_message = (
-                        f"add_to_cart {resp.status_code}: {resp.text[:200]}"
-                    )
+                    result.error_message = f"add_to_cart {resp.status_code}: {resp.text[:200]}"
                     result.total_duration = time.monotonic() - t_start
                     return result
 
@@ -336,9 +322,7 @@ class UserSimulator:
                 t0 = time.monotonic()
                 resp = await client.get(f"{self.server_url}/registration/cart/")
                 result.timings.append(
-                    StepTiming(
-                        "GET /cart/", (time.monotonic() - t0) * 1000, resp.status_code
-                    )
+                    StepTiming("GET /cart/", (time.monotonic() - t0) * 1000, resp.status_code)
                 )
 
                 # Step 5: POST checkout (retries on "reserved")
@@ -373,9 +357,7 @@ class UserSimulator:
                         },
                     )
                     latency = (time.monotonic() - t0) * 1000
-                    result.timings.append(
-                        StepTiming("POST /checkout/", latency, resp.status_code)
-                    )
+                    result.timings.append(StepTiming("POST /checkout/", latency, resp.status_code))
 
                     try:
                         data = resp.json()
@@ -408,8 +390,7 @@ class UserSimulator:
                             result.outcome = "retry_exhausted"
                             break
                     elif (
-                        "session expired" in reason_lower
-                        or "nothing in your cart" in reason_lower
+                        "session expired" in reason_lower or "nothing in your cart" in reason_lower
                     ):
                         # Session lost — cannot recover
                         result.outcome = "error"
@@ -487,14 +468,12 @@ class BaseBenchmark(LiveServerTestCase):
 
     def test_run(self):
         report = asyncio.run(self._run_benchmark())
-        capacity_ok = report.print_summary()
+        report.print_summary()
 
         # Assert no overselling
         for tier in self.scenario.tiers:
             if tier.max_capacity is not None:
-                successes = sum(
-                    1 for r in report.tier_results(tier.name) if r.outcome == "success"
-                )
+                successes = sum(1 for r in report.tier_results(tier.name) if r.outcome == "success")
                 self.assertLessEqual(
                     successes,
                     tier.max_capacity,
@@ -529,12 +508,11 @@ class BaseBenchmark(LiveServerTestCase):
         random.shuffle(users)
         total_users = len(users)
         delays = [
-            (i / max(total_users - 1, 1)) * scenario.ramp_up_seconds
-            for i in range(total_users)
+            (i / max(total_users - 1, 1)) * scenario.ramp_up_seconds for i in range(total_users)
         ]
 
         t_start = time.monotonic()
-        tasks = [sim.run(delay) for sim, delay in zip(users, delays)]
+        tasks = [sim.run(delay) for sim, delay in zip(users, delays, strict=False)]
         results = await asyncio.gather(*tasks)
         wall_clock = time.monotonic() - t_start
 

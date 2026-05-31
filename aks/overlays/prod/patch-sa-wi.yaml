@@ -1,0 +1,10 @@
+# Fill in the real Managed Identity client ID + tenant ID for the
+# production environment. Get them via:
+#   az identity show -g <rg> -n apis-app-mi --query 'clientId' -o tsv
+#   az account show --query tenantId -o tsv
+- op: replace
+  path: /metadata/annotations/azure.workload.identity~1client-id
+  value: "7eded7c4-d266-4f71-93e5-3462a0a0dda6"
+- op: replace
+  path: /metadata/annotations/azure.workload.identity~1tenant-id
+  value: "3eafa349-2c72-48b1-9823-cfc0edc23a76"

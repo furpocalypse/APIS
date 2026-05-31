@@ -83,9 +83,14 @@
   </script>
   <script type="text/javascript" src="/static/js/templates/price-types.js"></script>
   <script type="text/javascript" src="/static/js/templates/staff.js"></script>
+  {{ jsonStaff|json_script:"staff-data" }}
+  {{ jsonAttendee|json_script:"attendee-data" }}
   <script type="text/javascript">
-      let staff = {{ jsonStaff|safe|default:"null" }};
-      let attendee = {{ jsonAttendee|safe|default:"null" }};
+      // json_script emits valid JSON (including the literal `null` when the
+      // view passes None), closing the JS-string-XSS vector that |safe in a
+      // <script> tag had. OWASP A03.
+      let staff = JSON.parse(document.getElementById("staff-data").textContent);
+      let attendee = JSON.parse(document.getElementById("attendee-data").textContent);
 
       function doRegister(e) {
           e.preventDefault();
@@ -106,7 +111,7 @@
           birthdate = new Date(Date.parse($("#birthDate").val()));
           let age = getAgeByEventStart(birthdate);
           if (age < 18) {
-              alert("You must be 18 by the first day of {{ event }} to register online.")
+              alert("You must be 18 by the first day of {{ event|escapejs }} to register online.")
               $(this).one('click', doRegister);
               return;
           }
@@ -138,7 +143,7 @@
                   'contactRelation': $("#contactRel").val(),
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
-              'event': '{{event}}'
+              'event': '{{ event|escapejs }}'
           };
 
 
@@ -155,7 +160,7 @@
                   if (result.responseText == "") {
                       alert("Your session has expired.");
                   } else {
-                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{event.registrationEmail}} for assistance.")
+                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.registrationEmail|escapejs }} for assistance.")
                   }
                   $("#register").removeAttr("disabled").one('click', doRegister);
               },
@@ -163,7 +168,7 @@
                   if (result.success) {
                       window.location = "{% url 'registration:cart' %}";
                   } else {
-                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.registrationEmail }} for assistance.")
+                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.registrationEmail|escapejs }} for assistance.")
                   }
                   $("#register").removeAttr("disabled").one('click', doRegister);
               }

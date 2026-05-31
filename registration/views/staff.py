@@ -1,18 +1,30 @@
 import json
 import logging
 from datetime import datetime
-from time import timezone
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.forms import model_to_dict
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Badge,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    ShirtSizes,
+    Staff,
+    StaffInvite,
+    settings,
+)
+from registration.ratelimit import rate_limited_json
 from registration.services import CreateAttendeeOptions
 
-from .common import abort, handler, logger
+from .common import abort, to_json_safe
 from .ordering import get_total
 
 logger = logging.getLogger(__name__)
@@ -25,15 +37,10 @@ def new_staff(request, guid):
     tz = timezone.get_current_timezone()
     today = datetime.now(tz=tz)
     context = {"token": guid, "event": event, "form_type": form_type}
-    if (
-        event.staffRegStart <= today <= event.staffRegEnd
-        or invite.ignore_time_window is True
-    ):
+    if event.staffRegStart <= today <= event.staffRegEnd or invite.ignore_time_window is True:
         return render(request, "registration/staff/new-staff.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to slack and email for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -60,7 +67,11 @@ def find_new_staff(request):
     except ObjectDoesNotExist:
         return abort(404, "No staff found")
     except json.JSONDecodeError as e:
-        return abort(400, e.msg)
+        # CodeQL py/stack-trace-exposure: never echo the parser's message
+        # (it can quote the raw request body). Generic client reason; log
+        # only the type server-side.
+        logger.warning("find_new_staff bad JSON: %s", type(e).__name__)
+        return abort(400, "Invalid request")
 
 
 def info_new_staff(request):
@@ -70,9 +81,7 @@ def info_new_staff(request):
     try:
         context["token"] = StaffInvite.objects.get(token=token_value)
     except ObjectDoesNotExist:
-        return render(
-            request, "registration/staff/new-staff-payment.html", context, status=404
-        )
+        return render(request, "registration/staff/new-staff-payment.html", context, status=404)
     return render(request, "registration/staff/new-staff-payment.html", context)
 
 
@@ -93,6 +102,8 @@ def staff_from_post_data(pds, attendee, event, staff):
     return staff
 
 
+# MED-3: staff registration is low-frequency; cap submission floods.
+@rate_limited_json(rate="30/d")
 @require_POST
 def add_new_staff(request):
     postData = json.loads(request.body)
@@ -102,10 +113,7 @@ def add_new_staff(request):
     pdp = postData["priceLevel"]
     evt = postData.get("event")
 
-    if evt:
-        event = Event.objects.get(name=evt)
-    else:
-        event = Event.objects.get(default=True)
+    event = Event.objects.get(name=evt) if evt else Event.objects.get(default=True)
 
     tz = timezone.get_current_timezone()
     birthdate = datetime.strptime(pda["birthdate"], "%Y-%m-%d").replace(tzinfo=tz)
@@ -134,9 +142,7 @@ def add_new_staff(request):
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 
-    order_item = OrderItem.objects.create(
-        badge=badge, priceLevel=price_level, enteredBy="WEB"
-    )
+    order_item = OrderItem.objects.create(badge=badge, priceLevel=price_level, enteredBy="WEB")
 
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
@@ -164,9 +170,7 @@ def returning_staff(request, guid):
     if event.staffRegStart <= today <= event.staffRegEnd:
         return render(request, "registration/staff/returning-staff.html", context)
     elif event.staffRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to slack and email for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to slack and email for updates!"
         return render(request, "registration/staff/staff-closed.html", context)
     elif event.staffRegEnd <= today:
         context["message"] = "has ended."
@@ -190,13 +194,16 @@ def find_returning_staff(request):
         email = post_data["email"]
         token = post_data["token"]
     except (json.JSONDecodeError, KeyError) as e:
-        logger.warning(f"Unable to find returning staff: bad request - {request.body}")
-        return abort(400, str(e))
+        # OWASP A09 / ASVS V7.1.1 / V8.3.1: never log the raw request
+        # body — it carries email + registrationToken (and historically
+        # has carried PII like birthdate / address) which lands in
+        # plaintext logs and Sentry events. Log only the error type.
+        logger.warning("Unable to find returning staff: bad request (%s)", type(e).__name__)
+        # CodeQL py/stack-trace-exposure: generic client reason, not str(e).
+        return abort(400, "Invalid request")
 
     try:
-        staff = Staff.objects.get(
-            attendee__email__iexact=email, registrationToken=token
-        )
+        staff = Staff.objects.get(attendee__email__iexact=email, registrationToken=token)
     except ObjectDoesNotExist:
         return abort(404, "Staff matching query does not exist.")
 
@@ -206,13 +213,21 @@ def find_returning_staff(request):
 
 def info_returning_staff(request):
     event = Event.objects.get(default=True)
-    context = {"staff": None, "event": event, "form_type": form_type}
+    # Always provide jsonStaff / jsonAttendee in the context so the template's
+    # {% json_script %} blocks always emit valid JSON. If the staff session
+    # is unset, both are None (rendered as JS `null`), preserving the prior
+    # `|default:"null"` semantics without the unsafe |safe interpolation.
+    context = {
+        "staff": None,
+        "event": event,
+        "form_type": form_type,
+        "jsonStaff": None,
+        "jsonAttendee": None,
+    }
 
     staff_id = request.session.get("staff_id")
     if staff_id is None:
-        return render(
-            request, "registration/staff/returning-staff-payment.html", context
-        )
+        return render(request, "registration/staff/returning-staff-payment.html", context)
 
     staff = Staff.objects.get(id=staff_id)
     if staff:
@@ -228,8 +243,9 @@ def info_returning_staff(request):
 
         context = {
             "staff": staff,
-            "jsonStaff": json.dumps(staff_dict, default=handler),
-            "jsonAttendee": json.dumps(attendee_dict, default=handler),
+            # Plain dicts for `{% json_script %}`; closes JS-string-XSS vector.
+            "jsonStaff": to_json_safe(staff_dict),
+            "jsonAttendee": to_json_safe(attendee_dict),
             "badge": badge,
             "event": event,
             "paid_total": paid_total,
@@ -238,10 +254,11 @@ def info_returning_staff(request):
     return render(request, "registration/staff/returning-staff-payment.html", context)
 
 
+@rate_limited_json(rate="30/d")  # MED-3: returning-staff submit flood backstop.
 def add_returning_staff(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for add_returning_staff()")
         return JsonResponse({"success": False})
 
@@ -251,13 +268,39 @@ def add_returning_staff(request):
     pdp = postData["priceLevel"]
     evt = postData.get("event")
 
-    if evt:
-        event = Event.objects.get(name=evt)
-    else:
-        event = Event.objects.get(default=True)
+    event = Event.objects.get(name=evt) if evt else Event.objects.get(default=True)
 
-    attendee = Attendee.objects.get(id=pda["id"])
-    if not attendee:
+    # Audit P1.8 (BOLA / IDOR fix): the staff record (and the attendee
+    # behind it) must be the ones bound to *this* session, not whatever
+    # the body asserts. Read both from the session-bound staff record;
+    # body-supplied ids are checked for mismatch and rejected.
+    staff_id = request.session.get("staff_id")
+    if staff_id is None:
+        return JsonResponse({"success": False, "message": "Session expired"})
+
+    try:
+        staff = Staff.objects.get(id=staff_id)
+    except Staff.DoesNotExist:
+        return JsonResponse({"success": False, "message": "Staff record not found"})
+    if pds.get("id") and int(pds["id"]) != staff.id:
+        logger.warning(
+            "BOLA attempt in add_returning_staff: session staff %s tried to mutate staff %s",
+            staff_id,
+            pds.get("id"),
+        )
+        return JsonResponse({"success": False, "message": "Staff record not found"})
+
+    attendee = staff.attendee
+    if attendee is None:
+        return JsonResponse({"success": False, "message": "Staff has no attendee"})
+    if pda.get("id") and int(pda["id"]) != attendee.id:
+        logger.warning(
+            "BOLA attempt in add_returning_staff: session staff %s (attendee %s) tried "
+            "to mutate attendee %s",
+            staff_id,
+            attendee.id,
+            pda.get("id"),
+        )
         return JsonResponse({"success": False, "message": "Attendee not found"})
 
     tz = timezone.get_current_timezone()
@@ -279,25 +322,21 @@ def add_returning_staff(request):
 
     try:
         attendee.save()
-    except Exception as e:
+    except Exception:
         logger.exception("Error saving staff attendee record.")
-        return JsonResponse({"success": False, "message": "Attendee not saved: " + e})
+        # CodeQL py/stack-trace-exposure: detail is in the server log
+        # (logger.exception above); never echo the exception to the client.
+        return JsonResponse({"success": False, "message": "Attendee not saved"})
 
-    staff = Staff.objects.get(id=pds["id"])
-    if "staff_id" not in request.session:
-        return JsonResponse({"success": False, "message": "Staff record not found"})
-
-    # Update Staff info
-    if not staff:
-        return JsonResponse({"success": False, "message": "Staff record not found"})
-
+    # `staff` and `attendee` are already resolved from session above
+    # (P1.8 BOLA fix) — don't re-fetch from the body.
     staff_from_post_data(pds, attendee, event, staff)
 
     try:
         staff.save()
-    except Exception as e:
+    except Exception:
         logger.exception("Error saving staff record.")
-        return JsonResponse({"success": False, "message": "Staff not saved: " + str(e)})
+        return JsonResponse({"success": False, "message": "Staff not saved"})
 
     badges = Badge.objects.filter(attendee=attendee, event=event)
     if badges.count() == 0:
@@ -308,15 +347,13 @@ def add_returning_staff(request):
 
     try:
         badge.save()
-    except Exception as e:
+    except Exception:
         logger.exception("Error saving staff badge record.")
-        return JsonResponse({"success": False, "message": "Badge not saved: " + str(e)})
+        return JsonResponse({"success": False, "message": "Badge not saved"})
 
     price_level = PriceLevel.objects.get(id=int(pdp["id"]))
 
-    order_item = OrderItem.objects.create(
-        badge=badge, priceLevel=price_level, enteredBy="WEB"
-    )
+    order_item = OrderItem.objects.create(badge=badge, priceLevel=price_level, enteredBy="WEB")
 
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 

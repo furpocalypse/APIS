@@ -7,7 +7,21 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Badge,
+    Cart,
+    Decimal,
+    Department,
+    Discount,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    PriceLevelOption,
+    ShirtSizes,
+    TableSize,
+)
 
 logger = logging.getLogger(__name__)
 logging.disable(logging.NOTSET)
@@ -18,56 +32,56 @@ now = timezone.now()
 ten_days = timedelta(days=10)
 one_day = timedelta(days=1)
 
-DEFAULT_EVENT_ARGS = dict(
-    default=True,
-    name="Test Event 2050!",
-    dealerRegStart=now - ten_days,
-    dealerRegEnd=now + ten_days,
-    staffRegStart=now - ten_days,
-    staffRegEnd=now + ten_days,
-    attendeeRegStart=now - ten_days,
-    attendeeRegEnd=now + ten_days,
-    onsiteRegStart=now - ten_days,
-    onsiteRegEnd=now + ten_days,
-    eventStart=now - ten_days,
-    eventEnd=now + ten_days,
-)
+DEFAULT_EVENT_ARGS = {
+    "default": True,
+    "name": "Test Event 2050!",
+    "dealerRegStart": now - ten_days,
+    "dealerRegEnd": now + ten_days,
+    "staffRegStart": now - ten_days,
+    "staffRegEnd": now + ten_days,
+    "attendeeRegStart": now - ten_days,
+    "attendeeRegEnd": now + ten_days,
+    "onsiteRegStart": now - ten_days,
+    "onsiteRegEnd": now + ten_days,
+    "eventStart": now - ten_days,
+    "eventEnd": now + ten_days,
+}
 
 TEST_SIGNATURE_SVG = "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+PCFET0NUWVBFIHN2ZyBQVUJMSUMgIi0vL1czQy8vRFREIFNWRyAxLjEvL0VOIiAiaHR0cDovL3d3dy53My5vcmcvR3JhcGhpY3MvU1ZHLzEuMS9EVEQvc3ZnMTEuZHRkIj48c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmVyc2lvbj0iMS4xIiB3aWR0aD0iNjI3IiBoZWlnaHQ9IjkwIj48cGF0aCBzdHJva2UtbGluZWpvaW49InJvdW5kIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlPSJyZ2IoODUsIDg1LCA4NSkiIGZpbGw9Im5vbmUiIGQ9Ik0gMSA1NSBjIDAuMDUgLTAuMjEgMS4yIC04LjU5IDMgLTEyIGMgNC4yIC03Ljk1IDEwLjE2IC0xNi41NSAxNiAtMjQgYyAzLjcyIC00Ljc1IDguNDYgLTkuMjkgMTMgLTEzIGMgMi41NCAtMi4wOCA2LjE1IC0zLjk4IDkgLTUgYyAxLjM4IC0wLjQ5IDMuNzkgLTAuNjEgNSAwIGMgMi4yNCAxLjEyIDYuMzYgMy42IDcgNiBjIDMgMTEuMzEgNC40OSAyOC4zNiA2IDQzIGMgMC44NyA4LjQ0IDAuMjcgMTYuNzcgMSAyNSBjIDAuMjcgMy4wMyAxLjAzIDYuMjcgMiA5IGMgMC42MiAxLjczIDEuNjYgNC44MiAzIDUgYyA2LjE5IDAuODMgMTguMjMgMC41MyAyNyAtMSBjIDI1LjI5IC00LjQyIDQ5LjY3IC0xMS40NCA3NiAtMTcgYyAxMS4zNCAtMi4zOSAyMS44MSAtNC40IDMzIC02IGMgNS4zNSAtMC43NiAxMC41IC0wLjg2IDE2IC0xIGMgNy41NCAtMC4yIDE1LjIxIC0wLjk0IDIyIDAgYyA0LjU5IDAuNjQgOS40NyAyLjk5IDE0IDUgYyA0LjUgMiA4Ljc0IDUuMiAxMyA3IGMgMS43NiAwLjc0IDMuOTggMC45MyA2IDEgYyA4LjI5IDAuMjcgMTYuNjggMC41NSAyNSAwIGMgNi43MyAtMC40NSAyMCAtMyAyMCAtMyIvPjxwYXRoIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2U9InJnYig4NSwgODUsIDg1KSIgZmlsbD0ibm9uZSIgZD0iTSAyMDUgMzggYyAwLjI1IDAgOS4zOCAwLjQ5IDE0IDAgYyA4LjAyIC0wLjg0IDE1LjgzIC0zLjIzIDI0IC00IGMgMTMuNDQgLTEuMjYgMjYuMjEgLTEuODQgNDAgLTIgYyA0NC4wOCAtMC41MiA4NC44OCAtMS43NSAxMjggMCBjIDIzLjQgMC45NSA0NS41NiA0LjMgNjkgOCBjIDI4LjUzIDQuNSA1NS4wMyAxMC4xNyA4MyAxNiBjIDQuNSAwLjk0IDguNTMgMy4xNSAxMyA0IGMgMTYuNjMgMy4xNyA1MCA4IDUwIDgiLz48L3N2Zz4="
 
-TEST_ATTENDEE_ARGS = dict(
-    firstName="Test",
-    lastName="Testerson",
-    address1="123 Somewhere St",
-    city="Place",
-    state="PA",
-    country="US",
-    postalCode=12345,
-    phone="1112223333",
-    email="apis@mailinator.org",
-    birthdate="1990-01-01",
-)
+TEST_ATTENDEE_ARGS = {
+    "firstName": "Test",
+    "lastName": "Testerson",
+    "address1": "123 Somewhere St",
+    "city": "Place",
+    "state": "PA",
+    "country": "US",
+    "postalCode": 12345,
+    "phone": "1112223333",
+    "email": "apis@mailinator.org",
+    "birthdate": "1990-01-01",
+}
 
-DEFAULT_VENUE_ARGS = dict(
-    name="MegaCenter Conference Hotel",
-    address="123 Somewhere St",
-    city="Place",
-    state="VA",
-    country="US",
-    postalCode=12345,
-)
+DEFAULT_VENUE_ARGS = {
+    "name": "MegaCenter Conference Hotel",
+    "address": "123 Somewhere St",
+    "city": "Place",
+    "state": "VA",
+    "country": "US",
+    "postalCode": 12345,
+}
 
-TEST_TABLE_ARGS = dict(
-    name="Booth",
-    description="description here",
-    chairMin=0,
-    chairMax=1,
-    tableMin=0,
-    tableMax=1,
-    partnerMin=0,
-    partnerMax=1,
-    basePrice=Decimal(130),
-)
+TEST_TABLE_ARGS = {
+    "name": "Booth",
+    "description": "description here",
+    "chairMin": 0,
+    "chairMax": 1,
+    "tableMin": 0,
+    "tableMax": 1,
+    "partnerMin": 0,
+    "partnerMax": 1,
+    "basePrice": Decimal(130),
+}
 
 TEST_DEALER_ARGS = {
     "businessName": "Something Creative",
@@ -426,18 +440,18 @@ class OrdersTestCase(TestCase):
             "orgDonation": "10",
         }
 
-        self.attendee_upgrade = dict(
-            firstName="Test",
-            lastName="Upgrader",
-            address1="123 Somewhere St",
-            city="Place",
-            state="PA",
-            country="US",
-            postalCode=12345,
-            phone="1112223333",
-            email="apis@mailinator.org",
-            birthdate="1990-01-01",
-        )
+        self.attendee_upgrade = {
+            "firstName": "Test",
+            "lastName": "Upgrader",
+            "address1": "123 Somewhere St",
+            "city": "Place",
+            "state": "PA",
+            "country": "US",
+            "postalCode": 12345,
+            "phone": "1112223333",
+            "email": "apis@mailinator.org",
+            "birthdate": "1990-01-01",
+        }
 
         self.client = Client()
 
@@ -466,9 +480,7 @@ class OrdersTestCase(TestCase):
         )
         return response
 
-    def get_paypal_checkout_postdata(
-        self, code="", orgDonation="", charityDonation=""
-    ) -> dict:
+    def get_paypal_checkout_postdata(self, code="", orgDonation="", charityDonation="") -> dict:
         postData = {
             "processor": "paypal",
             "billingData": {"source_id": "TEST-PAYPAL-ORDER"},
@@ -509,9 +521,7 @@ class OrdersTestCase(TestCase):
             "orgDonation": orgDonation,
         }
 
-    def checkout(
-        self, token_or_code="", orgDonation="", charityDonation="", onsite=False
-    ):
+    def checkout(self, token_or_code="", orgDonation="", charityDonation="", onsite=False):
         postData = {}
 
         if token_or_code[:5] in ("cnon:", "ccof:", "bnon:", "wnon:"):
@@ -580,7 +590,7 @@ def make_refund_dict(
         "status": status,
         "amount": {
             "currency_code": currency,
-            "value": "%.2f" % Decimal(str(amount)),
+            "value": f"{Decimal(str(amount)):.2f}",
         },
     }
     if note:
@@ -624,7 +634,7 @@ def make_paypal_apidata(
     last_four:
         If given, a ``payment_source.card.last_digits`` field is added.
     """
-    amount_value = "%.2f" % Decimal(str(capture_amount))
+    amount_value = f"{Decimal(str(capture_amount)):.2f}"
     data = {
         "id": order_id,
         "status": "COMPLETED",
@@ -673,8 +683,7 @@ def paypal_apidata_one_partial_refund(amount, **overrides):
     capture_amount = overrides.get("capture_amount", "99.99")
     if Decimal(str(amount)) >= Decimal(str(capture_amount)):
         raise ValueError(
-            "partial refund amount %s must be < capture amount %s"
-            % (amount, capture_amount)
+            f"partial refund amount {amount} must be < capture amount {capture_amount}"
         )
     refund_id = overrides.pop("refund_id", "TEST-PAYPAL-PARTIAL-REFUND")
     overrides["refunds"] = [make_refund_dict(id=refund_id, amount=amount)]
@@ -700,11 +709,10 @@ def paypal_apidata_multi_partial(amounts, **overrides):
     decs = [Decimal(str(a)) for a in amounts]
     if sum(decs) >= capture_amount:
         raise ValueError(
-            "multi-partial refund amounts %s must sum to < capture amount %s"
-            % (amounts, capture_amount)
+            f"multi-partial refund amounts {amounts} must sum to < capture amount {capture_amount}"
         )
     overrides["refunds"] = [
-        make_refund_dict(id="TEST-PAYPAL-PARTIAL-REFUND-%d" % i, amount=a)
+        make_refund_dict(id=f"TEST-PAYPAL-PARTIAL-REFUND-{i}", amount=a)
         for i, a in enumerate(decs, start=1)
     ]
     return make_paypal_apidata(**overrides)
@@ -717,11 +725,10 @@ def paypal_apidata_multi_full(amounts, **overrides):
     decs = [Decimal(str(a)) for a in amounts]
     if sum(decs) != capture_amount:
         raise ValueError(
-            "multi-full refund amounts %s must sum to == capture amount %s"
-            % (amounts, capture_amount)
+            f"multi-full refund amounts {amounts} must sum to == capture amount {capture_amount}"
         )
     overrides["refunds"] = [
-        make_refund_dict(id="TEST-PAYPAL-FULL-REFUND-%d" % i, amount=a)
+        make_refund_dict(id=f"TEST-PAYPAL-FULL-REFUND-{i}", amount=a)
         for i, a in enumerate(decs, start=1)
     ]
     return make_paypal_apidata(**overrides)
@@ -766,12 +773,8 @@ class PayPalOrdersTestCase(OrdersTestCase):
         self.order.save()
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="Test Badge"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="Test Badge")
         self.badge.save()
-        self.order_item = OrderItem(
-            order=self.order, badge=self.badge, enteredBy="Test"
-        )
+        self.order_item = OrderItem(order=self.order, badge=self.badge, enteredBy="Test")
         self.order_item.save()
         self.order.refresh_from_db()

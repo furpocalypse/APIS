@@ -8,7 +8,7 @@ from django.urls import reverse
 import registration.views.common
 import registration.views.dealers
 import registration.views.staff
-from registration.models import *
+from registration.models import AttendeeOptions, Dealer, Event, Order, OrderItem, settings
 
 logger = logging.getLogger("registration.emails")
 
@@ -36,9 +36,7 @@ def send_registration_email(order, email, send_vip=True):
 
     # send registration confirmations to all people in the order
     for oi in order_items:
-        registration_email = registration.views.common.get_registration_email(
-            oi.badge.event
-        )
+        registration_email = registration.views.common.get_registration_email(oi.badge.event)
         if oi.badge.attendee.email == email:
             # send payment receipt to the payor
             data = {
@@ -49,16 +47,12 @@ def send_registration_email(order, email, send_vip=True):
                 "event": oi.badge.event,
                 "eventUrl": _get_event_url(oi.badge.event),
             }
-            msg_txt = render_to_string(
-                "registration/emails/registration-payment.txt", data
-            )
-            msg_html = render_to_string(
-                "registration/emails/registration-payment.html", data
-            )
+            msg_txt = render_to_string("registration/emails/registration-payment.txt", data)
+            msg_html = render_to_string("registration/emails/registration-payment.html", data)
             send_email(
                 registration_email,
                 [email],
-                "{0} Registration Payment".format(oi.badge.event.name),
+                f"{oi.badge.event.name} Registration Payment",
                 msg_txt,
                 msg_html,
             )
@@ -75,7 +69,7 @@ def send_registration_email(order, email, send_vip=True):
             send_email(
                 registration_email,
                 [oi.badge.attendee.email],
-                "{0} Registration Confirmation".format(oi.badge.event.name),
+                f"{oi.badge.event.name} Registration Confirmation",
                 msg_txt,
                 msg_html,
             )
@@ -84,13 +78,11 @@ def send_registration_email(order, email, send_vip=True):
         if oi.priceLevel.emailVIP and send_vip:
             data = {"badge": oi.badge, "event": oi.badge.event}
             msg_txt = render_to_string("registration/emails/vip-notification.txt", data)
-            msg_html = render_to_string(
-                "registration/emails/vip-notification.html", data
-            )
+            msg_html = render_to_string("registration/emails/vip-notification.html", data)
             send_email(
                 registration_email,
-                [email for email in oi.priceLevel.emailVIPEmails.split(",")],
-                "{0} VIP Registration".format(oi.badge.event.name),
+                list(oi.priceLevel.emailVIPEmails.split(",")),
+                f"{oi.badge.event.name} VIP Registration",
                 msg_txt,
                 msg_html,
             )
@@ -110,7 +102,7 @@ def send_upgrade_instructions(badge):
     send_email(
         registration_email,
         [badge.attendee.email],
-        "Upgrade Your Registration for {0}".format(event.name),
+        f"Upgrade Your Registration for {event.name}",
         msg_txt,
         msg_html,
     )
@@ -130,7 +122,7 @@ def send_upgrade_payment_email(attendee, order):
     send_email(
         registration_email,
         [attendee.email],
-        "{0} Upgrade Payment".format(event.name),
+        f"{event.name} Upgrade Payment",
         msg_txt,
         msg_html,
     )
@@ -139,13 +131,11 @@ def send_upgrade_payment_email(attendee, order):
         if oi.priceLevel.emailVIP:
             data = {"badge": oi.badge, "event": event}
             msg_txt = render_to_string("registration/emails/vip-notification.txt", data)
-            msg_html = render_to_string(
-                "registration/emails/vip-notification.html", data
-            )
+            msg_html = render_to_string("registration/emails/vip-notification.html", data)
             send_email(
                 registration_email,
-                [email for email in oi.priceLevel.emailVIPEmails.split(",")],
-                "{0} VIP Registration".format(event.name),
+                list(oi.priceLevel.emailVIPEmails.split(",")),
+                f"{event.name} VIP Registration",
                 msg_txt,
                 msg_html,
             )
@@ -163,7 +153,7 @@ def send_staff_registration_email(orderId):
     send_email(
         staff_email,
         [email],
-        "{0} Staff Registration".format(event.name),
+        f"{event.name} Staff Registration",
         msg_txt,
         msg_html,
     )
@@ -177,7 +167,7 @@ def send_staff_promotion_email(staff):
     send_email(
         staff_email,
         [staff.attendee.email],
-        "Welcome to {0} Staff!".format(staff.event.name),
+        f"Welcome to {staff.event.name} Staff!",
         msg_txt,
         msg_html,
     )
@@ -192,7 +182,7 @@ def send_new_staff_email(token):
     send_email(
         staff_email,
         [token.email],
-        "Welcome to {0} Staff!".format(event.name),
+        f"Welcome to {event.name} Staff!",
         msg_txt,
         msg_html,
     )
@@ -207,7 +197,7 @@ def send_dealer_application_email(dealerId):
     send_email(
         dealer_email,
         [dealer.attendee.email],
-        "{0} Dealer Application".format(dealer.event.name),
+        f"{dealer.event.name} Dealer Application",
         msg_txt,
         msg_html,
     )
@@ -219,7 +209,7 @@ def send_dealer_application_email(dealerId):
         [
             dealer_email,
         ],
-        "{0} Dealer Application Received".format(dealer.event.name),
+        f"{dealer.event.name} Dealer Application Received",
         msg_txt,
         msg_html,
     )
@@ -233,7 +223,7 @@ def send_dealer_assistant_form_email(dealer):
     send_email(
         dealer_email,
         [dealer.attendee.email],
-        "{0} Dealer Assistant Addition".format(dealer.event.name),
+        f"{dealer.event.name} Dealer Assistant Addition",
         msg_txt,
         msg_html,
     )
@@ -248,7 +238,7 @@ def send_dealer_assistant_email(dealer_id):
     send_email(
         dealer_email,
         [dealer.attendee.email],
-        "{0} Dealer Assistant Addition".format(dealer.event.name),
+        f"{dealer.event.name} Dealer Assistant Addition",
         msg_txt,
         msg_html,
     )
@@ -256,17 +246,13 @@ def send_dealer_assistant_email(dealer_id):
 
 def send_dealer_assistant_registration_invite(assistant):
     data = {"assistant": assistant, "event": assistant.event}
-    msg_txt = render_to_string(
-        "registration/emails/dealer/assistant-register.txt", data
-    )
-    msg_html = render_to_string(
-        "registration/emails/dealer/assistant-register.html", data
-    )
+    msg_txt = render_to_string("registration/emails/dealer/assistant-register.txt", data)
+    msg_html = render_to_string("registration/emails/dealer/assistant-register.html", data)
     dealer_email = registration.views.dealers.get_dealer_email(assistant.event)
     send_email(
         dealer_email,
         [assistant.email],
-        "{0} Dealer Assistant Addition".format(assistant.event.name),
+        f"{assistant.event.name} Dealer Assistant Addition",
         msg_txt,
         msg_html,
     )
@@ -291,7 +277,7 @@ def send_dealer_payment_email(dealer, order):
     send_email(
         dealer_email,
         [dealer.attendee.email],
-        "{0} Dealer Payment".format(dealer.event.name),
+        f"{dealer.event.name} Dealer Payment",
         msg_txt,
         msg_html,
     )
@@ -300,17 +286,13 @@ def send_dealer_payment_email(dealer, order):
 def send_dealer_approval_email(dealerQueryset):
     for dealer in dealerQueryset:
         data = {"dealer": dealer, "event": dealer.event}
-        msg_txt = render_to_string(
-            "registration/emails/dealer/dealer-approval.txt", data
-        )
-        msg_html = render_to_string(
-            "registration/emails/dealer/dealer-approval.html", data
-        )
+        msg_txt = render_to_string("registration/emails/dealer/dealer-approval.txt", data)
+        msg_html = render_to_string("registration/emails/dealer/dealer-approval.html", data)
         dealer_email = registration.views.dealers.get_dealer_email(dealer.event)
         send_email(
             dealer_email,
             [dealer.attendee.email],
-            "{0} Dealer Application".format(dealer.event.name),
+            f"{dealer.event.name} Dealer Application",
             msg_txt,
             msg_html,
         )
@@ -335,7 +317,9 @@ def send_chargeback_notice_email(order):
     )
 
 
-def send_email(reply_address, to_address_list, subject, message, html_message, bcc=[]):
+def send_email(reply_address, to_address_list, subject, message, html_message, bcc=None):
+    if bcc is None:
+        bcc = []
     logger.debug("Enter send_email...")
     mail_message = EmailMultiAlternatives(
         subject,
@@ -345,7 +329,9 @@ def send_email(reply_address, to_address_list, subject, message, html_message, b
         reply_to=[reply_address],
         bcc=bcc,
     )
-    logger.debug("Message to: {0}".format(to_address_list))
+    # OWASP A09 / ASVS V7 / CodeQL py/clear-text-logging-sensitive-data:
+    # recipient addresses are PII — log only the count, never the list.
+    logger.debug("Message to %d recipient(s)", len(to_address_list))
     mail_message.attach_alternative(html_message, "text/html")
     logger.debug("Sending...")
     mail_message.send()

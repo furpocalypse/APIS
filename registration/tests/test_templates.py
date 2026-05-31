@@ -18,7 +18,7 @@ import unittest
 
 from django.core.management import call_command
 from django.template.loader import get_template
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 
 
 class TestTemplates(unittest.TestCase):

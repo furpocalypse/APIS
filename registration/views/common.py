@@ -15,6 +15,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import cache_page
 
+# Plan D-IP: the single client-IP resolver. common.get_client_ip is
+# DELETED (not re-exported with a divergent body); callers use the one
+# resolver. clientip is model-free so this import is safe here too.
+from fm_eventmanager.clientip import get_client_ip
 from registration.models import (
     Cart,
     Department,
@@ -52,15 +56,6 @@ def clear_session(request):
             del request.session[key]
             logger.debug(f"Delete session key {key}")
     request.session.save()
-
-
-def get_client_ip(request):
-    x_forwarded_for = request.headers.get("x-forwarded-for")
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(",")[0]
-    else:
-        ip = request.META.get("REMOTE_ADDR")
-    return ip
 
 
 def get_request_meta(request):
@@ -105,9 +100,7 @@ def get_events(request):
         }
         for ev in events
     ]
-    return HttpResponse(
-        json.dumps(data, cls=DjangoJSONEncoder), content_type="application/json"
-    )
+    return HttpResponse(json.dumps(data, cls=DjangoJSONEncoder), content_type="application/json")
 
 
 def abort(status=400, reason="Bad request"):
@@ -117,7 +110,12 @@ def abort(status=400, reason="Bad request"):
     status: A valid HTTP status code
     reason: Human-readable explanation
     """
-    logger.info("JSON {0}: {1}".format(status, reason))
+    # OWASP A09 / CodeQL py/clear-text-logging-sensitive-data: callers pass
+    # `reason` that may carry exception text / PII. Log only the status; the
+    # reason is still returned to the client (the API contract) but never
+    # written to server logs. Callers MUST pass a generic, non-sensitive
+    # reason (never str(exc)) — see the stack-trace-exposure remediations.
+    logger.info("JSON abort %s", status)
     return JsonResponse({"success": False, "reason": reason}, status=status)
 
 
@@ -129,10 +127,10 @@ def success(status=200, reason=None):
     reason: (Optional) human-readable explanation
     """
     if reason is None:
-        logger.debug("JSON {0}".format(status))
+        logger.debug("JSON %s", status)
         return JsonResponse({"success": True}, status=status)
     else:
-        logger.debug("JSON {0}: {1}".format(status, reason))
+        logger.debug("JSON %s (with reason)", status)
         return JsonResponse(
             {
                 "success": True,
@@ -143,8 +141,20 @@ def success(status=200, reason=None):
         )
 
 
+# Order.reference is the lookup key for cash/credit completion endpoints
+# (complete_cash_transaction, complete_square_transaction) and is the
+# `invoice_id` / `custom_id` Square and PayPal echo back in webhooks. Per
+# ASVS V6.3.1, identifiers used as auth tokens must carry >= 64 bits of
+# entropy. The character set is 25 visually-unambiguous symbols
+# (registration.models.VISUALLY_UNAMBIGUOUS_CHARS, ~4.64 bits/char). 16
+# characters yields ~74 bits, comfortably above the floor with margin
+# against future alphabet shrinkage. Order.reference column is CharField
+# max_length=50, so this fits without a migration.
+ORDER_REFERENCE_LENGTH = 16
+
+
 def get_confirmation_token():
-    return get_random_token(6)
+    return get_random_token(ORDER_REFERENCE_LENGTH)
 
 
 def get_unique_confirmation_token(model):
@@ -166,12 +176,24 @@ def handler(obj):
             return None
     else:
         raise TypeError(
-            "Object of type %s with value of %s is not JSON serializable"
-            % (
-                type(obj),
-                repr(obj),
-            )
+            f"Object of type {type(obj)} with value of {obj!r} is not JSON serializable"
         )
+
+
+def to_json_safe(obj):
+    """Return a copy of *obj* containing only types that DjangoJSONEncoder
+    (used by Django's ``json_script`` filter) can serialize natively. The
+    custom :func:`handler` knows how to render the project's odd types
+    (``FieldFile``, ``Decimal``, ``datetime``); we round-trip through it so
+    the dict we hand to ``{{ value|json_script:"id" }}`` is plain JSON.
+
+    Used to feed templates that previously inlined
+    ``{{ json.dumps(...)|safe }}`` directly into a ``<script>`` block — a
+    JS-string-context XSS vector when any nested value contains
+    ``</script>`` or quote characters. Migrating to ``json_script`` closes
+    that vector. OWASP A03 / Cross-Site Scripting Prevention Cheat Sheet.
+    """
+    return json.loads(json.dumps(obj, default=handler))
 
 
 def index(request):
@@ -198,9 +220,7 @@ def index(request):
     if event.attendeeRegStart <= today <= event.attendeeRegEnd:
         return render(request, "registration/registration-form.html", context)
     elif event.attendeeRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to our social media for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
         return render(request, "registration/closed.html", context)
     elif event.attendeeRegEnd <= today:
         context["message"] = "has ended."
@@ -260,7 +280,7 @@ def basicBadges(request):
     ssdata = sorted(staffdata, key=lambda x: x["lastName"])
 
     dealers = [att for att in sdata if att["assoc"] == "Dealer"]
-    staff = [att for att in ssdata]
+    staff = list(ssdata)
     attendees = [att for att in sdata if att["assoc"] != "Staff"]
     return render(
         request,
@@ -279,9 +299,7 @@ def vipBadges(request):
     price_levels = PriceLevel.objects.filter(Q(emailVIP=True) | Q(group__iexact="vip"))
     shirt_sizes = {str(shirt.pk): shirt.name for shirt in ShirtSizes.objects.all()}
 
-    vip_order_items = OrderItem.objects.filter(
-        priceLevel__in=price_levels, badge__event=event
-    )
+    vip_order_items = OrderItem.objects.filter(priceLevel__in=price_levels, badge__event=event)
 
     badges = [
         {

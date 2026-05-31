@@ -1,8 +1,8 @@
-from django.http import HttpRequest
+from datetime import timedelta
+
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
 from freezegun import freeze_time
 
 from registration.models import Attendee, Dealer, DealerAsst, Event
@@ -16,6 +16,10 @@ from registration.views import ordering
 
 
 class DealerTestCase(TestCase):
+    # Set in setUpTestData (mypy/django-stubs cannot infer classmethod-set
+    # attrs); declare it so attribute access type-checks.
+    assistant: DealerAsst
+
     def setUp(self) -> None:
         self.client = Client()
         self.assistant.refresh_from_db()
@@ -77,9 +81,7 @@ class TestDealers(DealerTestCase):
         self.assertIn(b"FOOBAR", response.content)
 
     def test_dealerAsst(self):
-        response = self.client.get(
-            reverse("registration:dealer_asst", args=("FOOBAR",))
-        )
+        response = self.client.get(reverse("registration:dealer_asst", args=("FOOBAR",)))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"FOOBAR", response.content)
 

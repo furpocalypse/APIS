@@ -263,11 +263,17 @@
   {% if dealer %}
   <script type="text/javascript" src="{% static "js/templates/price-types.js" %}"></script>
   <script type="text/javascript" src="{% static "js/date-entry.js" %}"></script>
+  {{ jsonDealer|json_script:"dealer-data" }}
+  {{ jsonAttendee|json_script:"attendee-data" }}
+  {{ jsonBadge|json_script:"badge-data" }}
+  {{ jsonTable|json_script:"table-data" }}
   <script type="text/javascript">
-      let dealer = {{ jsonDealer|safe }};
-      let attendee = {{ jsonAttendee|safe }};
-      let badge = {{ jsonBadge|safe }};
-      let table = {{ jsonTable|safe }};
+      // See attendee-upgrade.html note: json_script blocks the JS-string XSS
+      // vector that |safe interpolation in <script> had. OWASP A03.
+      let dealer = JSON.parse(document.getElementById("dealer-data").textContent);
+      let attendee = JSON.parse(document.getElementById("attendee-data").textContent);
+      let badge = JSON.parse(document.getElementById("badge-data").textContent);
+      let table = JSON.parse(document.getElementById("table-data").textContent);
 
       let partners = dealer.partners.split(', ');
       let partnerCount = 0;
@@ -370,7 +376,7 @@
                   'buttonOffer': $('#buttonOffer').val(), 'asstbreakfast': false,
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
-              'event': '{{event}}'
+              'event': '{{ event|escapejs }}'
           };
 
 
@@ -387,7 +393,7 @@
                   if (result.responseText == "") {
                       alert("Your session has expired.");
                   } else {
-                      alert("An error has occurred. Please check the form and your payment information for errors. If this error continues, please contact {{event.dealerEmail}} for assistence.")
+                      alert("An error has occurred. Please check the form and your payment information for errors. If this error continues, please contact {{ event.dealerEmail|escapejs }} for assistence.")
                   }
                   $("#checkout").removeAttr("disabled");
               },
@@ -396,7 +402,7 @@
                       window.location = "{% url 'registration:invoice_dealer' %}";
                   } else {
                       $("#checkout").removeAttr("disabled");
-                      alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{event.dealerEmail}} for assistence.");
+                      alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{ event.dealerEmail|escapejs }} for assistence.");
                   }
               }
           });

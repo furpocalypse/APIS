@@ -1,0 +1,77 @@
+name: SCA
+
+# S33 HIGH-6 + CLAUDE.md item 6 (OWASP A06 / Dependency-Check discipline):
+# CodeQL scans source, not dependencies. Gate every PR on software-
+# composition analysis and re-scan weekly so a new CVE in an
+# already-locked dependency surfaces even without a code change.
+
+on:
+  push:
+    branches: [production, stage]
+  pull_request:
+    branches: [production, stage]
+  schedule:
+    # Mondays 07:17 UTC — surfaces new CVEs in pinned deps with no code change.
+    - cron: "17 7 * * 1"
+
+# CodeQL actions/missing-workflow-permissions: least privilege.
+permissions:
+  contents: read
+
+jobs:
+  python-deps:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Lockfile is in sync (immutable in CI)
+        run: uv lock --check
+      - name: pip-audit (Python deps; fail on any known vuln)
+        # NOTE: --strict is intentionally omitted. `django-prometheus` is
+        # pinned to a git rev (documented in pyproject.toml: 2.4.x caps
+        # Django<6.0, this project is on Django 6 — REVISIT on the first
+        # Django-6 PyPI release). pip-audit cannot resolve a VCS pin
+        # against PyPI, and --strict escalates "could not be audited" to a
+        # hard failure, which would wedge every merge on a deliberate,
+        # documented compatibility pin rather than on an actual CVE.
+        # Without --strict, pip-audit still exits non-zero on any *known*
+        # vulnerability (the CLAUDE.md item-6 / OWASP A06 control); only
+        # the un-auditable VCS pin is downgraded to a warning.
+        run: |
+          uv export --frozen --no-hashes --no-emit-project > /tmp/requirements.txt
+          uvx pip-audit -r /tmp/requirements.txt --progress-spinner=off
+
+  npm-deps:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: npm audit (frontend prod deps; fail on high/critical)
+        working-directory: registration/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+
+  trivy-fs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Trivy filesystem scan (deps + config)
+        # v0.28.0 transitively pinned aquasecurity/setup-trivy@v0.2.1,
+        # which upstream has since removed ("unable to find version
+        # v0.2.1"), hard-failing job setup. v0.36.0 pins a valid
+        # setup-trivy (@v0.2.6). SHA-pinned per S33 MED-10 / OWASP A08.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          # Block only on FIXABLE High/Critical (CLAUDE.md: "no new
+          # dependency with a known *unfixed* High or Critical CVE" — an
+          # upstream-unfixed advisory must not wedge every merge).
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table

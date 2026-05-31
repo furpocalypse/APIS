@@ -1,0 +1,8 @@
+# Http-level realip for TRUSTED_PROXY_MODE=proxy.
+# Rendered into /tmp/realip-http.conf by the entrypoint with envsubst.
+# Tokens (all substituted): TRUSTED_PROXY_CIDRS_DIRECTIVES, CLIENT_IP_HEADER,
+# REAL_IP_RECURSIVE.
+
+${TRUSTED_PROXY_CIDRS_DIRECTIVES}
+real_ip_header    ${CLIENT_IP_HEADER};
+real_ip_recursive ${REAL_IP_RECURSIVE};

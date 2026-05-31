@@ -23,18 +23,39 @@ if [[ "${SKIP_DOCKER_SERVICES:-${CI:+1}}" != "1" ]]; then
   make -C "$REPO" services-up
 fi
 
-# Reuse Makefile TEST_ENV values so this script mirrors ``make test``.
-export DJANGO_SETTINGS_MODULE=fm_eventmanager.settings_test
-export DJANGO_SECRET_KEY=test
-export DJANGO_DEBUG=1
+# Decision #11: load the tracked, secret-free, fully-independent test
+# posture (APIS_ENV=test, DJANGO_SETTINGS_MODULE=fm_eventmanager.settings,
+# DEBUG=True, empty TRUSTED_CLIENT_IP_HEADER [S3], MQTT test key, …) from
+# .env.test, then layer the e2e-harness-specific overrides below. There is
+# no settings_test module anymore.
+set -a
+# shellcheck disable=SC1091
+. "$REPO/.env.test"
+set +a
+
+# --- e2e-harness overrides (differ from the unit posture) ---------------
 export E2E_MODE=1
+# S3 test (c): the e2e suite must pass with the brute-force control
+# ACTIVE. .env.test sets AXES_ENABLED=False so the request-less unit
+# client.login() works; the Playwright harness drives real HTTP through
+# the full stack, so re-enable axes here. e2e reset() flushes axes state
+# between specs so an intentional bad-password test cannot lock the run.
+export AXES_ENABLED=true
+# S3 (evidence-led): Playwright talks straight to runserver with no nginx,
+# so no X-Real-IP is sent. .env.test already sets TRUSTED_CLIENT_IP_HEADER
+# empty -> allauth get_client_ip falls back to REMOTE_ADDR=127.0.0.1
+# (httpkit.py:207); the non-empty-header invariant is
+# APIS_ENV=production-gated and APIS_ENV=test here. Re-assert for clarity.
+export TRUSTED_CLIENT_IP_HEADER=''
+# Wildcard CSRF origins for the throwaway runserver host (DEBUG path).
+export CSRF_TRUSTED_ORIGINS='http://*,https://*'
 export PAYPAL_CLIENT_ID="${PAYPAL_CLIENT_ID:-test}"
 export PAYPAL_CLIENT_SECRET="${PAYPAL_CLIENT_SECRET:-test}"
 export PAYPAL_WEBHOOK_ID="${PAYPAL_WEBHOOK_ID:-test-webhook}"
 export SQUARE_APPLICATION_ID="${SQUARE_APPLICATION_ID:-test}"
 export SQUARE_ACCESS_TOKEN="${SQUARE_ACCESS_TOKEN:-test}"
 export SQUARE_LOCATION_ID="${SQUARE_LOCATION_ID:-test}"
-export CSRF_TRUSTED_ORIGINS='http://*,https://*'
+# Dedicated e2e database + isolated redis dbs (separate from unit).
 export DATABASE_HOST="${TEST_DATABASE_HOST:-127.0.0.1}"
 export DATABASE_PORT="${TEST_DATABASE_PORT:-5432}"
 export DATABASE_USER="${TEST_DATABASE_USER:-apis}"

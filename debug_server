@@ -1,5 +1,0 @@
-#!/bin/bash
-if [[ "$VIRTUAL_ENV" != "" ]]; then
-    source ./venvs/apis/bin/activate
-fi
-DJANGO_DEBUG=1 python -Wall ./manage.py runserver_plus

@@ -15,9 +15,7 @@ def check_state(data: dict, country_field: str, state_field: str):
     if country in COUNTRIES_REQUIRING_STATE and not state:
         raise ValidationError(
             {
-                state_field: ValidationError(
-                    f"State is required in {country}", code="required"
-                ),
+                state_field: ValidationError(f"State is required in {country}", code="required"),
             }
         )
 
@@ -25,9 +23,11 @@ def check_state(data: dict, country_field: str, state_field: str):
 class FirebaseForm(ModelForm):
     class Meta:
         model = Firebase
+        # Decision #8: no plaintext `token` field exists on the model (it
+        # is stored hash-only); the bearer token is minted server-side at
+        # create/rotation and shown once — never an editable form field.
         fields = (
             "name",
-            "token",
             "cashdrawer",
             "payment_type",
             "square_terminal_id",
@@ -40,12 +40,6 @@ class FirebaseForm(ModelForm):
             "foreground_color": TextInput(attrs={"type": "color"}),
             "background_color": TextInput(attrs={"type": "color"}),
         }
-
-
-class SignatureUploadForm(forms.Form):
-    badge_id = forms.IntegerField()
-    svg_file = forms.FileField()
-    png_file = forms.FileField()
 
 
 class AttendeeForm(forms.ModelForm):
@@ -82,7 +76,10 @@ class AttendeeForm(forms.ModelForm):
         )
 
     def clean(self) -> dict[str, Any]:
-        data = super().clean()
+        # Django's Form.clean() always returns the cleaned_data dict at
+        # runtime; the stub types it Optional. `or {}` satisfies the type
+        # without changing behaviour (an empty dict is a no-op downstream).
+        data = super().clean() or {}
         check_state(data, "country", "state")
         return data
 
@@ -110,7 +107,8 @@ class AttendeeForm(forms.ModelForm):
             "aslRequest",
             "address2",
             "state",
-        ) + required_address_fields
+            *required_address_fields,
+        )
 
 
 class BadgeForm(forms.ModelForm):
@@ -135,7 +133,10 @@ class OrderForm(forms.ModelForm):
                 self.fields[field].required = True
 
     def clean(self) -> dict[str, Any]:
-        data = super().clean()
+        # Django's Form.clean() always returns the cleaned_data dict at
+        # runtime; the stub types it Optional. `or {}` satisfies the type
+        # without changing behaviour (an empty dict is a no-op downstream).
+        data = super().clean() or {}
         check_state(data, "billingCountry", "billingState")
         return data
 
@@ -160,4 +161,5 @@ class OrderForm(forms.ModelForm):
             "apiData",
             "billingAddress2",
             "billingState",
-        ) + required_billing_fields
+            *required_billing_fields,
+        )

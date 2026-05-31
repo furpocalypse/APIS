@@ -272,7 +272,7 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
             "postal": "12345",
         }
 
-        status, message, order = ordering.do_checkout(
+        status, message, _order = ordering.do_checkout(
             "square",
             billing_data,
             Decimal("100.00"),
@@ -297,7 +297,7 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         # Before checkout
         self.assertEqual(self.limited_tier.get_registration_count(), 0)
 
-        status, message, order = ordering.doZeroCheckout(None, [cart_item], [])
+        status, _message, order = ordering.doZeroCheckout(None, [cart_item], [])
 
         self.assertTrue(status)
         self.assertIsNotNone(order)
@@ -328,7 +328,7 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         # Create many cart items
         cart_items = [self._create_cart_item(self.unlimited_tier) for _ in range(10)]
 
-        status, message, order = ordering.doZeroCheckout(None, cart_items, [])
+        status, _message, order = ordering.doZeroCheckout(None, cart_items, [])
 
         self.assertTrue(status)
         self.assertIsNotNone(order)
@@ -338,13 +338,10 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
 
     def test_pending_order_blocks_checkout_but_not_display(self):
         """Test that PENDING orders block checkout but don't affect frontend counts."""
-        from registration.payments import update_capacity_for_status_change
 
         # 2 confirmed + 1 pending against capacity of 3
         self._create_completed_order(self.limited_tier, 2)
-        pending_order = self._create_order_with_items(
-            self.limited_tier, 1, Order.PENDING
-        )
+        self._create_order_with_items(self.limited_tier, 1, Order.PENDING)
 
         # Frontend sees only confirmed registrations
         self.limited_tier.refresh_from_db()
@@ -365,15 +362,11 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         from registration.payments import update_capacity_for_status_change
 
         self._create_completed_order(self.limited_tier, 2)
-        pending_order = self._create_order_with_items(
-            self.limited_tier, 1, Order.PENDING
-        )
+        pending_order = self._create_order_with_items(self.limited_tier, 1, Order.PENDING)
 
         old_status = pending_order.status
         pending_order.status = Order.COMPLETED
-        update_capacity_for_status_change(
-            pending_order, old_status, pending_order.status
-        )
+        update_capacity_for_status_change(pending_order, old_status, pending_order.status)
         pending_order.save()
         self.limited_tier.refresh_from_db()
         self.assertEqual(self.limited_tier.get_registration_count(), 3)
@@ -388,15 +381,11 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         from registration.payments import update_capacity_for_status_change
 
         self._create_completed_order(self.limited_tier, 2)
-        pending_order = self._create_order_with_items(
-            self.limited_tier, 1, Order.PENDING
-        )
+        pending_order = self._create_order_with_items(self.limited_tier, 1, Order.PENDING)
 
         old_status = pending_order.status
         pending_order.status = Order.FAILED
-        update_capacity_for_status_change(
-            pending_order, old_status, pending_order.status
-        )
+        update_capacity_for_status_change(pending_order, old_status, pending_order.status)
         pending_order.save()
         self.limited_tier.refresh_from_db()
         self.assertEqual(self.limited_tier.get_registration_count(), 2)

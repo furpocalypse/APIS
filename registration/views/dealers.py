@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 from json import JSONDecodeError
+from typing import cast
 
 from django.forms import model_to_dict
 from django.http import (
@@ -17,13 +18,28 @@ from paypalserversdk.exceptions.api_exception import ApiException
 
 import registration.emails
 from registration import tasks
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Badge,
+    Dealer,
+    DealerAsst,
+    Decimal,
+    Discount,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    TableSize,
+    settings,
+    timezone,
+)
 from registration.paypal_payments import create_unpaid_paypal_order
+from registration.ratelimit import rate_limited_json
 from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import clear_session, handler, logger
+from .common import clear_session, to_json_safe
 from .ordering import do_checkout, doZeroCheckout, get_discount_total
 
 logger = logging.getLogger(__name__)
@@ -93,9 +109,7 @@ def new_dealer(request):
     if event.dealerRegStart <= today <= event.dealerRegEnd:
         return render(request, "registration/dealer/dealer-form.html", context)
     elif event.dealerRegStart >= today:
-        context["message"] = (
-            "is not yet open. Please stay tuned to our social media for updates!"
-        )
+        context["message"] = "is not yet open. Please stay tuned to our social media for updates!"
         return render(request, "registration/dealer/dealer-closed.html", context)
     elif event.dealerRegEnd <= today:
         context["message"] = "has ended."
@@ -112,25 +126,22 @@ def info_dealer(request):
 
     dealer = Dealer.objects.get(id=dealerId)
     if dealer:
-        badge = Badge.objects.filter(
-            attendee=dealer.attendee, event=dealer.event
-        ).last()
+        badge = Badge.objects.filter(attendee=dealer.attendee, event=dealer.event).last()
         dealer_dict = model_to_dict(dealer)
         attendee_dict = model_to_dict(dealer.attendee)
-        if badge is not None:
-            badge_dict = model_to_dict(badge)
-        else:
-            badge_dict = {}
+        badge_dict = model_to_dict(badge) if badge is not None else {}
         table_dict = model_to_dict(dealer.tableSize)
 
         context = {
             "dealer": dealer,
             "badge": badge,
             "event": dealer.event,
-            "jsonDealer": json.dumps(dealer_dict, default=handler),
-            "jsonTable": json.dumps(table_dict, default=handler),
-            "jsonAttendee": json.dumps(attendee_dict, default=handler),
-            "jsonBadge": json.dumps(badge_dict, default=handler),
+            # Plain dicts for `{% json_script %}` (closes the JS-string-XSS
+            # vector that `|safe` interpolation in <script> blocks had).
+            "jsonDealer": to_json_safe(dealer_dict),
+            "jsonTable": to_json_safe(table_dict),
+            "jsonAttendee": to_json_safe(attendee_dict),
+            "jsonBadge": to_json_safe(badge_dict),
         }
     return render(request, "registration/dealer/dealer-payment.html", context)
 
@@ -141,9 +152,7 @@ def find_dealer(request):
     token = post_data["token"]
 
     try:
-        dealer = Dealer.objects.get(
-            attendee__email__iexact=email, registrationToken=token
-        )
+        dealer = Dealer.objects.get(attendee__email__iexact=email, registrationToken=token)
     except Dealer.DoesNotExist:
         return common.abort(404, "No Dealer Found " + email)
 
@@ -160,9 +169,7 @@ def find_dealer_to_add_assistant_post(request):
         return common.abort(400, "Email or token missing from form data")
 
     try:
-        dealer = Dealer.objects.get(
-            attendee__email__iexact=email, registrationToken=token
-        )
+        dealer = Dealer.objects.get(attendee__email__iexact=email, registrationToken=token)
     except Dealer.DoesNotExist:
         return common.abort(404, "No dealer found")
 
@@ -182,9 +189,7 @@ def find_asst_dealer(request):
     token = postData["token"]
 
     try:
-        dealer_assistant = DealerAsst.objects.get(
-            email__iexact=email, registrationToken=token
-        )
+        dealer_assistant = DealerAsst.objects.get(email__iexact=email, registrationToken=token)
     except DealerAsst.DoesNotExist:
         return HttpResponseNotFound("No assistant dealer found")
 
@@ -263,7 +268,7 @@ def add_assistants(request):
             "assistants": assts,
             "extra_assistants_range": range(len(assts), dealer.tableSize.partnerMax),
             "asst_count_registered": asst_count_registered,
-            "json_assistants": json.dumps(assistants, default=handler),
+            "json_assistants": to_json_safe(assistants),
         }
     event = Event.objects.get(default=True)
     context["event"] = event
@@ -294,7 +299,7 @@ def _set_up_assistant_checkout(
     if total <= 0:
         raise RuntimeError(400, "No unpaid assistants to charge for.")
 
-    order_item = OrderItem(badge=badge, priceLevel=price_level, enteredBy="WEB")
+    order_item = OrderItem(badge=badge, priceLevel=cast(PriceLevel, price_level), enteredBy="WEB")
     order_item.save()
     session_items = request.session.get("order_items", [])
     session_items.append(order_item.id)
@@ -304,7 +309,7 @@ def _set_up_assistant_checkout(
 
 
 def _apply_assistants_form(
-    dealer: Dealer, event: Event, assistants_form: dict
+    dealer: Dealer, event: Event, assistants_form: list
 ) -> tuple[int, str] | None:
     """Create/update DealerAsst rows from the assistants payload.
 
@@ -313,9 +318,7 @@ def _apply_assistants_form(
     """
     for assistant in assistants_form:
         if assistant.get("id"):
-            dealer_asst_obj = DealerAsst.objects.get(
-                dealer=dealer, id=assistant.get("id")
-            )
+            dealer_asst_obj = DealerAsst.objects.get(dealer=dealer, id=assistant.get("id"))
         else:
             dealer_asst_obj = DealerAsst(
                 dealer=dealer,
@@ -342,9 +345,7 @@ def dealer_assistants_paypal_create(request):
     try:
         form_data = json.loads(request.body)
     except ValueError as e:
-        logger.warning(
-            f"Unable to decode JSON for dealer_assistants_paypal_create(): {e}"
-        )
+        logger.warning(f"Unable to decode JSON for dealer_assistants_paypal_create(): {e}")
         return common.abort(400, str(e))
 
     if "dealer_id" not in request.session:
@@ -410,16 +411,18 @@ def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
         if total <= 0:
             raise RuntimeError(400, "No unpaid assistants to charge for.")
     else:
-        total, order_items = _set_up_assistant_checkout(
-            request, form_data, dealer, event
-        )
+        total, order_items = _set_up_assistant_checkout(request, form_data, dealer, event)
 
     status, message, order = do_checkout(
-        processor, billing_data, total, None, [], order_items, 0, 0
+        processor, billing_data, total, None, [], order_items, Decimal(0), Decimal(0)
     )
 
     if status:
         # Payment succeeded - Mark assistants as paid
+        # do_checkout() returns a non-None Order whenever status is True
+        # (see registration.views.ordering.do_checkout); narrow for the
+        # type checker without altering runtime behavior.
+        order = cast(Order, order)
         for assistant in dealer.dealerasst_set.all().filter(paid=False):
             assistant.paid = True
             assistant.save()
@@ -436,6 +439,9 @@ def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
         return common.abort(500, message)
 
 
+# MED-3: dealer applications are low-frequency; cap abusive submission
+# floods (enumeration / mass-email) without impeding a real applicant.
+@rate_limited_json(rate="30/d")
 def add_dealer(request):
     try:
         postData = json.loads(request.body)
@@ -450,14 +456,25 @@ def add_dealer(request):
     pdp = postData["priceLevel"]
     event = Event.objects.get(name=evt)
 
-    if "dealer_id" not in request.session:
+    # Audit P1.8 (BOLA / IDOR fix): the dealer being mutated MUST be the
+    # one bound to this session, NOT whatever id the body asserts. Trusting
+    # pdd["id"] previously let an authenticated dealer A overwrite dealer
+    # B's record. The body-supplied attendee id is similarly ignored —
+    # we use dealer.attendee as the authoritative reference.
+    dealer_id = request.session.get("dealer_id")
+    if dealer_id is None:
         return HttpResponseServerError("Session expired")
 
-    # Update Dealer info
     try:
-        dealer = Dealer.objects.get(id=pdd["id"])
-    except dealer.DoesNotExist:
+        dealer = Dealer.objects.get(id=dealer_id)
+    except Dealer.DoesNotExist:
         return HttpResponseServerError("Dealer id not found")
+    if pdd.get("id") and int(pdd["id"]) != dealer.id:
+        logger.warning(
+            "BOLA attempt in add_dealer: session dealer %s tried to mutate dealer %s",
+            dealer_id,
+            pdd.get("id"),
+        )
 
     dealer.businessName = pdd["businessName"]
     dealer.website = pdd["website"]
@@ -479,11 +496,19 @@ def add_dealer(request):
 
     dealer.save()
 
-    # Update Attendee info
-    try:
-        attendee = Attendee.objects.get(id=pda["id"])
-    except attendee.DoesNotExist:
-        return HttpResponseServerError("Attendee id not found")
+    # Use the attendee bound to this dealer, NOT pda["id"] from the body.
+    # Same BOLA reasoning as the dealer guard above.
+    attendee = dealer.attendee
+    if attendee is None:
+        return HttpResponseServerError("Dealer has no attendee")
+    if pda.get("id") and int(pda["id"]) != attendee.id:
+        logger.warning(
+            "BOLA attempt in add_dealer: session dealer %s (attendee %s) tried "
+            "to mutate attendee %s",
+            dealer_id,
+            attendee.id,
+            pda.get("id"),
+        )
 
     attendee.preferredName = pda.get("preferredName", "")
     attendee.firstName = pda["firstName"]
@@ -526,10 +551,7 @@ def _build_dealer_translated_cart(
     event = dealer.event
     label = (
         dealer.businessName
-        or (
-            dealer.attendee
-            and f"{dealer.attendee.firstName} {dealer.attendee.lastName}"
-        )
+        or (dealer.attendee and f"{dealer.attendee.firstName} {dealer.attendee.lastName}")
         or "Dealer"
     )
     translated_cart: list[TranslatedCartItem] = [
@@ -540,9 +562,7 @@ def _build_dealer_translated_cart(
         },
     ]
     if porg > 0:
-        translated_cart.append(
-            {"name": f"Donation to {event}", "total": porg, "donation": True}
-        )
+        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
     if pcharity > 0:
         translated_cart.append(
             {
@@ -663,11 +683,14 @@ def checkout_dealer(request):
         return common.abort(400, message)
 
 
+@rate_limited_json(rate="30/d")  # MED-3: dealer-apply flood backstop.
 def addNewDealer(request):
     try:
         postData = json.loads(request.body)
     except ValueError as e:
-        logger.warning(f"Unable to decode JSON for addNewDealer(): {e}")
+        # OWASP A09: a JSON decode error message can echo back the raw
+        # request body (PII). Log only the exception type.
+        logger.warning("Unable to decode JSON for addNewDealer(): %s", type(e).__name__)
         return common.abort(400, "Unable to decode JSON")
 
     # create attendee from request post
@@ -757,8 +780,10 @@ def addNewDealer(request):
         return JsonResponse(
             {
                 "success": False,
-                "message": "Your registration succeeded but we may have been unable to send you a confirmation email. If you have any questions, please contact {0}.".format(
-                    dealerEmail
+                "message": (
+                    "Your registration succeeded but we may have been "
+                    "unable to send you a confirmation email. If you have "
+                    f"any questions, please contact {dealerEmail}."
                 ),
             }
         )
@@ -810,9 +835,7 @@ def get_dealer_total(orderItems, discount, dealer):
         for option in item.attendeeoptions_set.all():
             if option.option.optionExtraType == "int":
                 if option.optionValue:
-                    itemSubTotal += option.option.optionPrice * Decimal(
-                        option.optionValue
-                    )
+                    itemSubTotal += option.option.optionPrice * Decimal(option.optionValue)
             else:
                 itemSubTotal += option.option.optionPrice
     unpaidPartnerCount = dealer.getUnpaidPartnerCount()

@@ -53,6 +53,26 @@ def reset(request):
         return guard
     for model in _VOLATILE:
         model.objects.all().delete()
+    # S3 test (c): the e2e harness runs with axes ACTIVE
+    # (up.sh exports AXES_ENABLED=true). Clear axes lockout state between specs so
+    # the deliberate bad-password auth test (and any Playwright retry /
+    # cross-browser project) cannot lock the shared e2e-admin and cascade
+    # every later login test. The brute-force control stays exercised
+    # *within* a spec; only cross-spec bleed is reset (E2E_MODE-gated, so
+    # this is inert for prod and for `manage.py test`).
+    try:
+        from axes.models import AccessAttempt, AccessLog
+
+        AccessAttempt.objects.all().delete()
+        AccessLog.objects.all().delete()
+        try:  # AccessFailureLog exists on newer django-axes only.
+            from axes.models import AccessFailureLog
+
+            AccessFailureLog.objects.all().delete()
+        except ImportError:
+            pass
+    except ImportError:
+        pass
     paypal_stub.reset_state()
     return JsonResponse({"reset": True})
 

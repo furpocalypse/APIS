@@ -1,0 +1,42 @@
+# TRUSTED_PROXY_MODE=proxy
+#
+# Generic upstream proxy in front (Azure Application Gateway, Front Door,
+# nginx-ingress, etc.). TLS terminates upstream; this nginx serves
+# plaintext HTTP on port 80. Real client IP plumbing lives in
+# realip.proxy.conf.template, not here.
+#
+# Substituted tokens (in directives below): NGINX_SERVER_NAMES, NGINX_UPSTREAM.
+
+server {
+    listen      80 default_server;
+    listen [::]:80 default_server;
+    server_name ${NGINX_SERVER_NAMES};
+
+    location = /healthz {
+        access_log off;
+        return 204;
+    }
+
+    location / {
+        proxy_set_header Host              $http_host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        # Honor the upstream's X-Forwarded-Proto (it terminated TLS).
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header X-Forwarded-Host  $http_host;
+
+        proxy_set_header Forwarded          "";
+        proxy_set_header X-Real-Ip-Original "";
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    60s;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # Variable upstream + the http-block resolver = per-request DNS.
+        set $upstream "${NGINX_UPSTREAM}";
+        proxy_pass http://$upstream;
+    }
+}

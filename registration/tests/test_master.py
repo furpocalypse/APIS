@@ -1,19 +1,29 @@
-import io
 import unittest
-import urllib.error
-import urllib.parse
-import urllib.request
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from django.conf import settings
 from django.test import Client, TestCase
 from django.test.utils import override_settings, tag
 from django.urls import reverse
-from paypalserversdk.http.api_response import ApiResponse, HttpResponse
-from paypalserversdk.models.error_details import ErrorDetails
 
-from registration.models import *
-from registration.tests.common import *
+from registration.models import Dealer, DealerAsst
+from registration.tests.common import (
+    Attendee,
+    Badge,
+    Cart,
+    Decimal,
+    Department,
+    Discount,
+    Order,
+    OrderItem,
+    OrdersTestCase,
+    PriceLevel,
+    ShirtSizes,
+    json,
+    logger,
+    now,
+    ten_days,
+)
 
 
 class DebugURLTrigger(TestCase):
@@ -153,9 +163,7 @@ class TestAttendeeCheckout(OrdersTestCase):
 
     @tag("square")
     def test_bad_expiration(self):
-        self.assert_square_error(
-            "cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION"
-        )
+        self.assert_square_error("cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION")
 
     @tag("square")
     def test_card_declined(self):
@@ -601,7 +609,7 @@ class TestAttendeeCheckout(OrdersTestCase):
         self.assertEqual(response.status_code, 200)
         cart = response.context["orderItems"]
         self.assertEqual(len(cart), 1)
-        total = response.context["total"]
+        response.context["total"]
 
         checkout_post_data = {
             "orgDonation": "10",
@@ -671,9 +679,7 @@ class TestAttendeeCheckout(OrdersTestCase):
         assistant.save()
         order_item = OrderItem(badge=badge, priceLevel=self.price_45, enteredBy="WEB")
         order_item.save()
-        order_item = OrderItem.objects.select_related("priceLevel").get(
-            id=order_item.id
-        )
+        order_item = OrderItem.objects.select_related("priceLevel").get(id=order_item.id)
         dealer.refresh_from_db()
         return dealer, badge, order_item, assistant
 
@@ -688,7 +694,7 @@ class TestAttendeeCheckout(OrdersTestCase):
             return True, {"id": paypal_order_id, "status": "COMPLETED"}
 
         mock_capture.side_effect = fake_capture
-        dealer, badge, order_item, assistant = self._seed_dealer()
+        dealer, _badge, order_item, assistant = self._seed_dealer()
 
         session = self.client.session
         session["dealer_id"] = dealer.id
@@ -866,7 +872,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         self.assertEqual(order.total, Decimal("0"))
         self.assertEqual(order.billingType, Order.COMP)
 
-    def _seed_simple_dealer(self, dealer_flat_discount=Decimal("0")):
+    def _seed_simple_dealer(self, dealer_flat_discount=Decimal("0")):  # noqa: B008  # Decimal is immutable
         attendee = Attendee(
             firstName="Dealer",
             lastName="Disc",
@@ -893,9 +899,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         dealer.save()
         order_item = OrderItem(badge=badge, priceLevel=self.price_45, enteredBy="WEB")
         order_item.save()
-        order_item = OrderItem.objects.select_related("priceLevel").get(
-            id=order_item.id
-        )
+        order_item = OrderItem.objects.select_related("priceLevel").get(id=order_item.id)
         dealer.refresh_from_db()
         return dealer, badge, order_item
 
@@ -904,7 +908,7 @@ class TestPayPalDiscountScenarios(OrdersTestCase):
         """Dealer.discount flat amount should reduce Order.total end-to-end."""
         mock_capture.side_effect = self._fake_capture()
         flat = Decimal("20")
-        dealer, badge, order_item = self._seed_simple_dealer(dealer_flat_discount=flat)
+        dealer, _badge, order_item = self._seed_simple_dealer(dealer_flat_discount=flat)
 
         session = self.client.session
         session["dealer_id"] = dealer.id

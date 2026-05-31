@@ -9,12 +9,8 @@ class SmallCapacityRush(BaseBenchmark):
     scenario = ScenarioConfig(
         name="SmallCapacityRush",
         tiers=[
-            TierConfig(
-                name="VIP", price=Decimal("150.00"), max_capacity=10, num_users=50
-            ),
-            TierConfig(
-                name="Standard", price=Decimal("55.00"), max_capacity=None, num_users=50
-            ),
+            TierConfig(name="VIP", price=Decimal("150.00"), max_capacity=10, num_users=50),
+            TierConfig(name="Standard", price=Decimal("55.00"), max_capacity=None, num_users=50),
         ],
         ramp_up_seconds=5.0,
         think_times=ThinkTimes(
@@ -59,9 +55,7 @@ class ExtremeContention(BaseBenchmark):
     scenario = ScenarioConfig(
         name="ExtremeContention",
         tiers=[
-            TierConfig(
-                name="Limited", price=Decimal("50.00"), max_capacity=5, num_users=200
-            ),
+            TierConfig(name="Limited", price=Decimal("50.00"), max_capacity=5, num_users=200),
         ],
         ramp_up_seconds=3.0,
         think_times=ThinkTimes(

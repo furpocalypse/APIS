@@ -153,10 +153,18 @@
       </div>
     </div>
   </script>
+  {{ jsonAttendee|json_script:"attendee-data" }}
+  {{ jsonBadge|json_script:"badge-data" }}
+  {{ jsonLevel|json_script:"level-data" }}
   <script type="text/javascript">
-      var attendee = {{ jsonAttendee|safe }};
-      var badge = {{ jsonBadge|safe }};
-      var currentLevel = {{ jsonLevel|safe }};
+      // JSON.parse from <script type="application/json"> blocks emitted by
+      // Django's json_script filter. Using json_script (rather than the old
+      // |safe inside a JS string literal) prevents /script in attendee-
+      // controlled fields from breaking out of the script tag, and prevents
+      // quote/control characters from breaking the JS string. OWASP A03.
+      var attendee = JSON.parse(document.getElementById("attendee-data").textContent);
+      var badge = JSON.parse(document.getElementById("badge-data").textContent);
+      var currentLevel = JSON.parse(document.getElementById("level-data").textContent);
       var levelTemplateData = [];
       var shirtSizes = [];
 
@@ -364,7 +372,7 @@
           var data = {
               'attendee': {'id': attendee.id,},
               'badge': {'id': badge.id,},
-              'event': '{{ event }}',
+              'event': '{{ event | escapejs }}',
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()}
           };
 
@@ -383,7 +391,7 @@
                   if (result.responseText == "") {
                       alert("Your session has expired.");
                   } else {
-                      alert("An error has occurred. Please check the form and your payment information for errors. If this error continues, please contact {{ event.registrationEmail }} for assistance.")
+                      alert("An error has occurred. Please check the form and your payment information for errors. If this error continues, please contact {{ event.registrationEmail|escapejs }} for assistance.")
                   }
                   $("#checkout").removeAttr("disabled").one('click', doRegister);
               },
@@ -392,7 +400,7 @@
                       window.location = "{% url 'registration:invoice_upgrade' %}";
                   } else {
                       $("#checkout").removeAttr("disabled").one('click', doRegister);
-                      alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{ event.registrationEmail }} for assistance.");
+                      alert("An error has occurred: " + result.message + " Please check the form an your payment information for errors. If this error continues, please contact {{ event.registrationEmail|escapejs }} for assistance.");
                   }
               }
           });

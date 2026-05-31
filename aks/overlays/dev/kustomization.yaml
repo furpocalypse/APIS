@@ -1,0 +1,128 @@
+# Dev overlay. Single-replica everything, small resource asks, sandbox
+# payment URLs, lower-cost SKUs. Lives in namespace `apis-dev` so it can
+# coexist with prod in the same cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apis-dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+# All patches use explicit `target` selectors. We don't rely on the
+# patch file's own metadata.namespace for matching — that breaks when
+# the overlay remaps namespaces.
+patches:
+  # --- Delete the base Namespace resource (we supply our own apis-dev) -
+  - target:
+      kind: Namespace
+      name: apis
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: apis
+
+  # --- Replicas + HPA bounds: 1 everywhere -----------------------------
+  - target:
+      kind: Deployment
+      name: apis-app
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: apis-worker
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: apis-app
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: apis-worker
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+
+  # --- Smaller resource asks (fits on B-series nodes) ------------------
+  - target:
+      kind: Deployment
+      name: apis-app
+    path: patch-resources-app.yaml
+  - target:
+      kind: Deployment
+      name: apis-worker
+    path: patch-resources-worker.yaml
+  - target:
+      kind: StatefulSet
+      name: postgres
+    path: patch-resources-postgres.yaml
+  - target:
+      kind: StatefulSet
+      name: redis
+    path: patch-resources-redis.yaml
+
+  # --- Ingress (dev hostname + TLS secret) -----------------------------
+  - target:
+      kind: Ingress
+      name: apis
+    path: patch-ingress.yaml
+
+  # --- Always-pull for the moving `dev` tag ----------------------------
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/name=apis
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+
+configMapGenerator:
+  - name: apis-config
+    behavior: merge
+    literals:
+      # LOW-6: DJANGO_DEBUG=True is acceptable ONLY because this overlay
+      # targets a dev cluster reachable solely from a private VNet (no
+      # public ingress, no production PII/payments). DEBUG leaks stack
+      # traces + settings; never promote this overlay to a
+      # public-reachable or data-bearing cluster. The settings.py
+      # _IS_PROD guard additionally hard-fails if APIS_ENV=production is
+      # ever combined with DEBUG.
+      - DJANGO_DEBUG=True
+      - DJANGO_LOGLEVEL=debug
+      - ALLOWED_HOSTS=apis-dev.example.org
+      - CSRF_TRUSTED_ORIGINS=https://apis-dev.example.org
+      - SECURE_HSTS_SECONDS=0
+      - SECURE_HSTS_INCLUDE_SUBDOMAINS=False
+      - SECURE_HSTS_PRELOAD=False
+      - TRUSTED_PROXY_CIDRS=10.0.0.0/24
+      - SQUARE_ENVIRONMENT=sandbox
+      - PAYPAL_ENVIRONMENT=sandbox
+      - ENVIRONMENT_NAME=Dev
+      - ENVIRONMENT_COLOR=#FF8800
+      - SENTRY_ENVIRONMENT=dev
+      - SENTRY_TRACES_SAMPLE_RATE=1.0
+      - APIS_METRICS_BACKEND=DummyReporter
+    options:
+      disableNameSuffixHash: true
+
+images:
+  - name: furpocalypse.azurecr.io/apis
+    newTag: dev

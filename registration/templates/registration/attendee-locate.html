@@ -70,7 +70,7 @@
 
           var data = {
               'email': $("#email").val(), 'token': $("#token").val(),
-              'event': '{{ event }}'
+              'event': '{{ event|escapejs }}'
           };
           $.ajax({
               "type": "POST",

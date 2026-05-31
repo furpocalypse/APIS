@@ -1,0 +1,45 @@
+# PodDisruptionBudgets — voluntary-eviction guardrails. Node upgrades,
+# AKS auto-repair, and `kubectl drain` honor these; involuntary failures
+# (zone outage) do not.
+#
+# Web: at least one replica must remain available during a drain. Combined
+# with HPA min=2, a single-node drain on a 2-node pool can't take the
+# service down.
+#
+# Worker: minAvailable: 0 because the HPA min is 1; we'd rather a drain
+# evict the lone worker briefly than block the node upgrade indefinitely.
+# Celery tasks are idempotent / retry-on-failure (max_retries=3 in
+# registration/tasks.py), so a short outage is recoverable.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: apis-app
+  namespace: apis
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apis
+      app.kubernetes.io/component: web
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres
+  namespace: apis
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis
+  namespace: apis
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis

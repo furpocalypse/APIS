@@ -11,6 +11,8 @@ dependencies = [
     "django~=6.0.3",
     "django-admin-env-notice~=1.0.1",
     "django-allauth[mfa]>=65.14.3",
+    "django-axes~=8.3",
+    "django-csp~=4.0",
     "django-extensions~=4.1",
     "django-idempotency-key~=1.3.0",
     "django-import-export~=4.4.0",
@@ -19,14 +21,15 @@ dependencies = [
     "django-nested-admin>=4.1.1",
     "django-nested-inline~=0.4.6",
     "django-prometheus~=2.4.1",
+    "django-ratelimit~=4.1",
     "django-redis~=6.0.0",
     "django-vite>=3.1.0",
     "django-widget-tweaks~=1.5.1",
-    "freezegun>=1.4.0",
     "gotenberg-client~=0.13.1",
     "gunicorn>=25.0.1",
-    "influxdb~=5.3.1",
-    "influxdb-client~=1.50.0",
+    "influxdb~=5.3.1",                # legacy v1 client (InfluxDBReporter, deprecated)
+    "influxdb-client~=1.50.0",        # v2 client (unused; kept for backward-compat)
+    "influxdb3-python~=0.13",         # v3 client (InfluxDBv3Reporter — current path)
     "markuppy>=1.14",
     "paho-mqtt~=2.1.0",
     "paypal-server-sdk==2.2.0",
@@ -37,15 +40,28 @@ dependencies = [
     "pyjwt~=2.12.1",
     "pytz~=2026.1.post1",
     "qrcode~=8.2.0",
-    "respx>=0.22.0",
     "sentry-sdk>=2.54.0",
     "soupsieve>=2.8.3",
     "squareup==44.0.1.20260122",
     "uvicorn>=0.40.0",
     "uvicorn-worker>=0.4.0",
+    # WhiteNoise serves /static/ from gunicorn. Necessary because nginx
+    # is now a separate image (it doesn't have access to /app/apis/static
+    # the way the bundled-nginx setup did). [brotli] adds br/gz pre-comp
+    # at collectstatic time so gunicorn doesn't compress per-request.
+    "whitenoise[brotli]>=6.7.0",
 ]
 
 [tool.uv.sources]
+# django-prometheus 2.4.x requires Django<6.0; this project uses Django 6.0.x.
+# We are tracking the django-commons branch that supports Django 6 (currently
+# tagged 2.5.0.dev0 in setup.py). The pin is by full Git SHA, which uv resolves
+# via content-addressed lookup, so a force-push to upstream cannot substitute
+# different code under the same rev.
+#
+# REVISIT when django-prometheus 2.5.0 (or whatever the first Django-6
+# release is named) lands on PyPI. At that point switch to a tilde-pin in
+# [project] and remove this entry per OWASP A08 / CLAUDE.md §6.
 django-prometheus = { git = "https://github.com/django-commons/django-prometheus", rev = "ea2d559476675a688f82cc37fac22b796ec7bcba" }
 
 [dependency-groups]
@@ -53,14 +69,99 @@ dev = [
     "coverage[toml]>=7.6.0",
     "coveralls>=4.1.0",
     "django-debug-toolbar~=6.2.0",
-    "django-types>=0.22.0",
+    "django-stubs[compatible-mypy]>=6.0.4",
+    # mypy 2.0.0 INTERNAL-ERRORs on this codebase (CI lint.yml mypy job
+    # crashed with exit 2). Pin to the stable 1.x line until 2.x is
+    # crash-free; mypy is a Phase-B continue-on-error job so this only
+    # affects whether it produces usable (non-blocking) output.
+    "mypy>=1.15,<2",
+    "pylint>=4.0.5",
+    "pylint-django>=2.7.0",
     "ruff>=0.15.4",
+    "vulture>=2.16",
     "werkzeug>=3.1.5",
 ]
 test = [
     "coveralls>=4.1.0",
+    "freezegun>=1.4.0",
     "httpx>=0.27.0",
+    "respx>=0.22.0",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [
+    "*/migrations/*",
+    "registration/frontend/*",
+    "venv",
+    ".venv",
+    "vulture_whitelist.py",  # intentionally bare names for vulture; not real code
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "DJ", "SIM", "RUF"]
+ignore = [
+    "E203",    # whitespace-before-punctuation, conflicts with the formatter
+    "RUF012",  # Django model/admin/form classes use mutable class attrs by design
+               # (Meta, list_display, fields, fieldsets, actions); ClassVar is wrong here
+    "DJ001",   # null=True on string fields: changing it requires a DB migration and
+               # alters None/"" query semantics -- deliberate Phase C work, not a lint fix
+    "DJ012",   # model body element ordering: pure convention, high churn, low value
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*" = ["E501", "RUF012"]
+"registration/tests/*" = ["E501"]
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["registration", "fm_eventmanager"]
+combine-as-imports = true
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main"]
+ignore_missing_imports = true
+exclude = ['/migrations/', 'registration/frontend/']
+# Introduced lenient; tighten in Phase C (check_untyped_defs, then disallow_untyped_defs).
+check_untyped_defs = false
+disallow_untyped_defs = false
+
+[tool.django-stubs]
+django_settings_module = "fm_eventmanager.settings"
+
+[tool.pylint.main]
+load-plugins = ["pylint_django"]
+django-settings-module = "fm_eventmanager.settings"
+ignore-paths = ["^.*/migrations/.*$", "^registration/frontend/.*$"]
+jobs = 0
+
+[tool.pylint."messages control"]
+# Style/formatting is owned by ruff; keep pylint focused on semantics, design,
+# and the cross-file duplicate-code (R0801) check ruff cannot do.
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+    "C0301",  # line-too-long (ruff/E501)
+    "C0103",  # invalid-name (ruff/N, project uses camelCase model fields)
+    "R0903",  # too-few-public-methods (noisy for Django models/forms)
+    "W0511",  # fixme (TODO/FIXME comments are tracked elsewhere)
+]
+
+[tool.pylint.similarities]
+min-similarity-lines = 8
+ignore-imports = true
+ignore-signatures = true
+
+[tool.vulture]
+paths = ["registration", "fm_eventmanager", "vulture_whitelist.py"]
+exclude = ["*/migrations/*", "registration/frontend/*"]
+min_confidence = 80
 
 [tool.coverage.run]
 branch = true

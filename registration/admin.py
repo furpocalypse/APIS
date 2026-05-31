@@ -7,17 +7,18 @@ from io import BytesIO
 import qrcode
 from allauth.account.decorators import secure_admin_login
 from django import forms
-from django.contrib import admin, auth, messages
+from django.contrib import admin, messages
+from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
-from django.core.signing import TimestampSigner
 from django.db import transaction
 from django.db.models import Max, QuerySet
 from django.forms import NumberInput, widgets
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import path, re_path, reverse
-from django.utils.html import format_html, urlencode
+from django.utils.html import format_html
+from django.utils.http import urlencode
 from django.utils.safestring import mark_safe
 from import_export import fields, resources
 from import_export.admin import ImportExportModelAdmin
@@ -31,15 +32,52 @@ import registration.emails
 import registration.views.onsite_admin
 from registration import mqtt, payments, paypal_payments, tasks
 from registration.forms import FirebaseForm
-from registration.models import *
+from registration.models import (
+    Attendee,
+    AttendeeOptions,
+    Badge,
+    BadgeTemplate,
+    BanList,
+    Cart,
+    Cashdrawer,
+    Charity,
+    Dealer,
+    DealerAsst,
+    Decimal,
+    Department,
+    Discount,
+    Event,
+    Firebase,
+    HoldType,
+    Order,
+    OrderItem,
+    PaymentWebhookNotification,
+    PriceLevel,
+    PriceLevelOption,
+    PrintHistory,
+    ReservedBadgeNumbers,
+    ShirtSizes,
+    SquareDevice,
+    Staff,
+    StaffInvite,
+    TableSize,
+    Venue,
+    get_registration_token,
+    settings,
+)
 from registration.services import CreateAttendeeOptions
+from registration.signing import print_capability_signer
 from registration.views import webhooks
 
 logger = logging.getLogger(__name__)
 
 admin.site.site_url = None
 admin.site.site_header = "APIS Backoffice"
-admin.site.login = secure_admin_login(admin.site.login)
+# mypy [method-assign]: wrapping the bound admin login view with allauth's
+# secure_admin_login is the documented allauth integration; this is a plain
+# attribute assignment on the AdminSite instance (behavior unchanged). ruff
+# B010 forbids the setattr() form, so a targeted ignore is the only option.
+admin.site.login = secure_admin_login(admin.site.login)  # type: ignore[method-assign]
 
 # Register your models here.
 admin.site.register(HoldType)
@@ -49,7 +87,7 @@ admin.site.register(TableSize)
 admin.site.register(Cart)
 
 
-class UserProfileAdmin(auth.admin.UserAdmin):
+class UserProfileAdmin(UserAdmin):
     model = User
     list_display = (
         "username",
@@ -76,46 +114,71 @@ class FirebaseAdmin(admin.ModelAdmin):
     form = FirebaseForm
 
     def render_change_form(self, request, context, *args, **kwargs):
-        return super(FirebaseAdmin, self).render_change_form(
-            request, context, *args, **kwargs
-        )
+        return super().render_change_form(request, context, *args, **kwargs)
 
     def get_urls(self):
-        urls = super(FirebaseAdmin, self).get_urls()
+        urls = super().get_urls()
         my_urls = [
-            re_path(
-                r"^(.+)/provision/$", self.provision_view, name="firebase_provision"
-            ),
+            re_path(r"^(.+)/provision/$", self.provision_view, name="firebase_provision"),
         ]
         return my_urls + urls
 
     def save_model(self, request, obj, form, change):
-        obj.save()
-
-        registration.views.onsite_admin.send_mqtt_message_to_terminal(
-            obj, "payment/update/config", self.get_provisioning(obj)
-        )
+        if not change:
+            # New terminal: mint its bearer token now (in memory only),
+            # persist ONLY the hash, push the full provisioning (with the
+            # token) to the device, and surface the plaintext to the
+            # operator exactly once — it is never recoverable afterwards
+            # (Decision #8 / Round-4, ASVS V2.10.4).
+            plaintext = obj.mint_token()
+            obj.save()
+            registration.views.onsite_admin.send_mqtt_message_to_terminal(
+                obj,
+                "payment/update/config",
+                self.get_provisioning(obj, token=plaintext),
+            )
+            messages.warning(
+                request,
+                "Terminal bearer token (shown once — copy it now, it "
+                f"cannot be retrieved later): {plaintext}",
+            )
+        else:
+            # Routine edit (rename/close/theme/…): push the config update
+            # WITHOUT a token. Round-4: a non-rotation edit must never
+            # carry an empty/absent token that would brick a live device.
+            # Rotation is the explicit action on the provisioning page.
+            obj.save()
+            registration.views.onsite_admin.send_mqtt_message_to_terminal(
+                obj, "payment/update/config", self.get_provisioning(obj)
+            )
 
     @staticmethod
-    def get_provisioning(firebase):
+    def get_provisioning(firebase, *, token=None):
         current_site = Site.objects.get_current()
-        endpoint = "https://{0}".format(current_site.domain)
-        token = mqtt.get_payment_token(firebase)
+        endpoint = f"https://{current_site.domain}"
+        mqtt_token = mqtt.get_payment_token(firebase)
 
-        return {
+        provisioning = {
             "terminalName": firebase.name,
             "endpoint": endpoint,
-            "token": firebase.token,
             "webViewUrl": firebase.webview,
             "themeColor": firebase.background_color,
             "mqttHost": settings.MQTT_EXTERNAL_BROKER,
             "mqttPort": 443,
-            "mqttUsername": token["user"],
-            "mqttPassword": token["token"],
-            "mqttPrefix": token["root_topic"],
+            "mqttUsername": mqtt_token["user"],
+            "mqttPassword": mqtt_token["token"],
+            "mqttPrefix": mqtt_token["root_topic"],
             "squareApplicationId": settings.SQUARE_APPLICATION_ID,
             "squareLocationId": settings.REGISTER_SQUARE_LOCATION,
         }
+        # Decision #8 / Round-4: include the bearer token ONLY when a
+        # freshly-minted plaintext is supplied in THIS request (create or
+        # explicit rotation). The server stores only the hash, so a
+        # routine display/edit has no token to emit — the key is omitted
+        # entirely rather than pushed empty.
+        if token is not None:
+            provisioning["token"] = token
+        return provisioning
 
     @staticmethod
     def get_qrcode(data):
@@ -126,14 +189,31 @@ class FirebaseAdmin(admin.ModelAdmin):
 
     def provision_view(self, request, pk):
         obj = Firebase.objects.get(id=pk)
-        provisioning = json.dumps(self.get_provisioning(obj))
 
         receipt_token = mqtt.get_receipt_token(obj)
         station_token = mqtt.get_station_token(obj)
         state_token = mqtt.get_state_token(obj)
 
+        qr_svg = None
+        rotated = False
+        if request.method == "POST" and request.user.is_superuser:
+            # Explicit rotation only (never on GET): mint a new token,
+            # which invalidates the previous one because only the new
+            # hash remains; persist; re-push the full config over the
+            # existing MQTT path; render the pairing QR exactly once.
+            plaintext = obj.mint_token()
+            obj.save()
+            provisioning = self.get_provisioning(obj, token=plaintext)
+            registration.views.onsite_admin.send_mqtt_message_to_terminal(
+                obj, "payment/update/config", provisioning
+            )
+            qr_svg = self.get_qrcode(json.dumps(provisioning)).decode("utf-8")
+            rotated = True
+
         context = {
-            "qr_svg": self.get_qrcode(provisioning).decode("utf-8"),
+            "qr_svg": qr_svg,
+            "rotated": rotated,
+            "terminal": obj,
             "receipt_token": receipt_token,
             "station_token": station_token,
             "state_token": state_token,
@@ -150,7 +230,7 @@ class BanListAdmin(admin.ModelAdmin):
 @admin.action(description="Send New Staff registration email")
 def send_staff_token_email(modeladmin, request, queryset):
     if queryset.count() == 0:
-        messages.error("Invalid token selected")
+        messages.error(request, "Invalid token selected")
         return
 
     for token in queryset:
@@ -158,11 +238,9 @@ def send_staff_token_email(modeladmin, request, queryset):
         token.sent = True
         token.save()
     if queryset.count() > 1:
-        messages.success(
-            request, "Successfully sent emails to %d staff members" % queryset.count()
-        )
+        messages.success(request, f"Successfully sent emails to {queryset.count()} staff members")
     else:
-        messages.success(request, "Successfully sent email to %s" % queryset[0].email)
+        messages.success(request, f"Successfully sent email to {queryset[0].email}")
 
 
 @admin.register(StaffInvite)
@@ -183,14 +261,12 @@ class StaffInviteAdmin(admin.ModelAdmin):
 
 @admin.action(description="Send approval email and payment instructions")
 def send_approval_email(modeladmin, request, queryset):
-    tasks.send_dealer_approval_email_task.delay(
-        list(queryset.values_list("id", flat=True))
-    )
+    tasks.send_dealer_approval_email_task.delay(list(queryset.values_list("id", flat=True)))
     queryset.update(emailed=True)
     if queryset.count() > 1:
-        messages.success(request, "Successfully emailed %d dealers" % queryset.count())
+        messages.success(request, f"Successfully emailed {queryset.count()} dealers")
     else:
-        messages.success(request, "Successfully emailed %s" % queryset[0].attendee)
+        messages.success(request, f"Successfully emailed {queryset[0].attendee}")
 
 
 @admin.action(description="Approve selected dealers")
@@ -199,9 +275,9 @@ def mark_as_approved(modeladmin, request, queryset):
         dealer.approved = True
         dealer.save()
     if queryset.count() > 1:
-        messages.success(request, "Successfully approved %d dealers" % queryset.count())
+        messages.success(request, f"Successfully approved {queryset.count()} dealers")
     else:
-        messages.success(request, "Successfully approved %s" % queryset[0].attendee)
+        messages.success(request, f"Successfully approved {queryset[0].attendee}")
 
 
 @admin.action(description="Resend payment confirmation email")
@@ -212,9 +288,9 @@ def send_payment_email(modeladmin, request, queryset):
         if oi and oi.order:
             tasks.send_dealer_payment_email_task.delay(dealer.id, oi.order.id)
     if queryset.count() > 1:
-        messages.success(request, "Successfully emailed %d dealers" % queryset.count())
+        messages.success(request, f"Successfully emailed {queryset.count()} dealers")
     else:
-        messages.success(request, "Successfully emailed %s" % queryset[0].attendee)
+        messages.success(request, f"Successfully emailed {queryset[0].attendee}")
 
 
 @admin.action(description="Send assistant addition form email")
@@ -222,9 +298,9 @@ def send_assistant_form_email(modeladmin, request, queryset):
     for dealer in queryset:
         tasks.send_dealer_assistant_form_email_task.delay(dealer.id)
     if queryset.count() > 1:
-        messages.success(request, "Successfully emailed %d dealers" % queryset.count())
+        messages.success(request, f"Successfully emailed {queryset.count()} dealers")
     else:
-        messages.success(request, "Successfully emailed %s" % queryset[0].attendee)
+        messages.success(request, f"Successfully emailed {queryset[0].attendee}")
 
 
 class DealerAsstInline(NestedTabularInline):
@@ -276,12 +352,10 @@ def send_assistant_registration_email(modeladmin, request, queryset):
     if queryset.count() > 1:
         messages.success(
             request,
-            "Successfully sent emails to %d dealer assistants" % queryset.count(),
+            f"Successfully sent emails to {queryset.count()} dealer assistants",
         )
     else:
-        messages.success(
-            request, "Successfully sent email to %s" % queryset[0].attendee
-        )
+        messages.success(request, f"Successfully sent email to {queryset[0].attendee}")
 
 
 @admin.register(DealerAsst)
@@ -320,10 +394,7 @@ class DealerAsstAdmin(ImportExportModelAdmin):
         boolean=True,
     )
     def asst_registered(self, obj):
-        if obj.attendee is not None:
-            return True
-        else:
-            return False
+        return obj.attendee is not None
 
 
 class DealerResource(resources.ModelResource):
@@ -768,19 +839,23 @@ class StaffAdmin(ImportExportModelAdmin):
                     staff_copy.save()
                     count += 1
 
-                self.message_user(
-                    request, "Successfully copied %d staff to %s." % (count, event)
+                self.message_user(request, f"Successfully copied {count} staff to {event}.")
+                # Defense-in-depth (consistency with refund_view's open-
+                # redirect fix): never echo request.path back into a
+                # redirect. For an admin action this is just the model
+                # changelist — re-derive it from route metadata, which
+                # carries no request-controlled data.
+                meta = self.model._meta
+                return HttpResponseRedirect(
+                    reverse(f"admin:{meta.app_label}_{meta.model_name}_changelist")
                 )
-                return HttpResponseRedirect(request.get_full_path())
 
         if not form:
             form = self.CopyToEvent(
                 initial={"_selected_action": queryset.values_list("pk", flat=True)}
             )
 
-        return render(
-            request, "admin/copy_event.html", {"staff": queryset, "form": form}
-        )
+        return render(request, "admin/copy_event.html", {"staff": queryset, "form": form})
 
 
 ########################################################
@@ -801,16 +876,13 @@ def make_staff(modeladmin, request, queryset):
         if skipped > 0:
             messages.success(
                 request,
-                f"{queryset.count() - skipped} attendees added to staff ({skipped} ommited that were already on staff for {event})",
+                f"{queryset.count() - skipped} attendees added to staff "
+                f"({skipped} omitted that were already on staff for {event})",
             )
         else:
-            messages.success(
-                request, f"{queryset.count()} attendees added to staff for {event}"
-            )
+            messages.success(request, f"{queryset.count()} attendees added to staff for {event}")
     else:
-        messages.success(
-            request, f"Successfully added {queryset[0]} to staff for {event}"
-        )
+        messages.success(request, f"Successfully added {queryset[0]} to staff for {event}")
 
 
 @admin.action(description="Send upgrade info email")
@@ -818,11 +890,9 @@ def send_upgrade_form_email(modeladmin, request, queryset):
     for badge in queryset:
         tasks.send_upgrade_instructions_task.delay(badge.id)
     if queryset.count() > 1:
-        messages.success(
-            request, "Successfully sent emails to %d attendees" % queryset.count()
-        )
+        messages.success(request, f"Successfully sent emails to {queryset.count()} attendees")
     else:
-        messages.success(request, "Successfully sent email to %s" % queryset[0])
+        messages.success(request, f"Successfully sent email to {queryset[0]}")
 
 
 @admin.action(description="Resend confirmation email")
@@ -831,11 +901,9 @@ def resend_confirmation_email(modeladmin, request, queryset):
         order = badge.getOrder()
         tasks.send_registration_email_task.delay(order.id, badge.attendee.email, False)
     if queryset.count() > 1:
-        messages.success(
-            request, "Successfully sent emails to %d attendees" % queryset.count()
-        )
+        messages.success(request, f"Successfully sent emails to {queryset.count()} attendees")
     else:
-        messages.success(request, "Successfully sent email to %s" % queryset[0])
+        messages.success(request, f"Successfully sent email to {queryset[0]}")
 
 
 @admin.action(description="Assign badge number")
@@ -851,10 +919,10 @@ def assign_badge_numbers(modeladmin, request, queryset: "QuerySet[Badge]"):
     if highest is None:
         highest = 0
 
-    reserved_numbers = ReservedBadgeNumbers.objects.filter(
-        badgeNumber__gt=highest
-    ).values("badgeNumber")
-    reserved_numbers = {num["badgeNumber"] for num in reserved_numbers}
+    reserved_numbers_qs = ReservedBadgeNumbers.objects.filter(badgeNumber__gt=highest).values(
+        "badgeNumber"
+    )
+    reserved_numbers = {num["badgeNumber"] for num in reserved_numbers_qs}
 
     for badge in queryset.order_by("registeredDate"):
         # Skip assigning to badges not in current event
@@ -903,8 +971,9 @@ def get_attendee_age(attendee):
 
 @admin.action(description="Print Badges")
 def print_badges(modeladmin, request, queryset):
-    signer = TimestampSigner()
-    data = signer.sign_object(
+    # Peer-review ATTACK-1: salt-namespaced print-capability context
+    # (cannot be replayed as a terminal-token).
+    data = print_capability_signer().sign_object(
         {
             "badge_ids": [badge.id for badge in queryset],
             "source": PrintHistory.ADMIN,
@@ -915,7 +984,7 @@ def print_badges(modeladmin, request, queryset):
 
     response = HttpResponseRedirect(reverse("registration:print"))
     url_params = {"file": pdf_path, "next": request.get_full_path()}
-    response["Location"] += "?{}".format(urlencode(url_params))
+    response["Location"] += f"?{urlencode(url_params)}"
     return response
 
 
@@ -1113,9 +1182,7 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
         abandoned = [x for x in Badge.objects.filter() if x.abandoned == "Abandoned"]
         for obj in abandoned:
             obj.delete()
-        self.message_user(
-            request, "Removed {0} abandoned orders.".format(len(abandoned))
-        )
+        self.message_user(request, f"Removed {len(abandoned)} abandoned orders.")
 
 
 @admin.register(Attendee)
@@ -1161,9 +1228,7 @@ admin.site.register(AttendeeOptions)
 
 @admin.action(description="Attach missing private price level options")
 def attach_private_level_options(modeladmin, request, queryset: QuerySet[OrderItem]):
-    queryset = queryset.prefetch_related(
-        "priceLevel__priceLevelOptions", "attendeeoptions_set"
-    )
+    queryset = queryset.prefetch_related("priceLevel__priceLevelOptions", "attendeeoptions_set")
 
     total = 0
 
@@ -1245,10 +1310,36 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         ("Notes", {"fields": ("notes",), "classes": ("collapse",)}),
     )
 
+    def get_readonly_fields(self, request, obj=None):
+        """Make ``status`` non-editable without ``registration.issue_refund``.
+
+        CWE-362 / OWASP A04: this closes the refund-permission status race
+        *by construction* — Django excludes a read-only field from the
+        generated form, so a user lacking the permission cannot submit a
+        ``status`` change at all (no revert logic, no unlocked
+        read-modify-write to clobber a concurrent webhook transition).
+        """
+        ro = list(super().get_readonly_fields(request, obj))
+        if not request.user.has_perm("registration.issue_refund") and ("status" not in ro):
+            ro.append("status")
+        return ro
+
+    def has_import_permission(self, request):
+        """Gate bulk CSV import behind ``registration.issue_refund``.
+
+        OrderAdmin has no field-restricted import resource, so a bulk
+        import can set ``Order.status`` directly — bypassing
+        ``get_readonly_fields`` and the ``save_model`` CAS routing
+        (mass-assignment / CWE-862). Require the same refund permission
+        that governs status edits before allowing import.
+        """
+        return super().has_import_permission(request) and request.user.has_perm(
+            "registration.issue_refund"
+        )
+
     def render_change_form(self, request, context, *args, **kwargs):
         obj = kwargs.get("obj")
         if obj and obj.billingType == Order.CREDIT:
-
             context["api_data"] = obj.apiData
             if not obj.apiData:
                 messages.warning(
@@ -1264,9 +1355,7 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                         request, "This transaction has been disputed by the cardholder"
                     )
 
-        return super(OrderAdmin, self).render_change_form(
-            request, context, *args, **kwargs
-        )
+        return super().render_change_form(request, context, *args, **kwargs)
 
     class RefundForm(forms.Form):
         amount = forms.DecimalField(
@@ -1282,18 +1371,34 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        if not request.user.has_perm("registration.issue_refund"):
-            if form.data["status"] in (Order.REFUNDED, Order.REFUND_PENDING):
-                status = Order.PENDING
-                if obj.id:
-                    status = Order.objects.get(id=obj.id).status
-                messages.error(
-                    request,
-                    "You do not have permission to issue refunds. "
-                    "The order status has been reverted to {0}".format(status),
-                )
-                obj.status = status
-        obj.save()
+        """Route a permitted status change through the fused CAS primitive.
+
+        CWE-362 / OWASP A04. The has-perm fall-through used to be a raw
+        full-row ``obj.save()`` that could clobber a concurrent webhook
+        ``transition_order_status`` write (last-writer-wins on
+        ``Order.status``) and silently skipped the capacity transition.
+        When the change form actually edits ``status`` we now perform it
+        through ``payments.transition_order_status``: one atomic,
+        row-locked UPDATE that sets ``status`` + the admin's other edited
+        columns together, runs the capacity transition, and serialises
+        against webhook writers. ``expected=None`` (unconditional): a
+        permitted admin is an authoritative writer and the row lock — not
+        a CAS predicate — provides the safety. ``status`` being read-only
+        without ``registration.issue_refund`` (see ``get_readonly_fields``)
+        means the non-permitted path never reaches here with a status
+        change. Add-form and non-status edits keep Django's default save;
+        inline/related changes are persisted by ``save_related`` after
+        this returns.
+        """
+        if change and "status" in form.changed_data:
+            other = {
+                f.attname: getattr(obj, f.attname)
+                for f in obj._meta.local_concrete_fields
+                if f.name in form.changed_data and f.name != "status"
+            }
+            payments.transition_order_status(obj, obj.status, extra_fields=other)
+            return
+        super().save_model(request, obj, form, change)
 
     def refresh_view(self, request, order_id, extra_context=None):
         # Get Square Order ID, and grab latest info from the transactions API
@@ -1304,31 +1409,23 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         except ValueError as e:
             messages.error(
                 request,
-                "There was a problem while parsing the API data for this order: {0}".format(
-                    e
-                ),
+                f"There was a problem while parsing the API data for this order: {e}",
             )
             return HttpResponseRedirect(
                 reverse("admin:registration_order_change", args=(order_id,))
             )
 
         if success:
-            messages.success(
-                request, "Refreshed order information from Square successfully"
-            )
+            messages.success(request, "Refreshed order information from Square successfully")
         else:
             messages.error(
                 request,
-                "There was a problem while refreshing information about this order: {0}".format(
-                    message
-                ),
+                f"There was a problem while refreshing information about this order: {message}",
             )
-        return HttpResponseRedirect(
-            reverse("admin:registration_order_change", args=(order_id,))
-        )
+        return HttpResponseRedirect(reverse("admin:registration_order_change", args=(order_id,)))
 
     def get_urls(self):
-        urls = super(OrderAdmin, self).get_urls()
+        urls = super().get_urls()
         my_urls = [
             re_path(r"^(.+)/refund/$", self.refund_view, name="order_refund"),
             re_path(r"^(.+)/refresh/$", self.refresh_view, name="order_refresh"),
@@ -1348,7 +1445,14 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
         if "amount" in request.POST:
             if not request.user.has_perm("registration.issue_refund"):
                 messages.error(request, "You do not have permission to issue refunds.")
-                return HttpResponseRedirect(request.get_full_path())
+                # CodeQL py/url-redirection (alert 40) / CLAUDE.md "no open
+                # redirects": never echo request.path (it carries the
+                # user-controlled `(.+)` order_id URL segment). Re-derive
+                # the SAME refund page from the validated DB pk via
+                # reverse() (the CodeQL-recognized sanitizer) — behaviour-
+                # identical to the original request.path reload, with the
+                # taint severed (order.id is a trusted int).
+                return HttpResponseRedirect(reverse("admin:order_refund", args=(order.id,)))
 
             form = self.RefundForm(request.POST)
 
@@ -1361,29 +1465,28 @@ class OrderAdmin(ImportExportModelAdmin, NestedModelAdmin):
                 if amount > order.total:
                     messages.error(
                         request,
-                        "Refund amount (${0}) cannot exceed order total (${1})".format(
-                            amount, order.total
-                        ),
+                        f"Refund amount (${amount}) cannot exceed order total (${order.total})",
                     )
                 else:
                     if reason is None:
-                        reason = "[{0}]".format(request.user)
+                        reason = f"[{request.user}]"
                     else:
-                        reason += " [{0}]".format(request.user)
+                        reason += f" [{request.user}]"
                     result, msg = paypal_payments.refund_payment(order, amount, reason)
                     if result:
                         messages.success(
                             request,
-                            "{0} - refund amount: {1} (reason: {2})".format(
-                                msg, amount, reason
-                            ),
+                            f"{msg} - refund amount: {amount} (reason: {reason})",
                         )
                     else:
                         messages.error(request, msg)
                     return HttpResponseRedirect(
                         reverse("admin:registration_order_change", args=(order_id,))
                     )
-                return HttpResponseRedirect(request.get_full_path())
+                # CodeQL py/url-redirection (alert 41) / CLAUDE.md "no open
+                # redirects": route-reversed URL from the validated DB pk,
+                # never the user-controlled request.path.
+                return HttpResponseRedirect(reverse("admin:order_refund", args=(order.id,)))
             else:
                 messages.error(request, "Invalid form data.")
 
@@ -1488,8 +1591,8 @@ class PrettyJSONWidget(widgets.Textarea):
             self.attrs["cols"] = min(max(max(row_lengths) + 2, 40), 120)
             return value
         except Exception as e:
-            logger.warning("Error while formatting JSON: {}".format(e))
-            return super(PrettyJSONWidget, self).format_value(value)
+            logger.warning(f"Error while formatting JSON: {e}")
+            return super().format_value(value)
 
 
 def json_highlight_format_value(value):
@@ -1527,11 +1630,9 @@ class PaymentWebhookAdmin(admin.ModelAdmin):
     exclude = ("body", "headers")
     actions = [process_unprocessed_notifications]
 
-    @admin.display(description="Headers")
+    @admin.display(description="Body")
     def body_highlighted(self, instance):
         return json_highlight_format_value(instance.body)
-
-    body_highlighted.short_description = "Body"
 
     def headers_highlighted(self, instance):
         return json_highlight_format_value(instance.headers)
@@ -1595,7 +1696,7 @@ class SquareDeviceAdmin(admin.ModelAdmin):
         return False
 
     def get_urls(self):
-        urls = super(SquareDeviceAdmin, self).get_urls()
+        urls = super().get_urls()
         my_urls = [
             path(r"sync/", self.sync_view),
         ]

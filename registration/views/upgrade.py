@@ -11,15 +11,14 @@ from django.http import (
 from django.shortcuts import get_object_or_404, render
 from paypalserversdk.exceptions.api_exception import ApiException
 
-import registration.emails
 from registration import tasks
-from registration.models import *
+from registration.models import Attendee, Badge, Decimal, Event, Order, OrderItem, PriceLevel
 from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
 from registration.types import TranslatedCartItem
 
 from . import common
-from .common import clear_session, getOptionsDict, handler, logger
+from .common import clear_session, getOptionsDict, to_json_safe
 from .ordering import do_checkout, doZeroCheckout, get_total
 
 logger = logging.getLogger(__name__)
@@ -34,7 +33,7 @@ def upgrade(request, guid):
 def info_upgrade(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for info_upgrade()")
         return JsonResponse({"success": False}, status=400)
 
@@ -61,9 +60,7 @@ def find_upgrade(request):
         attendee_id = request.session["attendee_id"]
         badge_id = request.session["badge_id"]
     except KeyError:
-        return render(
-            request, "registration/attendee-upgrade.html", context, status=400
-        )
+        return render(request, "registration/attendee-upgrade.html", context, status=400)
 
     attendee = get_object_or_404(Attendee, id=attendee_id)
     badge = get_object_or_404(Badge, id=badge_id)
@@ -79,9 +76,10 @@ def find_upgrade(request):
         "attendee": attendee,
         "badge": badge,
         "event": event,
-        "jsonAttendee": json.dumps(attendee_dict, default=handler),
-        "jsonBadge": json.dumps(badge_dict, default=handler),
-        "jsonLevel": json.dumps(level_dict, default=handler),
+        # Plain dicts for `{% json_script %}`; closes JS-string-XSS vector.
+        "jsonAttendee": to_json_safe(attendee_dict),
+        "jsonBadge": to_json_safe(badge_dict),
+        "jsonLevel": to_json_safe(level_dict),
     }
     return render(request, "registration/attendee-upgrade.html", context)
 
@@ -89,25 +87,43 @@ def find_upgrade(request):
 def add_upgrade(request):
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for add_upgrade()")
         return JsonResponse({"success": False})
 
-    pda = postData["attendee"]
     pdp = postData["priceLevel"]
     pdd = postData["badge"]
     evt = postData["event"]
     event = Event.objects.get(name=evt)
 
-    if "attendee_id" not in request.session:
+    # Audit P1.8 (BOLA / IDOR fix): the attendee and badge being modified
+    # must be the ones bound to *this* session, NOT whatever the request
+    # body says. Reading attendee/badge ids from the body let an
+    # authenticated attendee mutate someone else's records.
+    attendee_id = request.session.get("attendee_id")
+    if attendee_id is None:
         return HttpResponseServerError("Session expired")
 
-    # Update Attendee info
-    attendee = Attendee.objects.get(id=pda["id"])
-    if not attendee:
+    try:
+        attendee = Attendee.objects.get(id=attendee_id)
+    except Attendee.DoesNotExist:
         return HttpResponseServerError("Attendee id not found")
 
-    badge = Badge.objects.get(id=pdd["id"])
+    # The badge id IS supplied by the body (an attendee can have multiple
+    # badges across events), but it MUST belong to the session attendee
+    # AND to the requested event. Reject any badge that doesn't.
+    try:
+        badge = Badge.objects.get(id=pdd["id"], attendee=attendee, event=event)
+    except Badge.DoesNotExist:
+        logger.warning(
+            "BOLA attempt in add_upgrade: session attendee %s tried to "
+            "modify badge %s for event %s",
+            attendee_id,
+            pdd.get("id"),
+            event.pk,
+        )
+        return HttpResponseServerError("Badge not found")
+
     priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 
     orderItem = OrderItem(badge=badge, priceLevel=priceLevel, enteredBy="WEB")
@@ -212,9 +228,7 @@ def upgrade_paypal_create(request):
         }
     ]
     if porg > 0:
-        translated_cart.append(
-            {"name": f"Donation to {event}", "total": porg, "donation": True}
-        )
+        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
     if pcharity > 0:
         translated_cart.append(
             {
@@ -247,11 +261,11 @@ def checkout_upgrade(request):
     attendee = Attendee.objects.get(id=request.session.get("attendee_id"))
     try:
         post_data = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for checkout_upgrade()")
         return common.abort(400, "Unable to parse input options")
 
-    subtotal, total_discount = get_total([], order_items)
+    subtotal, _total_discount = get_total([], order_items)
 
     if subtotal == 0:
         status, message, order = doZeroCheckout(None, None, order_items)
@@ -274,9 +288,7 @@ def checkout_upgrade(request):
     pbill = post_data.get("billingData", {})
     if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
-    status, message, order = do_checkout(
-        pproc, pbill, total, None, [], order_items, porg, pcharity
-    )
+    status, message, order = do_checkout(pproc, pbill, total, None, [], order_items, porg, pcharity)
 
     if status:
         return send_upgrade_email(request, attendee, order)

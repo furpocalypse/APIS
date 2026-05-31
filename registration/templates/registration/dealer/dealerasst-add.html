@@ -215,6 +215,9 @@
           data-sdk-integration-source="developer-studio"
       ></script>
     {% endif %}
+  {{ json_assistants|json_script:"dealer-assistants-data" }}
+  {# S33 HIGH-3: emit the admin-set email via json_script (script-context-safe) and JSON.parse it below, matching the existing dealer-assistants-data pattern. #}
+  {{ event.dealerEmail|json_script:"dealer-email" }}
   <script type="text/javascript">
       /* APIS URLs */
       const URL_REGISTRATION_CREATEORDER = "{% url 'registration:dealer_assistants_paypalcreate' %}";
@@ -229,17 +232,20 @@
 
       /* Application data */
 
-      const DEALER_EMAIL = "{{event.dealerEmail}}";
+      const DEALER_EMAIL = JSON.parse(document.getElementById("dealer-email").textContent);
 
       const dealer_id = {{dealer.id}};
       const maxPartners = {{dealer.tableSize.partnerMax}};
-      const dealer_assistants = {{json_assistants|safe}};
+      // dealer_assistants is rendered safely via json_script (see the
+      // <script type="application/json"> block just before this one).
+      // OWASP A03 — replaces the prior |safe interpolation in JS context.
+      const dealer_assistants = JSON.parse(document.getElementById("dealer-assistants-data").textContent);
 
 
       $("body").ready(function () {
           $("form").fadeIn();
-          $("#state").val("{{attendee.state}}");
-          $("#country").val("{{attendee.country}}");
+          $("#state").val("{{ attendee.state|escapejs }}");
+          $("#country").val("{{ attendee.country|escapejs }}");
       });
 
       window.getExtraOrderData = function () {

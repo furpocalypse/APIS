@@ -9,11 +9,25 @@ from square.utils.webhooks_helper import verify_signature
 
 from registration import payments
 from registration.models import PaymentWebhookNotification
+from registration.ratelimit import rate_limited_json
 from registration.views import common
+
+# Plan S2/S18/S19: age-window + signature-bypass primitives live in the
+# neutral webhook_age module (settings-driven, sibling import — no
+# cross-view edge, no cycle). Re-exported so existing importers keep
+# working.
+from registration.views.webhook_age import (
+    webhook_signature_bypassed,
+    webhook_within_age_window,
+)
 
 logger = logging.getLogger(__name__)
 
 
+# MED-4: signature verification is the real control; this caps volume so a
+# leaked signing key can't be used to flood thousands of forged-but-valid
+# events/sec. 100/min/source IP is generous for legitimate Square traffic.
+@rate_limited_json(rate="100/m")
 @require_POST
 @csrf_exempt
 def square_webhook(request):
@@ -38,6 +52,15 @@ def square_webhook(request):
 
     if "event_id" not in request_body:
         return common.abort(400, "Missing event_id")
+
+    # Bound the webhook's age — ONLY on the signature-verified path (plan
+    # S2). Square embeds an ISO 8601 ``created_at`` at the body top. When
+    # the signature is bypassed (E2E mock) the timestamp is untrusted
+    # anyway, so the window is bypassed too.
+    if not webhook_signature_bypassed(request) and not webhook_within_age_window(
+        request_body.get("created_at"), source="square"
+    ):
+        return common.abort(400, "Webhook timestamp out of window")
 
     event_id = request_body["event_id"]
     event_type = request_body.get("type")

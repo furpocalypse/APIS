@@ -133,7 +133,7 @@
                   'contactRelation': $("#contactRel").val(),
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
-              'event': '{{event}}'
+              'event': '{{ event|escapejs }}'
           };
 
 
@@ -150,7 +150,7 @@
                   if (result.responseText == "") {
                       alert("Your session has expired.");
                   } else {
-                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.staffEmail }} for assistance.")
+                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.staffEmail|escapejs }} for assistance.")
                   }
                   $("#register").removeAttr("disabled").one("click", doRegister);
               },
@@ -158,7 +158,7 @@
                   if (result.success) {
                       window.location = "{% url 'registration:cart' %}";
                   } else {
-                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.staffEmail }} for assistance.")
+                      alert("An error has occurred. Please check the form for any error messages. If this error continues, please contact {{ event.staffEmail|escapejs }} for assistance.")
                   }
                   $("#register").removeAttr("disabled").one("click", doRegister);
               }

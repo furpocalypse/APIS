@@ -1,0 +1,106 @@
+# Postgres StatefulSet. Single replica — Postgres clustering / HA is a
+# big topic that this manifest deliberately doesn't tackle. For real
+# production prefer Azure Database for PostgreSQL Flexible Server (see the
+# docker-compose.prod.yaml header for the rationale: managed backups,
+# point-in-time restore, zone-redundant HA, no manual major-version
+# upgrades).
+#
+# Persistence: a single PVC (database-data) backed by managed-csi-premium
+# (Azure Disk Premium SSD v1). LRS by default; switch to ZRS in the
+# storage class for zone-redundant durability.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: apis
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: postgres                # matches the headless Service
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+    spec:
+      # The official postgres image runs as uid 999 by default. fsGroup
+      # ensures the mounted PVC is owned by that gid so initdb can write.
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - name: pg
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: apis-config
+                  key: DATABASE_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: apis-config
+                  key: DATABASE_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: apis-secrets
+                  key: POSTGRES_PASSWORD
+            # Force the data dir to a subpath so the lost+found that some
+            # Azure Disk filesystems create at the volume root doesn't make
+            # initdb refuse to start with "directory not empty".
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: false   # Postgres needs /var/run/postgresql, /tmp; flipping rootfs RO requires extra mounts
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-csi-premium
+        resources:
+          requests:
+            storage: 32Gi

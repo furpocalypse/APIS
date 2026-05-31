@@ -119,7 +119,7 @@ def onsite_cart(request):
             "total": total,
             "total_discount": total_discount,
             "discount": discount,
-            "hasMinors": hasMinors
+            "hasMinors": hasMinors,
         }
         context["form_type"] = form_type
     return render(request, "registration/onsite-checkout.html", context)

@@ -1,0 +1,13 @@
+# Dev namespace. Same Pod Security profile as prod — security gates
+# should not be weaker in dev or you'll discover them only in prod.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apis-dev
+  labels:
+    name: apis-dev
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    azure.workload.identity/use: "true"

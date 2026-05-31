@@ -17,9 +17,18 @@ Commands:
 	make dev-setup                  : Sets up a venv for local development
 	make pre-commit-setup           : Installs (or updates) pre-commit hooks
 
+	make lint                       : ruff check + ruff format --check (the CI gate)
+	make lint-fix                   : ruff check --fix + ruff format (apply autofixes)
+	make typecheck                  : Run mypy (django-stubs) over registration + fm_eventmanager
+	make lint-pylint                : Run pylint (semantics + duplicate-code/R0801)
+	make lint-vulture               : Run vulture (dead-code detection)
+	make lint-all                   : Run every linter (ruff, mypy, pylint, vulture)
+
 	make makemigrations             : Create new Django migrations (host-uv, dev DB)
 	make migrate                    : Apply Django migrations (host-uv, dev DB)
 	make createsuperuser            : Create a Django superuser (host-uv, dev DB, interactive)
+	make bootstrap-admin            : Idempotent first-run admin provisioning (interactive)
+	make bootstrap-admin-from-env   : Idempotent first-run admin provisioning (from BOOTSTRAP_ADMIN_* env)
 
 	make dev-makemigrations         : Create new Django migrations (inside `make dev` container)
 	make dev-migrate                : Apply Django migrations (inside `make dev` container)
@@ -88,9 +97,8 @@ dev:
 
 dev-setup:
 	uv sync
-	cp fm_eventmanager/settings.py.devel fm_eventmanager/settings.py
-
-	@echo "ACTION REQUIRED: Review fm_eventmanager/settings.py"
+	@echo "Settings are checked into fm_eventmanager/settings.py (single canonical file)."
+	@echo "Copy .env.dev.example to .env and adjust if needed; then run 'docker compose up -d'."
 
 pre-commit-setup:
 	pip3 install pre-commit
@@ -100,10 +108,9 @@ pre-commit-setup:
 # Django management commands (dev environment)
 # --------------------------------------------------------------------------
 # Thin wrappers around `manage.py` for the most common ops commands. These
-# use the default DJANGO_SETTINGS_MODULE (fm_eventmanager.settings, populated
-# by `make dev-setup` from settings.py.devel) — i.e. the developer's local
-# DB, not the test DB. For the test-context migration check, see
-# `test-check-migrations`.
+# use the default DJANGO_SETTINGS_MODULE (fm_eventmanager.settings) — the
+# single canonical settings file. For the test-context migration check,
+# see `test-check-migrations`.
 
 makemigrations:
 	uv run python manage.py makemigrations
@@ -114,12 +121,22 @@ migrate:
 createsuperuser:
 	uv run python manage.py createsuperuser
 
+# First-run admin provisioning. Idempotent: refuses to run if any superuser
+# already exists. Use `bootstrap-admin` for an interactive prompt, or
+# `bootstrap-admin-from-env` to consume BOOTSTRAP_ADMIN_USERNAME /
+# BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD from env (Key Vault →
+# Managed Identity → env in Azure deploys).
+bootstrap-admin:
+	uv run python manage.py bootstrap_admin
+
+bootstrap-admin-from-env:
+	uv run python manage.py bootstrap_admin --from-env
+
 # Docker-compose-exec equivalents of the three above. These run inside the
 # `app` container started by `make dev`, so the dev container must already
-# be up (`docker-compose up -d` / `make dev` in another shell). They use
-# whatever DJANGO_SETTINGS_MODULE the container's env defines (typically
-# fm_eventmanager.settings via settings.py.docker), pointing at the
-# docker-network postgres rather than a host-side DB.
+# be up (`docker compose up -d` / `make dev` in another shell). They use
+# fm_eventmanager.settings (the canonical settings module baked into the
+# image), pointing at the docker-network postgres rather than a host DB.
 
 dev-makemigrations:
 	docker-compose exec app python /app/manage.py makemigrations
@@ -136,11 +153,13 @@ dev-createsuperuser:
 # Requires: `docker compose up -d postgres redis` (to bring up the backing
 # services) and a local uv-backed venv via `make dev-setup`.
 #
-# Settings: uses `fm_eventmanager/settings.py.docker` verbatim via
-# `fm_eventmanager/settings_test.py` (an exact copy checked in for this
-# purpose). DATABASE_* / REDIS_* / CELERY_* env vars below point the test
-# run at the docker compose service hostnames resolved via 127.0.0.1 port
-# bindings — adjust if your docker compose exposes different ports.
+# Settings (Decision #11): the ONE canonical
+# `fm_eventmanager/settings.py` driven by the tracked `.env.test`
+# (CELERY_TASK_ALWAYS_EAGER etc. come from that env file, not a separate
+# settings module). DATABASE_* / REDIS_* / CELERY_* env vars below point
+# the test run at the docker compose service hostnames
+# resolved via 127.0.0.1 port bindings — adjust if your docker compose
+# exposes different ports.
 # --------------------------------------------------------------------------
 
 # Ports exposed by docker-compose.yaml (override from the command line if
@@ -177,25 +196,14 @@ SQUARE_APPLICATION_ID ?= test
 SQUARE_ACCESS_TOKEN   ?= test
 SQUARE_LOCATION_ID    ?= test
 
-TEST_ENV = \
-	DJANGO_SETTINGS_MODULE=fm_eventmanager.settings_test \
-	DJANGO_SECRET_KEY=test \
-	PAYPAL_CLIENT_ID=$(PAYPAL_CLIENT_ID) \
-	PAYPAL_CLIENT_SECRET=$(PAYPAL_CLIENT_SECRET) \
-	SQUARE_APPLICATION_ID=$(SQUARE_APPLICATION_ID) \
-	SQUARE_ACCESS_TOKEN=$(SQUARE_ACCESS_TOKEN) \
-	SQUARE_LOCATION_ID=$(SQUARE_LOCATION_ID) \
-	CSRF_TRUSTED_ORIGINS='http://*,https://*' \
-	DATABASE_HOST=$(TEST_DATABASE_HOST) DATABASE_PORT=$(TEST_DATABASE_PORT) \
-	DATABASE_USER=$(TEST_DATABASE_USER) DATABASE_PASS=$(TEST_DATABASE_PASS) \
-	DATABASE_NAME=$(TEST_DATABASE_NAME) DJANGO_DATABASE_POOL=False \
-	DJANGO_REDIS_URL=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/1 \
-	CELERY_BROKER_URL=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/2 \
-	CELERY_RESULT_BACKEND=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/2 \
-	IDEMPOTENCY_KEY_LOCK_LOCATION=redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT) \
-	STATIC_ROOT=$(TEST_STATIC_ROOT) \
-	MAINTENANCE_MODE_STATE_FILE_PATH=$(CURDIR)/build/maintenance_mode_state.txt \
-	GOTENBERG_HOST=http://127.0.0.1:3000
+# Decision #11: the test posture lives in the tracked, secret-free,
+# fully-independent .env.test (APIS_ENV=test). TEST_ENV is a command
+# prefix that loads it (set -a exports every KEY=value) so the existing
+# `$(TEST_ENV) uv run …` call sites are unchanged. Pre-exported env vars
+# (e.g. real PAYPAL_* sandbox creds for `make test-paypal`) can still be
+# layered by exporting them before invoking make and re-sourcing is
+# idempotent. CI does NOT use this — django.yml loads .env.ci directly.
+TEST_ENV = set -a && . ./.env.test && set +a &&
 
 # Fail loudly if a model change on the branch lacks a migration. Django's
 # test runner applies existing migrations to the throwaway test database, so
@@ -367,6 +375,112 @@ e2e-ui:
 	cd $(E2E_DIR) && npx playwright test --ui || true
 	bash $(E2E_DIR)/scripts/down.sh
 
+# mypy/pylint load Django via the django-stubs / pylint-django plugins, which
+# import the canonical settings.py; that needs a (throwaway) secret key
+# and a STATIC_ROOT.
+# Decision #11: mypy/pylint import the Django settings (django plugins),
+# so they need a clean importable env (DEBUG/ALLOWED_HOSTS/…). Reuse the
+# tracked .env.test posture rather than a partial inline env that would
+# trip settings.py's !DEBUG ALLOWED_HOSTS guard.
+LINT_ENV = set -a && . ./.env.test && set +a &&
+
+lint:
+	uv run ruff check .
+	uv run ruff format --check .
+
+lint-fix:
+	uv run ruff check --fix .
+	uv run ruff format .
+
+typecheck:
+	$(LINT_ENV) uv run mypy registration fm_eventmanager
+
+lint-pylint:
+	$(LINT_ENV) uv run pylint registration --fail-under=9.0
+
+lint-vulture:
+	uv run vulture
+
+# D-LINT extras (shell / docker / actions / yaml). Each runs the tool
+# when its binary is present; when absent it prints an install hint and
+# exits 0 so `make lint-all` is runnable everywhere (CI installs the
+# tools and they then run for real — not "if configured" in CI).
+SHELL_SCRIPTS = start.sh nginx/entrypoint.sh nginx/refresh-cloudflare-ips.sh
+
+lint-shell:
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck $(SHELL_SCRIPTS); \
+	else echo "shellcheck not installed — skipping (CI runs it)"; fi
+
+lint-docker:
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint Dockerfile nginx/Dockerfile; \
+	else echo "hadolint not installed — skipping (CI runs it)"; fi
+
+lint-actions:
+	@if command -v actionlint >/dev/null 2>&1; then \
+		actionlint; \
+	else echo "actionlint not installed — skipping (CI runs it)"; fi
+
+lint-yaml:
+	@if command -v yamllint >/dev/null 2>&1; then \
+		yamllint .github/ docker-compose*.yaml aks/ 2>/dev/null || true; \
+	else echo "yamllint not installed — skipping (CI runs it)"; fi
+
+# S20: module-level config reads belong in fm_eventmanager/settings.py.
+# Flag NEW top-level os.getenv/os.environ in registration/ (function-body
+# reads are fine). Informational gate — exits 0, surfaces the anti-pattern.
+lint-env-sweep:
+	@hits=$$(grep -rnE '^(os\.getenv|os\.environ|[A-Z_]+ = os\.(getenv|environ))' \
+		registration/ --include=*.py 2>/dev/null | grep -v '/tests/' || true); \
+	if [ -n "$$hits" ]; then \
+		echo "S20: module-level env reads outside settings.py (review):"; \
+		echo "$$hits"; \
+	else echo "S20: no module-level env reads in registration/ — clean"; fi
+
+# S24 / plan 721-723 (BLOCKING): no raw Order.status transition write in
+# the request/view layer — every status transition must route through
+# registration.payments.transition_order_status (or the documented
+# Pattern-A helpers in payments.py/paypal_webhook_handlers.py). A genuine
+# initial-create or audited exception carries an inline
+# `status-writer-ok:` justification. Exits non-zero on a violation.
+lint-status-writers:
+	@hits=$$(grep -rnE '\.status = (Order|ApisOrder)\.|\.status = ["'"'"']|\.update\(status=' \
+		registration/views/ --include=*.py 2>/dev/null \
+		| grep -v '/tests/' | grep -v 'status-writer-ok' || true); \
+	if [ -n "$$hits" ]; then \
+		echo "BLOCK: raw Order.status writer in registration/views/ — route via transition_order_status:"; \
+		echo "$$hits"; exit 1; \
+	else echo "status-writers: views route status transitions through the primitive — clean"; fi
+
+lint-all: lint typecheck lint-pylint lint-vulture lint-shell lint-docker lint-actions lint-yaml lint-env-sweep lint-status-writers
+
+# MED-9 (CIS Docker 4.2 / OWASP A08): resolve the current digest for
+# every secondary container image so a refresh is a deliberate, reviewed
+# act (a tag swap at the registry must never silently land on the next
+# `docker compose pull`). Prints copy-paste-ready `image: <ref>@sha256:`
+# lines; the operator bakes them into docker-compose.prod.yaml,
+# nginx/Dockerfile, and the kustomize `images:` block. Uses buildx
+# imagetools (no pull). See docs/deploy-preflight.md.
+DIGEST_IMAGES = \
+	mirror.gcr.io/library/nginx:1.27-alpine \
+	mirror.gcr.io/library/postgres:16 \
+	mirror.gcr.io/library/redis:8 \
+	mirror.gcr.io/gotenberg/gotenberg:8 \
+	furpocalypse.azurecr.io/apis-nginx:0.5.2 \
+	furpocalypse.azurecr.io/apis:0.5.3
+
+refresh-digests:
+	@for img in $(DIGEST_IMAGES); do \
+		d=$$(docker buildx imagetools inspect "$$img" --format '{{.Manifest.Digest}}' 2>/dev/null) || \
+			{ echo "FAILED to resolve $$img (registry auth / network?)" >&2; continue; }; \
+		echo "$${img%%:*}:$${img##*:}@$$d"; \
+	done
+
 .PHONY: e2e e2e-setup e2e-smoke e2e-ui test test-django \
         makemigrations migrate createsuperuser \
-        dev-makemigrations dev-migrate dev-createsuperuser
+        bootstrap-admin bootstrap-admin-from-env \
+        dev-makemigrations dev-migrate dev-createsuperuser \
+        lint lint-fix typecheck lint-pylint lint-vulture lint-all \
+        lint-shell lint-docker lint-actions lint-yaml lint-env-sweep \
+        lint-status-writers refresh-digests

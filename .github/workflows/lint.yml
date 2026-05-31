@@ -1,0 +1,89 @@
+name: Lint
+
+on:
+  push:
+    branches: [production, stage]
+  pull_request:
+    branches: [production, stage]
+
+# CodeQL actions/missing-workflow-permissions: least privilege. These jobs
+# only checkout + run linters; no write scope is needed.
+permissions:
+  contents: read
+
+jobs:
+  # Blocking: ruff lint + format are clean on the branch and must stay that way.
+  ruff:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install dependencies
+        run: uv sync
+      - name: ruff check
+        run: uv run ruff check --output-format=github .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+      # Peer-review R2 (Radical-Doubt CLAIM-1): the S24 / plan-721-723
+      # status-writer invariant must be ENFORCED in CI, not just
+      # available via `make lint-all`. Blocking.
+      - name: status-writer gate (no raw Order.status in views)
+        run: make lint-status-writers
+      - name: S20 module-level env-read sweep
+        run: make lint-env-sweep
+
+  # Phase C COMPLETE: mypy, pylint and vulture backlogs are all triaged
+  # to green, so every lint job below is now blocking (no
+  # continue-on-error) — a regression in any of them fails the build.
+  # Phase C: the mypy backlog has been fully triaged to zero errors
+  # (real cast()/annotation fixes, no blanket type: ignore), so mypy is
+  # now BLOCKING — a new type regression fails the build.
+  mypy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install dependencies
+        run: uv sync
+      # Decision #11: there is no settings_test module. The single
+      # canonical settings.py hard-fails (ALLOWED_HOSTS / DEBUG guards)
+      # unless a posture .env is loaded. mypy's django-stubs plugin
+      # imports Django settings at plugin-construction time, so without
+      # this the run dies with "Error constructing plugin instance of
+      # NewSemanalDjangoPlugin". Mirror django.yml: load the tracked,
+      # secret-free .env.ci (APIS_ENV=ci, DJANGO_DEBUG=True).
+      - name: Load .env.ci into the job environment
+        run: grep -vE '^[[:space:]]*#|^[[:space:]]*$' .env.ci >> "$GITHUB_ENV"
+      - name: mypy
+        run: uv run mypy registration fm_eventmanager
+
+  # Phase C: pylint is green at --fail-under=9.0, now BLOCKING.
+  pylint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install dependencies
+        run: uv sync
+      # Decision #11: pylint imports project modules; the single canonical
+      # settings.py raises RuntimeError("ALLOWED_HOSTS must be set ... when
+      # DEBUG=False") with no posture .env loaded. Mirror django.yml.
+      - name: Load .env.ci into the job environment
+        run: grep -vE '^[[:space:]]*#|^[[:space:]]*$' .env.ci >> "$GITHUB_ENV"
+      - name: pylint (semantics + duplicate-code/R0801)
+        run: uv run pylint registration --fail-under=9.0
+
+  # Phase C: vulture (dead-code) is clean, now BLOCKING.
+  vulture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install dependencies
+        run: uv sync
+      - name: vulture (dead code)
+        run: uv run vulture

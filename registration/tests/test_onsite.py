@@ -6,8 +6,26 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.test.utils import override_settings
 
-from registration.models import *
-from registration.tests.common import *
+from registration.models import Cashdrawer, Firebase, HoldType
+from registration.signing import mint_terminal_token
+from registration.tests.common import (
+    DEFAULT_EVENT_ARGS,
+    Attendee,
+    Badge,
+    Client,
+    Decimal,
+    Event,
+    Order,
+    PriceLevel,
+    PriceLevelOption,
+    ShirtSizes,
+    json,
+    logging,
+    now,
+    one_day,
+    reverse,
+    ten_days,
+)
 from registration.views import onsite_admin
 
 
@@ -15,14 +33,16 @@ class OnsiteBaseTestCase(TestCase):
     def setUp(self):
         # Create some users
         self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")
-        self.normal_user = User.objects.create_user(
-            "john", "lennon@thebeatles.com", "john"
-        )
+        self.normal_user = User.objects.create_user("john", "lennon@thebeatles.com", "john")
         self.normal_user.staff_member = False
         self.normal_user.save()
 
-        # Create some test terminals to push notifications to
-        self.terminal = Firebase.objects.create(token="test", name="Terminal 1")
+        # Create some test terminals to push notifications to. Decision #8:
+        # the bearer token is stored hash-only; mint it and keep the
+        # plaintext for Bearer-auth assertions in this suite.
+        self.terminal = Firebase(name="Terminal 1")
+        self.terminal_token = self.terminal.mint_token()
+        self.terminal.save()
 
         # At least one event always mandatory
         self.event = Event.objects.create(**DEFAULT_EVENT_ARGS)
@@ -66,6 +86,24 @@ class OnsiteBaseTestCase(TestCase):
         self.boogeyman_hold = HoldType.objects.create(name="Boogeyman")
 
         self.client = Client()
+        # MED-2: binding a terminal to the session now requires the
+        # device's signed terminal-token cookie to match. The default
+        # client "operates from" self.terminal; use bind_terminal() to
+        # switch the proven terminal in a test.
+        self.bind_terminal(self.terminal)
+
+    def bind_terminal(self, terminal):
+        """Set the signed terminal-token cookie proving possession of
+        ``terminal`` using the *canonical* issuer.
+
+        Decision #10 peer-review ATTACK-1/2 moved the terminal-token to a
+        salted, id+rotation-epoch-bound context (registration.signing);
+        the old plain-``TimestampSigner({"terminal": name})`` blob is now
+        rejected by the strict shape/salt check in ``resolve_terminal_token``.
+        Mint via the exact production issuer ``mint_terminal_token`` so the
+        test's issuer and the view's verifier stay paired."""
+
+        self.client.cookies["terminal-token"] = mint_terminal_token(terminal)
 
     def add_to_cart(self, level, options):
         form_data = {
@@ -123,7 +161,7 @@ class OnsiteBaseTestCase(TestCase):
 
 class TestOnsiteCart(OnsiteBaseTestCase):
     def setUp(self):
-        super(TestOnsiteCart, self).setUp()
+        super().setUp()
 
     def test_onsite_open(self):
         self.event.onsiteRegStart = now - one_day
@@ -199,7 +237,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         response = self.client.get(reverse("registration:onsite_admin"), follow=True)
         self.assertRedirects(
             response,
-            "/accounts/login/?next={0}".format(reverse("registration:onsite_admin")),
+            "/accounts/login/?next={}".format(reverse("registration:onsite_admin")),
         )
 
     def test_onsite_admin_required(self):
@@ -220,7 +258,8 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         response = self.client.get(reverse("registration:onsite_admin"))
         self.assertEqual(response.status_code, 200)
 
-        self.terminal = Firebase(token="test", name="Terminal 1")
+        self.terminal = Firebase(name="Terminal 1")
+        self.terminal_token = self.terminal.mint_token()
         self.terminal.save()
 
         response = self.client.get(
@@ -368,9 +407,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
     @patch("registration.mqtt.send_mqtt_message")
     def test_complete_cash_transaction(self, mock_send_mqtt_message):
         self.test_onsite_admin_cart_no_donations()
-        self.client.get(
-            reverse("registration:onsite_admin"), {"terminal": self.terminal.id}
-        )
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
         order = Order.objects.last()
         args = {
             "reference": order.reference,
@@ -391,9 +428,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     @patch("registration.payments.refresh_payment")
-    def test_complete_square_transaction(
-        self, mock_refresh_payment, mock_send_mqtt_message
-    ):
+    def test_complete_square_transaction(self, mock_refresh_payment, mock_send_mqtt_message):
         mock_refresh_payment.return_value = (True, None)
         self.test_onsite_admin_cart_no_donations()
         order = Order.objects.last()
@@ -405,7 +440,7 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
             reverse("registration:complete_square_transaction"),
             json.dumps(args),
             content_type="application/json",
-            headers={"authorization": f"Bearer {self.terminal.token}"},
+            headers={"authorization": f"Bearer {self.terminal_token}"},
         )
         self.assertEqual(response.status_code, 200)
         message = response.json()
@@ -413,7 +448,12 @@ class TestOnsiteAdmin(OnsiteBaseTestCase):
         order.refresh_from_db()
         self.assertEqual(order.billingType, Order.CREDIT)
         self.assertEqual(order.status, Order.COMPLETED)
-        mock_refresh_payment.assert_called_once()
+        # Peer-review R3 (Test-Coverage): the CAS owns capacity on this
+        # path — refresh_payment MUST be invoked with update_capacity=
+        # False, else the BLOCK-3 double-decrement silently returns.
+        mock_refresh_payment.assert_called_once_with(
+            order, {"payment": {"id": "JUNK"}}, update_capacity=False
+        )
 
 
 @override_settings(
@@ -425,9 +465,7 @@ class TestDrawers(OnsiteBaseTestCase):
     def setUp(self):
         super().setUp()
         self.assertTrue(self.client.login(username="admin", password="admin"))
-        self.client.get(
-            reverse("registration:onsite_admin"), {"terminal": self.terminal.id}
-        )
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
 
     def test_drawerStatusClosed_no_transactions(self):
         response = self.client.get(reverse("registration:drawer_status"))
@@ -466,9 +504,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_open_drawer(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:open_drawer"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:open_drawer"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -479,9 +515,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_cash_deposit(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:cash_deposit"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:cash_deposit"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -492,9 +526,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_safe_drop(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:safe_drop"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:safe_drop"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -505,9 +537,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_cash_pickup(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:cash_pickup"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:cash_pickup"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -518,9 +548,7 @@ class TestDrawers(OnsiteBaseTestCase):
 
     @patch("registration.mqtt.send_mqtt_message")
     def test_close_drawer(self, mock_send_mqtt_message):
-        response = self.client.post(
-            reverse("registration:close_drawer"), {"amount": "200"}
-        )
+        response = self.client.post(reverse("registration:close_drawer"), {"amount": "200"})
         message = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(message["success"])
@@ -559,3 +587,168 @@ class TestSearchFields(OnsiteBaseTestCase):
         self.assertEqual(fields.query, "")
         self.assertIsNone(fields.birthday)
         self.assertEqual(fields.badge_ids, [123, 456])
+
+
+class TestTerminalOrderBinding(OnsiteBaseTestCase):
+    """S33 HIGH-1 + HIGH-2 (OWASP API1 BOLA).
+
+    HIGH-1: attendee_details must scope its Badge lookup to the active
+    onsite event and return a generic 404 across events (no cross-event
+    PII oracle). HIGH-2: an order opened at one terminal must not be
+    completable from another terminal, while legacy/null orders remain
+    completable (fail-safe — the binding cannot break an existing
+    checkout).
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Second terminal with its own hash-only bearer token (Decision #8).
+        self.terminal_b = Firebase(name="Terminal 2")
+        self.terminal_b_token = self.terminal_b.mint_token()
+        self.terminal_b.save()
+        self.assertTrue(self.client.login(username="admin", password="admin"))
+
+    def _make_badge(self, event):
+        attendee = Attendee.objects.create(
+            firstName="Jane",
+            lastName="Doe",
+            email=f"jane{Attendee.objects.count()}@example.com",
+            birthdate=now.date() - ten_days,
+        )
+        return Badge.objects.create(
+            attendee=attendee, event=event, badgeName=f"B{Badge.objects.count()}"
+        )
+
+    def _make_order(self, reference, opened_at=None):
+        return Order.objects.create(
+            total=Decimal("45.00"),
+            reference=reference,
+            status=Order.PENDING,
+            billingType=Order.CREDIT,
+            opened_at_terminal=opened_at,
+        )
+
+    # ---- HIGH-1: attendee_details event scoping ----
+
+    def test_attendee_details_same_event_ok(self):
+        badge = self._make_badge(self.event)
+        response = self.client.get(
+            reverse("registration:onsite_attendee_details"), {"id": badge.id}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(response.json()["attendee"]["firstName"], "Jane")
+
+    def test_attendee_details_cross_event_404(self):
+        other_event = Event.objects.create(
+            **{**DEFAULT_EVENT_ARGS, "default": False, "name": "Other Event 2051!"}
+        )
+        badge = self._make_badge(other_event)
+        response = self.client.get(
+            reverse("registration:onsite_attendee_details"), {"id": badge.id}
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        self.assertEqual(response.json()["reason"], "Not found")
+
+    # ---- HIGH-2: square (bearer-auth) terminal binding ----
+
+    @patch("registration.mqtt.send_mqtt_message")
+    @patch("registration.payments.refresh_payment")
+    def _complete_square(self, reference, token, mock_refresh, _mock_mqtt):
+        mock_refresh.return_value = (True, None)
+        return self.client.post(
+            reverse("registration:complete_square_transaction"),
+            json.dumps({"reference": reference, "paymentId": "JUNK"}),
+            content_type="application/json",
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+    def test_square_bound_order_blocks_other_terminal(self):
+        order = self._make_order("BIND-A", opened_at=self.terminal)
+        response = self._complete_square("BIND-A", self.terminal_b_token)
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.PENDING)
+
+    def test_square_bound_order_allows_owning_terminal(self):
+        self._make_order("BIND-OK", opened_at=self.terminal)
+        response = self._complete_square("BIND-OK", self.terminal_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+
+    def test_square_legacy_null_order_still_completes(self):
+        # Fail-safe invariant: an unbound (legacy) order completes from any
+        # authenticated terminal, so the binding cannot break checkout.
+        self._make_order("LEGACY", opened_at=None)
+        response = self._complete_square("LEGACY", self.terminal_b_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+
+    # ---- HIGH-2: cash (session-terminal) binding ----
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_cash_mismatch_rejected_when_both_known(self, _mock_mqtt):
+        order = self._make_order("CASH-MM", opened_at=self.terminal)
+        # Active session terminal = terminal_b (prove it via its cookie),
+        # order bound to terminal A.
+        self.bind_terminal(self.terminal_b)
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal_b.id})
+        args = {"reference": "CASH-MM", "total": order.total, "tendered": order.total}
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.PENDING)
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_med2_url_param_without_proof_does_not_bind(self, _mock_mqtt):
+        """MED-2: ?terminal= alone (cookie proves a different terminal)
+        must NOT bind terminal_b. The order is opened@terminal_a, so with
+        no proven terminal_b the cross-terminal guard cannot engage and
+        the cash sale completes (proving the bind was rejected, not that
+        terminal_b became the active terminal)."""
+        order = self._make_order("CASH-NP", opened_at=self.terminal)
+        # Cookie still proves self.terminal (base setUp); request binds
+        # terminal_b by URL param only → rejected.
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal_b.id})
+        args = {"reference": "CASH-NP", "total": order.total, "tendered": order.total}
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+        )
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.COMPLETED)
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_cash_match_completes(self, _mock_mqtt):
+        order = self._make_order("CASH-OK", opened_at=self.terminal)
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
+        args = {"reference": "CASH-OK", "total": order.total, "tendered": order.total}
+        response = self.client.post(
+            reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.COMPLETED)
+
+    @patch("registration.mqtt.send_mqtt_message")
+    def test_low4_cash_sale_is_audited(self, _mock_mqtt):
+        """LOW-4 (S33-j): a completed cash sale emits a who/what/where/
+        outcome audit line on fm_eventmanager.security."""
+        order = self._make_order("CASH-AUD", opened_at=self.terminal)
+        self.client.get(reverse("registration:onsite_admin"), {"terminal": self.terminal.id})
+        args = {"reference": "CASH-AUD", "total": order.total, "tendered": order.total}
+        with self.assertLogs("fm_eventmanager.security", level="WARNING") as cm:
+            self.client.post(
+                reverse("registration:complete_cash_transaction") + f"?{urlencode(args)}"
+            )
+        audit = [m for m in cm.output if "cash-drawer audit" in m]
+        self.assertTrue(audit, "no cash-drawer audit line emitted")
+        self.assertIn("action=cash_sale", audit[-1])
+        self.assertIn("reference=CASH-AUD", audit[-1])
+        self.assertIn("outcome=success", audit[-1])

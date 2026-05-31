@@ -5,7 +5,27 @@
 {% if request.user.is_superuser %}
 <br>
   <h2>Setup payment terminal</h2>
+  {% if qr_svg %}
+  <p><strong>New bearer token issued for &ldquo;{{ terminal.name }}&rdquo;.</strong>
+     Scan this QR on the device now — it is shown <strong>once</strong> and
+     cannot be retrieved later. Any device still using the previous token
+     is now rejected and must be re-paired with this code.</p>
   {{ qr_svg | safe }}<br><br>
+  {% else %}
+  <p>The terminal bearer token is stored hashed and cannot be displayed.
+     To pair a new or replacement device for &ldquo;{{ terminal.name }}&rdquo;,
+     rotate the token below — this <strong>invalidates the token currently
+     on the live device</strong>, which must then be re-paired with the new
+     QR. Existing terminals keep working until you rotate.</p>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <input type="submit" class="default"
+           value="Rotate token &amp; show pairing QR"
+           onclick="return confirm('Rotating invalidates the token on the current device for {{ terminal.name|escapejs }}. Continue?');"/>
+  </form>
+  <br>
 
   <h2>Station interface credentials</h2>
   <pre style="overflow: hidden">

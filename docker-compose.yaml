@@ -1,16 +1,49 @@
+# --------------------------------------------------------------------------
+# APIS — Development compose file (the default).
+#
+# Boot styles:
+#
+#     docker compose up -d                  # dev — uses this file
+#     docker compose -f docker-compose.prod.yaml up -d   # production
+#
+# Differences from docker-compose.prod.yaml:
+#   * Builds the image locally from ./Dockerfile (no ACR pull).
+#   * Bind-mounts the source tree so edits to registration/ and
+#     fm_eventmanager/settings.py hot-reload without rebuilding the image.
+#   * No runtime hardening (cap_drop / read_only / tmpfs) — these slow
+#     iteration without giving you anything for a single-machine dev loop.
+#   * Postgres + Redis use named Docker volumes — `docker compose down -v`
+#     wipes them, which is the right behaviour for dev.
+#
+# REQUIRED before `docker compose up`:
+#   - `.env.dev`       (copy from .env.dev.example, adjust if needed)
+#   - `database.env`   (copy from database.env.example; DB creds must
+#                       match DATABASE_USER / DATABASE_PASS in .env.dev)
+#
+# Optional monitoring stack (InfluxDB 3 + Prometheus + node-exporter +
+# Grafana): bring up with the overlay --
+#     docker compose -f docker-compose.yaml -f docker-compose.monitoring.yaml up -d
+# See setup-monitoring.sh for the supporting config files.
+# --------------------------------------------------------------------------
+
 services:
   app:
-    image: ghcr.io/furthemore/apis:latest
     build: .
-    restart: always
+    image: apis:dev
+    restart: unless-stopped
     ports:
-      - 8080:80
-      - 8000:8000
+      # gunicorn is exposed directly in dev — no nginx sidecar. Skip the
+      # nginx layer locally; it adds nothing for hot-reload iteration.
+      # The prod compose runs apis-nginx in front (TLS + Cloudflare gate).
+      - "8000:8000"
     volumes:
+      # Hot-mount source so edits don't require a rebuild. Strictly dev-only;
+      # the prod compose file omits these mounts so the image-baked code is
+      # canonical.
       - ./registration:/app/registration
-      - ./fm_eventmanager/settings.py.docker:/app/fm_eventmanager/settings.py
+      - ./fm_eventmanager/settings.py:/app/fm_eventmanager/settings.py
     env_file:
-      - .env
+      - .env.dev
     depends_on:
       postgres:
         condition: service_healthy
@@ -18,15 +51,15 @@ services:
         condition: service_healthy
 
   worker:
-    image: ghcr.io/furthemore/apis:latest
-    command: worker
     build: .
-    restart: always
+    image: apis:dev
+    command: worker
+    restart: unless-stopped
     volumes:
       - ./registration:/app/registration
-      - ./fm_eventmanager/settings.py.docker:/app/fm_eventmanager/settings.py
+      - ./fm_eventmanager/settings.py:/app/fm_eventmanager/settings.py
     env_file:
-      - .env
+      - .env.dev
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,82 +67,41 @@ services:
         condition: service_healthy
 
   postgres:
-    image: postgres:16
-    restart: always
+    image: mirror.gcr.io/library/postgres:16
+    restart: unless-stopped
     env_file:
       - database.env
     volumes:
-      - database-data:/var/lib/postgresql
+      - database-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
       interval: 30s
-      timeout: 60s
+      timeout: 10s
       retries: 5
-      start_period: 80s
+      start_period: 30s
 
   redis:
-    image: redis:8
-    restart: always
-    command: redis-server --appendonly yes --save 60 1 --maxmemory 1gb
+    image: mirror.gcr.io/library/redis:8
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --save 60 1
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      interval: 1s
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
       timeout: 3s
       retries: 5
 
   gotenberg:
     profiles: [gotenberg]
-    image: gotenberg/gotenberg:8
+    image: mirror.gcr.io/gotenberg/gotenberg:8
     restart: unless-stopped
-
-  # Optional Celery Prometheus exporter for real-time metrics
-  celery-exporter:
-    profiles: [monitoring]
-    restart: unless-stopped
-    image: danihodovic/celery-exporter
-    command: --broker-url=redis://redis/2
-    ports:
-      - 9808:9808
-
-  influxdb:
-    profiles: [monitoring]
-    image: influxdb:1.12-alpine
-    volumes:
-      - influxdb:/var/lib/influxdb
-    restart: unless-stopped
-    healthcheck:
-      test: "curl -f http://localhost:8086/ping"
-      interval: 5s
-      timeout: 10s
-      retries: 5
-    environment:
-      - "INFLUXDB_DB=apis"
-    ports:
-      - "8086:8086/udp"
-      - "8086:8086"
-
-  cadvisor:
-    profiles: [monitoring]
-    image: gcr.io/cadvisor/cadvisor
-    container_name: monitoring_cadvisor
-    restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
-      - /dev/disk:/dev/disk
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:rw
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/kmsg:/dev/kmsg:ro
-      - /dev/disk/:/dev/disk:ro
-    ports:
-      - 8079:8080
 
 volumes:
   database-data:
   redis-data:
-  influxdb:

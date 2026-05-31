@@ -1,0 +1,15 @@
+- op: replace
+  path: /spec/template/spec/containers/0/resources
+  value:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: managed-csi
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 2Gi

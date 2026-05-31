@@ -338,9 +338,7 @@ class JsonLookupEndpointsTest(OrdersTestCase):
     def test_get_price_levels_attendee(self):
         response = self.client.post(
             reverse("registration:pricelevels"),
-            data=json.dumps(
-                {"year": 1990, "month": 1, "day": 1, "form_type": "attendee"}
-            ),
+            data=json.dumps({"year": 1990, "month": 1, "day": 1, "form_type": "attendee"}),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
@@ -399,9 +397,7 @@ class UpgradeRenderingTest(OrdersTestCase):
         self.order_item.save()
 
     def test_upgrade_landing_page(self):
-        response = self.client.get(
-            reverse("registration:upgrade", kwargs={"guid": "abc-123"})
-        )
+        response = self.client.get(reverse("registration:upgrade", kwargs={"guid": "abc-123"}))
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "registration/attendee-locate.html")
         self.assertEqual(response.context["token"], "abc-123")
@@ -431,9 +427,7 @@ class UpgradeRenderingTest(OrdersTestCase):
         session = self.client.session
         session["attendee_id"] = self.attendee.pk
         session["badge_id"] = self.badge.pk
-        upgrade_item = OrderItem(
-            badge=self.badge, priceLevel=self.price_90, enteredBy="WEB"
-        )
+        upgrade_item = OrderItem(badge=self.badge, priceLevel=self.price_90, enteredBy="WEB")
         upgrade_item.save()
         session["order_items"] = [upgrade_item.pk]
         session.save()
@@ -548,18 +542,14 @@ class StaffRenderingTest(OrdersTestCase):
         self.assertTemplateUsed(response, "registration/staff/new-staff-payment.html")
 
     def test_returning_staff_landing(self):
-        response = self.client.get(
-            reverse("registration:returning_staff", kwargs={"guid": "g"})
-        )
+        response = self.client.get(reverse("registration:returning_staff", kwargs={"guid": "g"}))
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "registration/staff/returning-staff.html")
 
     def test_info_returning_staff_no_session(self):
         response = self.client.get(reverse("registration:info_returning_staff"))
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(
-            response, "registration/staff/returning-staff-payment.html"
-        )
+        self.assertTemplateUsed(response, "registration/staff/returning-staff-payment.html")
 
     def test_info_returning_staff_with_session(self):
         session = self.client.session
@@ -567,9 +557,7 @@ class StaffRenderingTest(OrdersTestCase):
         session.save()
         response = self.client.get(reverse("registration:info_returning_staff"))
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(
-            response, "registration/staff/returning-staff-payment.html"
-        )
+        self.assertTemplateUsed(response, "registration/staff/returning-staff-payment.html")
 
     def test_staff_done(self):
         for url_name in ("new_staff_done", "returning_staff_done"):
@@ -668,9 +656,7 @@ class DealerRenderingTest(OrdersTestCase):
         self.assertTemplateUsed(response, "registration/dealer/dealer-closed.html")
 
     def test_dealers_landing(self):
-        response = self.client.get(
-            reverse("registration:dealers", kwargs={"guid": "abc"})
-        )
+        response = self.client.get(reverse("registration:dealers", kwargs={"guid": "abc"}))
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "registration/dealer/dealer-locate.html")
 
@@ -728,9 +714,7 @@ class DealerRenderingTest(OrdersTestCase):
         self.assertTemplateUsed(response, "registration/dealer/dealerasst-locate.html")
 
     def test_dealer_asst(self):
-        response = self.client.get(
-            reverse("registration:dealer_asst", kwargs={"guid": "x"})
-        )
+        response = self.client.get(reverse("registration:dealer_asst", kwargs={"guid": "x"}))
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "registration/dealer/dealerasst-locate.html")
 

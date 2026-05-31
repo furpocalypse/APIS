@@ -1,0 +1,17 @@
+# Resources + smaller PVC. volumeClaimTemplates changes only take effect
+# on initial create — the StatefulSet's VCT is immutable after that.
+- op: replace
+  path: /spec/template/spec/containers/0/resources
+  value:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: managed-csi
+- op: replace
+  path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 8Gi

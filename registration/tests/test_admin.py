@@ -1,7 +1,6 @@
 import time
 import unittest
 import uuid
-from typing import List
 from unittest.mock import Mock, patch
 
 from bs4 import BeautifulSoup
@@ -9,30 +8,44 @@ from django.contrib.admin import AdminSite
 from django.contrib.auth.models import User
 from django.core import mail
 from django.http import HttpRequest
-from django.test import TestCase, tag
+from django.test import RequestFactory, TestCase, tag
 from django.urls import reverse
-from paypalserversdk.api_helper import APIHelper
-from paypalserversdk.models.order import Order
-from paypalserversdk.models.order_request import OrderRequest
 from square.core.api_error import ApiError
 from square.requests.address import AddressParams
 from square.requests.money import MoneyParams
 
-from registration import admin, payments, paypal_payments
+from registration import admin, payments
 from registration.admin import OrderAdmin
-from registration.models import *
+from registration.models import (
+    Cashdrawer,
+    Dealer,
+    DealerAsst,
+    Order,
+    ReservedBadgeNumbers,
+    Staff,
+    StaffInvite,
+    settings,
+)
 from registration.templatetags import site as site_tags
-from registration.tests.common import *
+from registration.tests.common import (
+    DEFAULT_EVENT_ARGS,
+    TEST_ATTENDEE_ARGS,
+    Attendee,
+    Badge,
+    Event,
+    OrderItem,
+    OrdersTestCase,
+)
 
 
 class TestOrderAdmin(TestCase):
     def setUp(self):
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
         self.normal_user = User.objects.create_user(
-            "john", "lennon@thebeatles.com", "john"  # NOSONAR
+            "john",
+            "lennon@thebeatles.com",
+            "john",  # NOSONAR
         )
         self.normal_user.staff_member = True
         self.normal_user.save()
@@ -290,7 +303,7 @@ class TestOrderAdmin(TestCase):
         form = OrderAdmin.RefundForm(data=form_data)
 
         self.assertTrue(form.is_valid())
-        response = self.client.post(
+        self.client.post(
             reverse("admin:order_refund", args=(self.cash_order.id,)),
             form_data,
             follow=True,
@@ -310,7 +323,7 @@ class TestOrderAdmin(TestCase):
         form = OrderAdmin.RefundForm(data=form_data)
 
         self.assertTrue(form.is_valid())
-        response = self.client.post(
+        self.client.post(
             reverse("admin:order_refund", args=(self.cash_order.id,)),
             form_data,
             follow=True,
@@ -363,9 +376,7 @@ class TestOrderAdmin(TestCase):
                 idempotency_key=str(uuid.uuid4()),
                 source_id=nonce,
                 autocomplete=autocomplete,
-                amount_money=MoneyParams(
-                    amount=10000, currency=settings.SQUARE_CURRENCY
-                ),
+                amount_money=MoneyParams(amount=10000, currency=settings.SQUARE_CURRENCY),
                 reference_id=order.reference,
                 billing_address=AddressParams(postal_code="94042"),
                 location_id=settings.SQUARE_LOCATION_ID,
@@ -393,7 +404,7 @@ class TestOrderAdmin(TestCase):
         form = OrderAdmin.RefundForm(data=form_data)
 
         self.assertTrue(form.is_valid())
-        response = self.client.post(
+        self.client.post(
             reverse("admin:order_refund", args=(order.id,)),
             form_data,
             follow=True,
@@ -478,9 +489,7 @@ class TestOrderAdmin(TestCase):
         )
         self.assertRedirects(
             response,
-            reverse(
-                "admin:registration_order_change", args=(self.square_order_bad_id.id,)
-            ),
+            reverse("admin:registration_order_change", args=(self.square_order_bad_id.id,)),
         )
         self.assertContains(
             response,
@@ -490,9 +499,7 @@ class TestOrderAdmin(TestCase):
 
         # Test against captured & failed transactions:
         order = self.create_square_order(nonce="cnon:card-nonce-declined")
-        response = self.client.get(
-            reverse("admin:order_refresh", args=(order.id,)), follow=True
-        )
+        response = self.client.get(reverse("admin:order_refresh", args=(order.id,)), follow=True)
         self.assertRedirects(
             response,
             reverse("admin:registration_order_change", args=(order.id,)),
@@ -501,9 +508,7 @@ class TestOrderAdmin(TestCase):
         self.assertEqual(order.status, order.FAILED)
 
         order = self.create_square_order(autocomplete=False)
-        response = self.client.get(
-            reverse("admin:order_refresh", args=(order.id,)), follow=True
-        )
+        response = self.client.get(reverse("admin:order_refresh", args=(order.id,)), follow=True)
         self.assertRedirects(
             response,
             reverse("admin:registration_order_change", args=(order.id,)),
@@ -527,16 +532,12 @@ class TestOrderAdmin(TestCase):
         )
 
         order = Order.objects.get(id=order.id)
-        response = self.client.get(
-            reverse("admin:order_refresh", args=(order.id,)), follow=True
-        )
+        response = self.client.get(reverse("admin:order_refresh", args=(order.id,)), follow=True)
         self.assertRedirects(
             response,
             reverse("admin:registration_order_change", args=(order.id,)),
         )
-        self.assertContains(
-            response, "Refreshed order information from Square successfully"
-        )
+        self.assertContains(response, "Refreshed order information from Square successfully")
         self.assertContains(response, "Square Data")
         self.assertContains(response, "$100")
         self.assertContains(response, "-$100")
@@ -545,9 +546,7 @@ class TestOrderAdmin(TestCase):
 
 class TestCashDrawerAdmin(TestCase):
     def setUp(self):
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
 
     def test_save_model(self):
@@ -558,9 +557,7 @@ class TestCashDrawerAdmin(TestCase):
             "action": Cashdrawer.TRANSACTION,
         }
 
-        response = self.client.post(
-            reverse("admin:registration_cashdrawer_add"), form_data, follow=True
-        )
+        self.client.post(reverse("admin:registration_cashdrawer_add"), form_data, follow=True)
         cash_drawer = Cashdrawer.objects.get(id=1)
         self.assertEqual(cash_drawer.tendered, 0)
         self.assertEqual(cash_drawer.user, self.admin_user)
@@ -570,17 +567,13 @@ class TestCashDrawerAdmin(TestCase):
 class TestOrderItemAdmin(OrdersTestCase):
     def setUp(self):
         super().setUp()
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
         self.order = Order(total="90.00", reference="FOOBAR")
         self.order.save()
         self.badge = Badge(event=self.event)
         self.badge.save()
-        self.order_item = OrderItem(
-            order=self.order, badge=self.badge, priceLevel=self.price_90
-        )
+        self.order_item = OrderItem(order=self.order, badge=self.badge, priceLevel=self.price_90)
         self.order_item.save()
 
     def test_save_model(self):
@@ -616,9 +609,7 @@ class TestDealerAdmin(AdminTestCase):
         self.dealer_admin = admin.DealerAdmin(model=Dealer, admin_site=self.admin_site)
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.dealer = Dealer(
-            attendee=self.attendee, businessName="Test business", approved=True
-        )
+        self.dealer = Dealer(attendee=self.attendee, businessName="Test business", approved=True)
         self.dealer.save()
 
     def test_get_email(self):
@@ -632,9 +623,7 @@ class TestDealerAdmin(AdminTestCase):
 class TestDealerAsstAdmin(TestDealerAdmin):
     def setUp(self):
         super().setUp()
-        self.asst_admin = admin.DealerAsstAdmin(
-            model=DealerAsst, admin_site=AdminSite()
-        )
+        self.asst_admin = admin.DealerAsstAdmin(model=DealerAsst, admin_site=AdminSite())
         self.assistant = DealerAsst(
             dealer=self.dealer,
             name="Lovely Assistant",
@@ -649,9 +638,7 @@ class TestDealerAsstAdmin(TestDealerAdmin):
         )
 
     def test_dealer_approved(self):
-        self.assertEqual(
-            self.asst_admin.dealer_approved(self.assistant), self.dealer.approved
-        )
+        self.assertEqual(self.asst_admin.dealer_approved(self.assistant), self.dealer.approved)
 
     def test_send_assistant_registration_email(self):
         pass
@@ -679,15 +666,11 @@ class TestStaffAdmin(AdminTestCase):
         self.staff_admin = admin.StaffAdmin(model=Staff, admin_site=self.admin_site)
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="DisStaff"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="DisStaff")
         self.badge.save()
         self.staff = Staff(attendee=self.attendee, event=self.event)
         self.staff.save()
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
 
     def test_checkin_staff(self):
@@ -729,7 +712,7 @@ class TestStaffAdmin(AdminTestCase):
         request = HttpRequest()
         request.POST.update(form_data)
 
-        response = self.staff_admin.copy_to_event(request, [self.staff])
+        self.staff_admin.copy_to_event(request, [self.staff])
         mock_message_user.assert_called_once()
         self.assertEqual(
             mock_message_user.call_args[0][1],
@@ -748,7 +731,7 @@ class TestStaffAdmin(AdminTestCase):
         request = HttpRequest()
         request.POST.update(form_data)
 
-        response = self.staff_admin.copy_to_event(request, [self.staff])
+        self.staff_admin.copy_to_event(request, [self.staff])
         mock_message_user.assert_called_once()
         self.assertEqual(
             mock_message_user.call_args[0][1],
@@ -762,9 +745,7 @@ class TestStaffInvite(TestCase):
         self.event = Event(**DEFAULT_EVENT_ARGS)
         self.event.save()
 
-        self.admin_user = User.objects.create_superuser(
-            "admin", "admin@host", "admin"
-        )  # NOSONAR
+        self.admin_user = User.objects.create_superuser("admin", "admin@host", "admin")  # NOSONAR
         self.admin_user.save()
 
     @patch("registration.emails.send_email")
@@ -808,7 +789,8 @@ class TestStaffInvite(TestCase):
         form = soup.find("form", id="staffinvite_form")
         self.assertIsNone(form)
 
-        token = StaffInvite.objects.get(email=test_email_address).token
+        invite = StaffInvite.objects.get(email=test_email_address)
+        token = invite.token
 
         # Get the response message
         content = soup.find("main", attrs={"class": "content"})
@@ -823,7 +805,7 @@ class TestStaffInvite(TestCase):
             "action": "send_staff_token_email",
             "select_across": "0",
             "index": "0",
-            "_selected_action": "1",
+            "_selected_action": str(invite.pk),
         }
 
         # Get the CSRF token from the form so we can POST properly
@@ -881,7 +863,7 @@ class TestAssignBadgeNumbers(OrdersTestCase):
 
     @patch("django.contrib.messages.warning")
     def test_assignment_works(self, mock_messages_warning: Mock):
-        badges: List[Badge] = []
+        badges: list[Badge] = []
 
         args = DEFAULT_EVENT_ARGS.copy()
         args["default"] = False
@@ -923,3 +905,115 @@ class TestAssignBadgeNumbers(OrdersTestCase):
         for idx, badge in enumerate(badges):
             badge.refresh_from_db()
             self.assertEqual(badge.badgeNumber, EXPECTED[idx])
+
+
+class _Form:
+    """Minimal stand-in for an admin ModelForm (only ``changed_data`` is
+    read by ``OrderAdmin.save_model``)."""
+
+    def __init__(self, changed_data):
+        self.changed_data = changed_data
+
+
+class TestOrderAdminStatusWS2(TestCase):
+    """WS2 — CWE-362 / OWASP A04: ``status`` is read-only without
+    ``registration.issue_refund`` (race eliminated by construction) and a
+    permitted status change is routed through the fused CAS primitive.
+    ``save_model`` had zero coverage before this (the legacy
+    ``test_save_model`` actually exercises ``refund_view``)."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.site = AdminSite()
+        self.oa = OrderAdmin(Order, self.site)
+        self.superuser = User.objects.create_superuser(
+            "ws2admin",
+            "ws2admin@host",
+            "ws2admin",  # NOSONAR
+        )
+        self.clerk = User.objects.create_user(
+            "ws2clerk",
+            "ws2clerk@host",
+            "ws2clerk",  # NOSONAR
+        )
+        self.clerk.is_staff = True
+        self.clerk.save()
+        self.order = Order.objects.create(
+            total=100,
+            billingType=Order.CASH,
+            status=Order.PENDING,
+            reference="WS2_ORDER_1",
+            notes="orig",
+        )
+
+    def _req(self, user):
+        req = self.factory.post("/admin/registration/order/")
+        req.user = user
+        return req
+
+    def test_status_readonly_without_issue_refund(self):
+        self.assertFalse(self.clerk.has_perm("registration.issue_refund"))
+        self.assertIn("status", self.oa.get_readonly_fields(self._req(self.clerk)))
+
+    def test_status_editable_with_issue_refund(self):
+        self.assertTrue(self.superuser.has_perm("registration.issue_refund"))
+        self.assertNotIn("status", self.oa.get_readonly_fields(self._req(self.superuser)))
+
+    def test_import_requires_issue_refund(self):
+        # Bulk CSV import can mass-assign status, bypassing the readonly
+        # gate — so it must require the same refund permission.
+        self.assertFalse(self.oa.has_import_permission(self._req(self.clerk)))
+        self.assertTrue(self.oa.has_import_permission(self._req(self.superuser)))
+
+    def test_no_status_change_uses_default_save(self):
+        # The no-perm reality: 'status' is excluded from the form, so it
+        # is never in changed_data — save_model must not transition and
+        # must persist the other edits, leaving status untouched.
+        self.order.notes = "edited"
+        self.oa.save_model(self._req(self.clerk), self.order, _Form(["notes"]), change=True)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.PENDING)
+        self.assertEqual(self.order.notes, "edited")
+
+    def test_add_form_uses_default_save(self):
+        new = Order(
+            total=50,
+            billingType=Order.CASH,
+            status=Order.PENDING,
+            reference="WS2_ADD_1",
+        )
+        self.oa.save_model(self._req(self.superuser), new, _Form(["status"]), change=False)
+        self.assertIsNotNone(Order.objects.filter(reference="WS2_ADD_1").first())
+
+    @patch("registration.payments.transition_order_status")
+    def test_permitted_status_change_routed_through_primitive(self, mock_cas):
+        self.order.status = Order.COMPLETED
+        self.order.notes = "by-admin"
+        self.oa.save_model(
+            self._req(self.superuser),
+            self.order,
+            _Form(["status", "notes"]),
+            change=True,
+        )
+        mock_cas.assert_called_once()
+        args, kwargs = mock_cas.call_args
+        self.assertEqual(args[0], self.order)
+        self.assertEqual(args[1], Order.COMPLETED)
+        self.assertEqual(kwargs["extra_fields"], {"notes": "by-admin"})
+        self.assertNotIn("status", kwargs["extra_fields"])
+
+    def test_permitted_status_change_persists_and_runs_capacity(self):
+        # Unpatched: the real primitive must persist the status + the
+        # co-edited column in one locked UPDATE (and run the capacity
+        # transition the old raw obj.save() skipped).
+        self.order.status = Order.COMPLETED
+        self.order.notes = "completed-by-admin"
+        self.oa.save_model(
+            self._req(self.superuser),
+            self.order,
+            _Form(["status", "notes"]),
+            change=True,
+        )
+        fresh = Order.objects.get(pk=self.order.pk)
+        self.assertEqual(fresh.status, Order.COMPLETED)
+        self.assertEqual(fresh.notes, "completed-by-admin")

@@ -52,11 +52,9 @@ def get_price_levels(request):
             return JsonResponse(response, status=400)
 
         try:
-            dob = date(
-                int(data.get("year")), int(data.get("month")), int(data.get("day"))
-            )
+            dob = date(int(data.get("year")), int(data.get("month")), int(data.get("day")))
             form_type = data.get("form_type")
-        except:
+        except Exception:
             response = {"status": "error", "message": "Invalid birthdate or form_type"}
             return JsonResponse(response, status=400)
 
@@ -80,18 +78,12 @@ def get_price_levels(request):
 
         match form_type:
             case "staff":
-                available_levels = age_appropriate_levels.filter(
-                    available_to_staff=True
-                )
+                available_levels = age_appropriate_levels.filter(available_to_staff=True)
             case "marketplace":
-                available_levels = age_appropriate_levels.filter(
-                    available_to_marketplace=True
-                )
+                available_levels = age_appropriate_levels.filter(available_to_marketplace=True)
             case _:
                 # probably tighten this up at some point
-                available_levels = age_appropriate_levels.filter(
-                    available_to_attendee=True
-                )
+                available_levels = age_appropriate_levels.filter(available_to_attendee=True)
 
         data = format_price_level_list(available_levels)
 

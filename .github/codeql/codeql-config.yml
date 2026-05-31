@@ -1,0 +1,18 @@
+name: "APIS CodeQL config"
+
+# Vendored / third-party static assets are NOT application-authored source.
+# `registration/static/js/_site/*` (bootstrap.js, npm.js, …),
+# `registration/static/js/validator.js`, and any `*.min.js` are upstream
+# libraries shipped as-is. Hand-patching them is the wrong remediation:
+# the change is lost on the next vendor upgrade, the minified forms are not
+# meaningfully editable, and as static files they are not part of the
+# server's first-party attack surface. They are excluded from first-party
+# SAST here; third-party risk is owned by dependency management (upgrading
+# the vendored libraries), not by CodeQL alerts on copied code.
+#
+# Application TypeScript under registration/frontend/src is intentionally
+# NOT excluded — only vendored/minified static output.
+paths-ignore:
+  - registration/static/js/_site
+  - registration/static/js/validator.js
+  - "registration/static/**/*.min.js"

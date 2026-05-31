@@ -2,19 +2,20 @@ import base64
 import json
 import logging
 import re
+import secrets
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import Iterable, List, Optional, Union
+from typing import Any
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import permission_required
 from django.contrib.messages import get_messages
 from django.contrib.postgres.search import TrigramSimilarity
-from django.core.signing import TimestampSigner
 from django.db import transaction
 from django.db.models import Case, F, Func, Q, Sum, Value, When
 from django.http import HttpRequest, HttpResponseRedirect, JsonResponse
@@ -43,24 +44,24 @@ from registration.models import (
     generate_discount_code,
     get_random_token,
 )
+from registration.payments_sanitize import sanitize_api_data
+from registration.signing import (
+    mint_terminal_token,
+    print_capability_signer,
+    resolve_terminal_token,
+)
 from registration.views.attendee import get_attendee_age
-from registration.views.common import logger
 from registration.views.ordering import (
     get_discount_total,
     get_order_item_option_total,
 )
-
-
-def flatten(l):
-    return [item for sublist in l for item in sublist]
-
 
 logger = logging.getLogger(__name__)
 
 TWOPLACES = Decimal(10) ** -2
 
 
-def get_active_terminal(request) -> Optional[Firebase]:
+def get_active_terminal(request) -> Firebase | None:
     term_id = request.session.get("terminal")
     if term_id:
         try:
@@ -68,6 +69,54 @@ def get_active_terminal(request) -> Optional[Firebase]:
         except Firebase.DoesNotExist:
             return None
     return None
+
+
+# MED-2 (OWASP A07 / ASVS V3.2.1): binding a terminal to a staff session
+# from a bare ``?terminal=<id>`` param trusted the URL indefinitely — a
+# session's active-terminal context could be flipped by anyone who could
+# reach the staff-gated endpoint. Re-validate possession of the terminal
+# by requiring the device's signed ``terminal-token`` cookie (issued
+# HttpOnly by ``regtoken`` via the salted, id+epoch-bound
+# registration.signing context — 30 min window, the same context
+# notify_terminal verifies) to match the terminal. Bearer-token paths
+# (complete_square_transaction) set the session terminal only after
+# Firebase.find_by_token and never go through these URL-param binders, so
+# they are unaffected.
+_TERMINAL_TOKEN_MAX_AGE = 60 * 30
+_security_logger = logging.getLogger("fm_eventmanager.security")
+
+
+def _request_proves_terminal(request, terminal: Firebase) -> bool:
+    """True iff the request carries a valid signed terminal-token cookie
+    bound (by id + rotation epoch, via the salted terminal-token context)
+    to ``terminal``. Peer-review ATTACK-1/2: salt-namespaced so a
+    print-capability blob cannot be replayed here, and bound to the
+    immutable id (not the mutable name) with rotation invalidation."""
+    proven = resolve_terminal_token(request.COOKIES.get("terminal-token"), _TERMINAL_TOKEN_MAX_AGE)
+    return proven is not None and proven.id == terminal.id
+
+
+def _audit_cash_action(
+    request, action, *, amount=None, terminal=None, outcome="success", reference=None
+):
+    """LOW-4 (S33-j / ASVS V7.1 / Logging cheat sheet): who/what/when/
+    where/outcome for every money-handling admin action.
+
+    Emitted on the dedicated ``fm_eventmanager.security`` logger (S35:
+    own handler, ``propagate=False``, pinned WARNING) so it survives a
+    production root-level tightening and ships to centralized,
+    append-only aggregation — the tamper-evident sink. Carries the
+    actor identity by design (accountability); no attendee PII.
+    """
+    _security_logger.warning(
+        "cash-drawer audit: user=%s action=%s amount=%s terminal=%s reference=%s outcome=%s",
+        getattr(request.user, "username", "?"),
+        action,
+        "-" if amount is None else amount,
+        terminal.name if terminal is not None else "unbound",
+        reference or "-",
+        outcome,
+    )
 
 
 @require_safe
@@ -93,9 +142,7 @@ def onsite_admin_terminals(request):
                 "id": terminal.id,
                 "name": terminal.name,
                 "cashdrawer": terminal.cashdrawer,
-                "printViaMqtt": (
-                    terminal.print_via_mqtt.name if terminal.print_via_mqtt else None
-                ),
+                "printViaMqtt": (terminal.print_via_mqtt.name if terminal.print_via_mqtt else None),
                 "paymentType": terminal.payment_type,
                 "backgroundColor": terminal.background_color,
                 "foregroundColor": terminal.foreground_color,
@@ -117,22 +164,32 @@ def onsite_admin_context(request):
     terminal_id = request.GET.get("terminal", None)
     if terminal_id:
         terminal = Firebase.objects.get(id=terminal_id)
-        request.session["terminal"] = terminal.id
+        # MED-2: only bind the terminal to this session if the request
+        # proves possession of that terminal (signed terminal-token
+        # cookie). Otherwise skip the bind and render with no selected
+        # terminal — the page still works, the URL param alone cannot
+        # flip a staff session's active-terminal context.
+        if _request_proves_terminal(request, terminal):
+            request.session["terminal"] = terminal.id
 
-        selected_terminal = {
-            "id": terminal.id,
-            "features": {
-                "card": terminal.payment_type is not None,
-                "cashdrawer": terminal.cashdrawer,
-                "prompt": terminal.payment_type == Firebase.MQTT_REGISTER_APP,
-                "squareTerminal": terminal.square_terminal_id is not None,
-            },
-        }
+            selected_terminal = {
+                "id": terminal.id,
+                "features": {
+                    "card": terminal.payment_type is not None,
+                    "cashdrawer": terminal.cashdrawer,
+                    "prompt": terminal.payment_type == Firebase.MQTT_REGISTER_APP,
+                    "squareTerminal": terminal.square_terminal_id is not None,
+                },
+            }
 
-        mqtt_context = {
-            "broker": getattr(settings, "MQTT_EXTERNAL_BROKER", None),
-            "auth": mqtt.get_onsite_admin_token(terminal),
-        }
+            mqtt_context = {
+                "broker": getattr(settings, "MQTT_EXTERNAL_BROKER", None),
+                "auth": mqtt.get_onsite_admin_token(terminal),
+            }
+        else:
+            _security_logger.warning(
+                "terminal bind rejected: no valid terminal-token proof (onsite_admin_context)"
+            )
 
     context = {
         "user": {
@@ -149,9 +206,7 @@ def onsite_admin_context(request):
         },
         "terminals": {
             "selected": selected_terminal,
-            "available": [
-                {"id": terminal.id, "name": terminal.name} for terminal in terminals
-            ],
+            "available": [{"id": terminal.id, "name": terminal.name} for terminal in terminals],
         },
         "messages": get_messages_list(request),
     }
@@ -162,8 +217,8 @@ def onsite_admin_context(request):
 @dataclass
 class SearchFields:
     query: str
-    birthday: Optional[str] = None
-    badge_ids: Optional[List[int]] = None
+    birthday: str | None = None
+    badge_ids: list[int] | None = None
 
     @classmethod
     def parse(cls, query: str) -> "SearchFields":
@@ -175,10 +230,11 @@ class SearchFields:
             except ValueError:
                 query = query.replace(badge_nums.group(0), "")
 
-        birthday = re.search(r"birthday:([0-9-]{10}) ?", query)
-        if birthday:
-            query = query.replace(birthday.group(0), "")
-            birthday = birthday.group(1)
+        birthday_match = re.search(r"birthday:([0-9-]{10}) ?", query)
+        birthday: str | None = None
+        if birthday_match:
+            query = query.replace(birthday_match.group(0), "")
+            birthday = birthday_match.group(1)
 
         query = query.strip()
 
@@ -200,9 +256,7 @@ def onsite_admin_search(request):
             data.append(
                 {
                     "id": badge.id,
-                    "editUrl": reverse(
-                        "admin:registration_badge_change", args=(badge.id,)
-                    ),
+                    "editUrl": reverse("admin:registration_badge_change", args=(badge.id,)),
                     "attendee": {
                         "firstName": badge.attendee.firstName,
                         "lastName": badge.attendee.lastName,
@@ -225,9 +279,7 @@ def onsite_admin_search(request):
     full_name = Func(
         F("attendee__firstName"), Value(" "), F("attendee__lastName"), function="CONCAT"
     )
-    greater_similarity = Func(
-        "name_similarity", "badge_similarity", function="GREATEST"
-    )
+    greater_similarity = Func("name_similarity", "badge_similarity", function="GREATEST")
 
     filters = (
         Q(name_similarity__gte=0.4)
@@ -276,7 +328,7 @@ def set_terminal_status(request):
     return update_terminal_status(request, status)
 
 
-def get_terminal_from_request(request) -> Optional[Firebase]:
+def get_terminal_from_request(request) -> Firebase | None:
     url_terminal = request.GET.get("terminal", None)
     session_terminal = request.session.get("terminal", None)
 
@@ -284,10 +336,20 @@ def get_terminal_from_request(request) -> Optional[Firebase]:
 
     if url_terminal:
         try:
-            active = Firebase.objects.get(id=int(url_terminal))
-            request.session["terminal"] = active.id
+            candidate = Firebase.objects.get(id=int(url_terminal))
         except (ValueError, Firebase.DoesNotExist):
             return None
+        # MED-2: a URL/POST `terminal` param may bind the session only
+        # with a valid signed terminal-token proof for that terminal.
+        # Without proof, ignore the param and fall back to an already
+        # (proven) session terminal — the param alone can't flip context.
+        if _request_proves_terminal(request, candidate):
+            active = candidate
+            request.session["terminal"] = active.id
+        else:
+            _security_logger.warning(
+                "terminal bind rejected: no valid terminal-token proof (get_terminal_from_request)"
+            )
 
     if not active and session_terminal:
         try:
@@ -299,8 +361,11 @@ def get_terminal_from_request(request) -> Optional[Firebase]:
 
 
 def send_mqtt_message_to_terminal(
-    request: Union[HttpRequest, Firebase], topic: str, data={}
+    request: HttpRequest | Firebase, topic: str, data=None
 ) -> JsonResponse:
+    if data is None:
+        data = {}
+    active: Firebase | None
     if isinstance(request, Firebase):
         active = request
     else:
@@ -317,9 +382,7 @@ def send_mqtt_message_to_terminal(
         mqtt.send_mqtt_message(topic, data)
     except Exception as ex:
         logger.error("could not send mqtt message: %s", ex)
-        return JsonResponse(
-            {"success": False, "reason": "Could not send MQTT message"}, status=500
-        )
+        return JsonResponse({"success": False, "reason": "Could not send MQTT message"}, status=500)
 
     return JsonResponse({"success": True})
 
@@ -330,9 +393,7 @@ def enable_payment(request):
     cart = request.session.get("cart", None)
     if cart is None:
         request.session["cart"] = []
-        return JsonResponse(
-            {"success": False, "reason": "Cart not initialized"}, status=200
-        )
+        return JsonResponse({"success": False, "reason": "Cart not initialized"}, status=200)
 
     badges = []
     first_order = None
@@ -354,9 +415,7 @@ def enable_payment(request):
                 order.save()
         except Badge.DoesNotExist:
             cart.remove(pk)
-            logger.error(
-                "ID {0} was in cart but doesn't exist in the database".format(pk)
-            )
+            logger.error(f"ID {pk} was in cart but doesn't exist in the database")
 
     # Force a cart refresh to get the latest order reference to the terminal
     onsite_admin_cart(request)
@@ -365,9 +424,7 @@ def enable_payment(request):
 
     terminal = get_terminal_from_request(request)
     if not terminal:
-        return JsonResponse(
-            {"sucess": False, "reason": "No terminal associated with request."}
-        )
+        return JsonResponse({"sucess": False, "reason": "No terminal associated with request."})
 
     order_id = payments.create_square_order(str(terminal.name), data)
 
@@ -394,9 +451,7 @@ def enable_payment(request):
             return JsonResponse(
                 {
                     "success": False,
-                    "reason": ", ".join(
-                        [str(error.detail) for error in api_response.errors or []]
-                    ),
+                    "reason": ", ".join([str(error.detail) for error in api_response.errors or []]),
                 }
             )
     elif terminal.payment_type == Firebase.MQTT_REGISTER_APP:
@@ -450,8 +505,9 @@ def onsite_print_badges(request):
     badge_list = request.GET.getlist("id")
     terminal = get_active_terminal(request)
 
-    signer = TimestampSigner()
-    data = signer.sign_object(
+    # Peer-review ATTACK-1: distinct salt so this print-capability blob
+    # can never be replayed as a terminal-token cookie.
+    data = print_capability_signer().sign_object(
         {
             "badge_ids": [int(badge_id) for badge_id in badge_list],
             "terminal": terminal.name if terminal else None,
@@ -481,15 +537,16 @@ def admin_push_cart_refresh(request):
 def complete_square_transaction(request):
     try:
         token = request.headers.get("authorization").removeprefix("Bearer ")
-    except:
-        return JsonResponse(
-            {"success": False, "reason": "Invalid authorization"}, status=401
-        )
+    except Exception:
+        return JsonResponse({"success": False, "reason": "Invalid authorization"}, status=401)
 
-    try:
-        terminal = Firebase.objects.get(token=token)
-        request.session["terminal"] = terminal.id
-    except Firebase.DoesNotExist:
+    # Decision #8 / RT-B1: tokens are stored hash-only (no plaintext
+    # column). find_by_token hashes the presented bearer and does an
+    # indexed lookup; a miss returns the generic 401 below — no
+    # token-existence oracle. This is NOT a constant-time comparison and
+    # makes no such claim; hashed-at-rest + generic 401 is the control.
+    terminal = Firebase.find_by_token(token)
+    if terminal is None:
         return JsonResponse(
             {
                 "success": False,
@@ -497,6 +554,7 @@ def complete_square_transaction(request):
             },
             status=401,
         )
+    request.session["terminal"] = terminal.id
 
     data = json.loads(request.body)
 
@@ -521,7 +579,7 @@ def complete_square_transaction(request):
     try:
         orders = Order.objects.filter(reference=reference).prefetch_related()
     except Order.DoesNotExist:
-        logger.error("No order matching reference {0}".format(reference))
+        logger.error(f"No order matching reference {reference}")
         return JsonResponse(
             {
                 "success": False,
@@ -535,27 +593,63 @@ def complete_square_transaction(request):
     store_api_data = {}
 
     order = orders[0]
-    order.billingType = Order.CREDIT
+
+    # S33 HIGH-2 (OWASP API1 BOLA): if this order was opened at a specific
+    # terminal, only that terminal may complete it. Fail-safe — the guard is
+    # inert for legacy/null orders, so it cannot break an existing checkout.
+    # Collapse to a generic 404 to avoid a cross-terminal order oracle.
+    if order.opened_at_terminal_id and order.opened_at_terminal_id != terminal.id:
+        return JsonResponse({"success": False, "reason": "Not found"}, status=404)
 
     # Lookup the payment(s?) associated with this order:
     if paymentId:
         store_api_data["payment"] = {"id": paymentId}
-        order.status = Order.COMPLETED
-        order.settledDate = timezone.now()
     else:
-        order.status = Order.CAPTURED
         order.notes = "No paymentId."
 
-    order.status = Order.COMPLETED
+    order.billingType = Order.CREDIT
     order.settledDate = timezone.now()
+    order.apiData = sanitize_api_data(json.dumps(store_api_data))  # MED-8
 
-    order.apiData = json.dumps(store_api_data)
-    order.save()
-
-    if paymentId:
-        status, errors = payments.refresh_payment(order, store_api_data)
-        if not status:
-            return JsonResponse({"success": False, "error": errors}, status=210)
+    # Peer-review BLOCK-3 / S24: route the onsite-credit completion
+    # through the fused CAS primitive (status+capacity, atomic,
+    # idempotent vs a concurrent Square webhook) instead of a raw
+    # status flip + save that skipped capacity and could clobber a
+    # parallel webhook winner.
+    won = payments.transition_order_status(
+        order,
+        Order.COMPLETED,
+        # Onsite (pay-at-door) orders start at ONSITE_PENDING; a Square
+        # capture-then-complete may also arrive PENDING/CAPTURED. Omitting
+        # ONSITE_PENDING here silently dropped every onsite credit
+        # completion (status stuck, capacity unconsumed, billingType
+        # never set) — the S24 BLOCK-3 migration regression CI caught.
+        expected=[Order.PENDING, Order.CAPTURED, Order.ONSITE_PENDING],
+        extra_fields={
+            "billingType": Order.CREDIT,
+            "settledDate": order.settledDate,
+            "notes": order.notes,
+            "apiData": order.apiData,
+        },
+        refresh=False,
+    )
+    # Peer-review R2/R3 (Adversarial / Blue Team F5): the CAS owns the
+    # status+capacity transition. Only the WINNER reconciles with Square
+    # via refresh_payment. On a CAS LOSS a parallel Square webhook
+    # already finalized this order (status + capacity + apiData), so
+    # re-running refresh_payment here would be a non-CAS full-row write
+    # racing/clobbering that winner on apiData/total for no benefit —
+    # skip it and report success (the order IS completed). On a WIN,
+    # refresh_payment runs with update_capacity=False (the CAS already
+    # moved capacity exactly once — re-applying it was the BLOCK-3
+    # double-decrement).
+    if won:
+        # In-memory mirror of the CAS we just won (no DB write here).
+        order.status = Order.COMPLETED  # status-writer-ok: in-memory CAS mirror
+        if paymentId:
+            status, errors = payments.refresh_payment(order, store_api_data, update_capacity=False)
+            if not status:
+                return JsonResponse({"success": False, "error": errors}, status=210)
 
     admin_push_cart_refresh(request)
 
@@ -580,7 +674,7 @@ def combine_orders(orders):
             old_order = order_item.order
             order_item.order = first_order
             if old_order and old_order.id:
-                logger.warning("Deleting old order id={0}".format(old_order.id))
+                logger.warning(f"Deleting old order id={old_order.id}")
                 old_order.delete()
             order_item.save()
 
@@ -609,8 +703,14 @@ def drawer_status(request):
 @permission_required("order.cash_admin")
 def no_sale(request):
     position = get_active_terminal(request)
-    mqtt.send_mqtt_message(mqtt.get_topic("receipt/nosale", name=str(position.name)))
+    # MED-2: no proven terminal → nothing to print to; the no-sale event
+    # is itself non-financial, so just skip the receipt push.
+    if position is not None:
+        mqtt.send_mqtt_message(mqtt.get_topic("receipt/nosale", name=str(position.name)))
+    else:
+        _security_logger.warning("no-sale receipt not pushed: no proven terminal bound to session")
 
+    _audit_cash_action(request, "no_sale", terminal=position)
     return JsonResponse({"success": True})
 
 
@@ -618,6 +718,13 @@ def no_sale(request):
 @permission_required("order.cash_admin")
 def print_audit_receipt(request, audit_type, cash_ledger, cashdraw=True):
     position = get_active_terminal(request)
+    # MED-2: the cash-drawer ledger entry is already persisted by the
+    # caller (audited regardless); the audit *slip* just needs a print
+    # target. With no proven terminal, skip the push instead of 500-ing a
+    # completed, permission-gated drawer action.
+    if position is None:
+        _security_logger.warning("audit-slip not pushed: no proven terminal bound to session")
+        return
     event = Event.objects.get(default=True)
     payload = {
         "v": 1,
@@ -630,9 +737,7 @@ def print_audit_receipt(request, audit_type, cash_ledger, cashdraw=True):
         "cashdraw": cashdraw,
     }
 
-    mqtt.send_mqtt_message(
-        mqtt.get_topic("receipt/auditslip", name=str(position.name)), payload
-    )
+    mqtt.send_mqtt_message(mqtt.get_topic("receipt/auditslip", name=str(position.name)), payload)
 
 
 def cash_audit_action(request, action):
@@ -642,11 +747,10 @@ def cash_audit_action(request, action):
     if action in (Cashdrawer.DROP, Cashdrawer.PICKUP, Cashdrawer.CLOSE):
         amount = -abs(amount)
         cashdraw = False
-    cash_ledger = Cashdrawer(
-        action=action, total=amount, user=request.user, position=position
-    )
+    cash_ledger = Cashdrawer(action=action, total=amount, user=request.user, position=position)
     cash_ledger.save()
     cash_ledger.refresh_from_db()
+    _audit_cash_action(request, action, amount=amount, terminal=position)
     print_audit_receipt(request, action, cash_ledger, cashdraw)
 
     return JsonResponse({"success": True})
@@ -689,23 +793,21 @@ def close_drawer(request):
 
 def cash_receipt_payload(order: Order, tendered: str, total: str) -> dict:
     order_items = OrderItem.objects.filter(order=order)
-    attendee_options = []
-    for item in order_items:
-        attendee_options.extend(get_line_items(item.attendeeoptions_set.all()))
+    attendee_options = [
+        line_item
+        for item in order_items
+        for line_item in get_line_items(item.attendeeoptions_set.all())
+    ]
 
     # discounts
     if order.discount:
         if order.discount.amountOff:
-            attendee_options.append(
-                {"item": "Discount", "price": "-${0}".format(order.discount.amountOff)}
-            )
+            attendee_options.append({"item": "Discount", "price": f"-${order.discount.amountOff}"})
         elif order.discount.percentOff:
-            attendee_options.append(
-                {"item": "Discount", "price": "-%{0}".format(order.discount.percentOff)}
-            )
+            attendee_options.append({"item": "Discount", "price": f"-%{order.discount.percentOff}"})
 
     event = Event.objects.get(default=True)
-    payload = {
+    payload: dict[str, Any] = {
         "v": 1,
         "event": event.name,
         "line_items": attendee_options,
@@ -715,7 +817,7 @@ def cash_receipt_payload(order: Order, tendered: str, total: str) -> dict:
             "type": order.billingType,
             "tendered": Decimal(tendered),
             "change": Decimal(tendered) - Decimal(total),
-            "details": "Ref: {0}".format(order.reference),
+            "details": f"Ref: {order.reference}",
         },
         "reference": order.reference,
     }
@@ -759,11 +861,58 @@ def complete_cash_transaction(request):
     combine_orders(orders)
 
     order = orders[0]
+
+    # S33 HIGH-2 (OWASP API1 BOLA): if the order is bound to a terminal and
+    # the active session terminal is resolvable and differs, reject. Cash is
+    # already @staff_member_required + @permission_required("order.cash");
+    # if the active terminal can't be resolved we fail open (skip the guard)
+    # rather than block a permitted staff cash sale on a session edge case.
+    active_terminal = get_active_terminal(request)
+    if (
+        order.opened_at_terminal_id
+        and active_terminal is not None
+        and order.opened_at_terminal_id != active_terminal.id
+    ):
+        _audit_cash_action(
+            request,
+            "cash_sale",
+            amount=total,
+            terminal=active_terminal,
+            reference=reference,
+            outcome="rejected_terminal_mismatch",
+        )
+        return JsonResponse({"success": False, "reason": "Not found"}, status=404)
+
+    # Peer-review BLOCK-3 / S24: a raw status flip + save here skipped the
+    # capacity transition entirely (a cash sale of a capped price level
+    # never consumed a slot) and could clobber a concurrent webhook. Route
+    # through the fused CAS primitive: status + capacity, atomic,
+    # idempotent (a duplicate cash submit no-ops instead of double-selling).
     order.billingType = Order.CASH
-    order.status = Order.COMPLETED
     order.settledDate = timezone.now()
     order.notes = json.dumps({"type": "cash", "tendered": tendered})
-    order.save()
+    payments.transition_order_status(
+        order,
+        Order.COMPLETED,
+        # Onsite cash sale: the order is created at ONSITE_PENDING (pay at
+        # the door). Omitting it dropped every onsite cash completion —
+        # the till took the money but the order never moved to COMPLETED
+        # and capacity was never consumed. S24 BLOCK-3 regression.
+        expected=[Order.PENDING, Order.CAPTURED, Order.ONSITE_PENDING],
+        extra_fields={
+            "billingType": Order.CASH,
+            "settledDate": order.settledDate,
+            "notes": order.notes,
+        },
+        refresh=False,
+    )
+    _audit_cash_action(
+        request,
+        "cash_sale",
+        amount=total,
+        terminal=active_terminal,
+        reference=reference,
+    )
 
     txn = Cashdrawer(
         action=Cashdrawer.TRANSACTION, total=total, tendered=tendered, user=request.user
@@ -772,10 +921,19 @@ def complete_cash_transaction(request):
 
     payload = cash_receipt_payload(order, tendered, total)
 
-    terminal = get_active_terminal(request)
-    mqtt.send_mqtt_message(
-        mqtt.get_topic("receipt/print/cash", name=str(terminal.name)), payload
-    )
+    # MED-2: with the bind-gate, no session terminal may be resolvable
+    # (e.g. a console without a valid terminal-token proof). The cash sale
+    # itself is already recorded; only the receipt-print push needs a
+    # terminal. Skip the push (log, don't 500) rather than fail a
+    # completed, permitted, audited cash transaction on a missing receipt
+    # target.
+    if active_terminal is not None:
+        mqtt.send_mqtt_message(
+            mqtt.get_topic("receipt/print/cash", name=str(active_terminal.name)),
+            payload,
+        )
+    else:
+        _security_logger.warning("cash receipt not pushed: no proven terminal bound to session")
 
     return JsonResponse({"success": True})
 
@@ -829,9 +987,7 @@ def build_result(cart):
             badges.append(badge)
         except Badge.DoesNotExist:
             cart.remove(pk)
-            logger.error(
-                "ID {0} was in cart but doesn't exist in the database".format(pk)
-            )
+            logger.error(f"ID {pk} was in cart but doesn't exist in the database")
 
     order = None
     subtotal = 0
@@ -863,8 +1019,7 @@ def build_result(cart):
             holdType = badge.attendee.holdType.name
 
         level_discount = (
-            Decimal(get_discount_total(order.discount, level_subtotal) * 100)
-            * TWOPLACES
+            Decimal(get_discount_total(order.discount, level_subtotal) * 100) * TWOPLACES
         )
         total_discount += level_discount
 
@@ -984,9 +1139,7 @@ def onsite_add_to_cart(request):
     try:
         badge_ids = [int(badge_id) for badge_id in badge_ids]
     except ValueError:
-        return JsonResponse(
-            {"success": False, "reason": "Unexpected badge ID value"}, status=400
-        )
+        return JsonResponse({"success": False, "reason": "Unexpected badge ID value"}, status=400)
 
     badges = Badge.objects.filter(id__in=badge_ids)
 
@@ -994,17 +1147,12 @@ def onsite_add_to_cart(request):
         preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(badge_ids)])
         badges = badges.order_by(preserved)
 
-    if assign:
-        cart = []
-    else:
-        cart = request.session.get("cart", [])
+    cart = [] if assign else request.session.get("cart", [])
 
     for badge in badges:
         order_item = OrderItem.objects.filter(badge=badge, order__isnull=False).first()
         if order_item:
-            order_items = OrderItem.objects.filter(
-                order=order_item.order, badge__isnull=False
-            )
+            order_items = OrderItem.objects.filter(order=order_item.order, badge__isnull=False)
             for order_item in order_items:
                 if order_item.badge_id not in cart:
                     cart.append(order_item.badge_id)
@@ -1134,9 +1282,7 @@ def create_discount(request):
 def onsite_print_clear(request):
     id = request.GET.get("id", None)
     if id is None or id == "":
-        return JsonResponse(
-            {"success": False, "reason": "Need ID parameter"}, status=400
-        )
+        return JsonResponse({"success": False, "reason": "Need ID parameter"}, status=400)
 
     try:
         id = int(id)
@@ -1161,14 +1307,25 @@ def regtoken(request):
             {"success": False, "reason": "No terminal attached to session"}, status=400
         )
 
-    signer = TimestampSigner()
-    data = signer.sign_object(
-        {
-            "terminal": terminal.name,
-        }
+    # Peer-review ATTACK-1/2/3: salt-namespaced, id+rotation-epoch bound,
+    # and set as an HttpOnly+Secure+SameSite cookie SERVER-side (no longer
+    # handed to JS to write a non-HttpOnly cookie an XSS could read).
+    data = mint_terminal_token(terminal)
+    # The authoritative cookie for browser clients is the HttpOnly one set
+    # here (an XSS can no longer read it). `token` is still returned for a
+    # non-browser kiosk client that provisions its own cookie — both
+    # resolve through the same salted/id-bound context, so this is purely
+    # back-compat, not a second trust path.
+    response = JsonResponse({"success": True, "token": data})
+    response.set_cookie(
+        "terminal-token",
+        data,
+        max_age=_TERMINAL_TOKEN_MAX_AGE,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="Lax",
     )
-
-    return JsonResponse({"success": True, "token": data})
+    return response
 
 
 @require_safe
@@ -1176,9 +1333,7 @@ def regtoken(request):
 def attendee_details(request):
     id = request.GET.get("id", None)
     if id is None or id == "":
-        return JsonResponse(
-            {"success": False, "reason": "Need ID parameter"}, status=400
-        )
+        return JsonResponse({"success": False, "reason": "Need ID parameter"}, status=400)
 
     try:
         id = int(id)
@@ -1187,7 +1342,14 @@ def attendee_details(request):
             {"success": False, "reason": "ID parameter must be integer"}, status=400
         )
 
-    attendee = Badge.objects.get(id=id).attendee
+    # BOLA (S33 HIGH-1 / OWASP API1): scope the badge lookup to the active
+    # onsite event and collapse any miss to a generic 404 so a staff session
+    # at one event cannot enumerate or read attendee PII from another event.
+    event = Event.objects.get(default=True)
+    try:
+        attendee = Badge.objects.get(id=id, event=event).attendee
+    except Badge.DoesNotExist:
+        return JsonResponse({"success": False, "reason": "Not found"}, status=404)
 
     return JsonResponse(
         {
@@ -1212,14 +1374,18 @@ def attendee_details(request):
 
 @csrf_exempt
 def terminal_square_token(request):
-    key = request.headers.get("authorization").removeprefix("Bearer ")
-
+    # Peer-review ATTACK-4: a missing/garbage Authorization header must
+    # return the generic 401, not an unhandled AttributeError 500
+    # (.removeprefix on None) — mirrors complete_square_transaction.
     try:
-        terminal = Firebase.objects.get(token=key)
-    except Firebase.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "reason": "Incorrect API key"}, status=401
-        )
+        key = request.headers.get("authorization").removeprefix("Bearer ")
+    except (AttributeError, TypeError):
+        return JsonResponse({"success": False, "reason": "Incorrect API key"}, status=401)
+
+    # Decision #8 / RT-B1: see complete_square_transaction comment.
+    terminal = Firebase.find_by_token(key)
+    if terminal is None:
+        return JsonResponse({"success": False, "reason": "Incorrect API key"}, status=401)
 
     base_url = "https://connect.squareup.com"
     if settings.SQUARE_ENVIRONMENT == "sandbox":
@@ -1228,7 +1394,10 @@ def terminal_square_token(request):
     scopes = ["MERCHANT_PROFILE_READ", "PAYMENTS_WRITE", "PAYMENTS_WRITE_IN_PERSON"]
     state = get_random_token(64)
 
-    url = f"{base_url}/oauth2/authorize?client_id={settings.SQUARE_APPLICATION_ID}&state={state}&scope={'+'.join(scopes)}"
+    url = (
+        f"{base_url}/oauth2/authorize?client_id={settings.SQUARE_APPLICATION_ID}"
+        f"&state={state}&scope={'+'.join(scopes)}"
+    )
 
     send_mqtt_message_to_terminal(
         terminal,
@@ -1245,10 +1414,15 @@ def terminal_square_token(request):
 @require_safe
 @staff_member_required
 def oauth_square(request):
-    url_state = request.GET.get("state")
-    cookie_state = request.COOKIES.get("square_oauth_state")
+    url_state = request.GET.get("state") or ""
+    cookie_state = request.COOKIES.get("square_oauth_state") or ""
 
-    if url_state != cookie_state:
+    # S16: one clear predicate (no double-negative). bool(url_state) rejects
+    # empty/absent state; secrets.compare_digest is constant-time and
+    # returns False for any cookie/url mismatch incl. an empty cookie
+    # (ASVS V2.1.7 / V13.2.6 — anti-CSRF/auth token compare).
+    state_ok = bool(url_state) and secrets.compare_digest(url_state, cookie_state)
+    if not state_ok:
         return JsonResponse(
             {"success": False, "reason": "Saved state did not match URL state"},
             status=400,
@@ -1296,7 +1470,7 @@ def print_receipts(request):
         if order.billingType == Order.CASH:
             try:
                 note_data = json.loads(order.notes)
-            except:
+            except Exception:
                 return JsonResponse(
                     {"success": False, "reason": "Cash order was missing note data"}
                 )
@@ -1335,22 +1509,16 @@ def fulfill(request):
     with transaction.atomic():
         try:
             attendee_option = (
-                AttendeeOptions.objects.select_for_update()
-                .filter(pk=attendee_option_id)
-                .first()
+                AttendeeOptions.objects.select_for_update().filter(pk=attendee_option_id).first()
             )
         except AttendeeOptions.DoesNotExist:
             return JsonResponse({"success": False, "reason": "Option ID is unknown"})
 
         if attendee_option.fulfilled_at:
-            return JsonResponse(
-                {"success": False, "reason": "Option was already fulfilled"}
-            )
+            return JsonResponse({"success": False, "reason": "Option was already fulfilled"})
 
         if not attendee_option.option.requires_fulfillment:
-            return JsonResponse(
-                {"success": False, "reason": "Option does not require fulfillment"}
-            )
+            return JsonResponse({"success": False, "reason": "Option does not require fulfillment"})
 
         if attendee_option.orderItem.badge.effectiveLevel() == Badge.UNPAID:
             return JsonResponse(

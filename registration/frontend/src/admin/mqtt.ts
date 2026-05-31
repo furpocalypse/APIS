@@ -176,7 +176,14 @@ export default class MqttClient {
       switch (strippedTopic) {
         case "authorize/square":
           if (payload?.["url"] && payload?.["state"]) {
-            document.cookie = `square_oauth_state=${payload["state"]}; path=/; secure`;
+            // Peer-review ATTACK-3: this OAuth-CSRF state cookie is
+            // necessarily JS-set (the value arrives over MQTT), so it
+            // cannot be HttpOnly. Harden with SameSite=Strict; the
+            // server-side defenses remain the real control (constant-time
+            // secrets.compare_digest match in oauth_square + the cookie is
+            // deleted immediately after use). It is short-lived CSRF
+            // state, not a bearer credential.
+            document.cookie = `square_oauth_state=${payload["state"]}; path=/; secure; samesite=strict`;
             globalThis.open(payload["url"], "square_oauth");
           }
           break;

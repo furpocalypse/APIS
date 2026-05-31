@@ -1,10 +1,17 @@
 import json
 from enum import Enum
-from typing import Any, Dict, Tuple
+from typing import Any
 from unittest.mock import MagicMock, patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
-from django.test import RequestFactory, TestCase, override_settings, tag
+from django.core.cache import cache
+from django.test import (
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    override_settings,
+    tag,
+)
 from django.urls import reverse
 
 from registration.models import (
@@ -28,26 +35,26 @@ class PaypalResourceType(Enum):
     # Data structure references:
     # - POST /v2/payments/captures/{capture_id}/refund paypal
     # - GET /v2/payments/refunds/{refund_id}.
-    refund: str = "refund"
+    refund = "refund"
 
     # Data structure references:
     # - Missing
-    capture: str = "capture"
+    capture = "capture"
 
     # Data structure references:
     # - Missing
-    sale: str = "sale"
+    sale = "sale"
 
     # Data structure references:
     # - Missing
-    dispute: str = "dispute"
+    dispute = "dispute"
 
 
 class PaypalNotificationEventType(Enum):
     # primary refund event, the resource is a Refund object (not a Capture)
     # Resource type: 'refund'
     # Do we want to test this: Yes
-    PAYMENT_CAPTURE_REFUNDED: str = "PAYMENT.CAPTURE.REFUNDED"
+    PAYMENT_CAPTURE_REFUNDED = "PAYMENT.CAPTURE.REFUNDED"
 
     # fires when PayPal (not the merchant) reverses a capture — typically due
     # to a chargeback or dispute resolution. Despite the event name, the
@@ -56,14 +63,14 @@ class PaypalNotificationEventType(Enum):
     # https://github.com/woocommerce/woocommerce-paypal-payments/issues/1614
     # Resource type: 'refund'
     # Do we want to test this: Yes
-    PAYMENT_CAPTURE_REVERSED: str = "PAYMENT.CAPTURE.REVERSED"
+    PAYMENT_CAPTURE_REVERSED = "PAYMENT.CAPTURE.REVERSED"
 
     # For chargebacks, you need the dispute events.
     # Data structure references:
     # - GET /v1/customer/disputes/{id}.
     # Resource type: 'dispute'
     # Do we want to test this: Maybe
-    CUSTOMER_DISPUTE_CREATED: str = "CUSTOMER.DISPUTE.CREATED"
+    CUSTOMER_DISPUTE_CREATED = "CUSTOMER.DISPUTE.CREATED"
 
     # Community reports indicate PayPal has occasionally sent v1-style events
     # to v2 integrations without warning.
@@ -73,7 +80,7 @@ class PaypalNotificationEventType(Enum):
     # - Missing
     # Resource type: 'sale'
     # Do we want to test this: Yes
-    PAYMENT_SALE_REFUNDED: str = "PAYMENT.SALE.REFUNDED"
+    PAYMENT_SALE_REFUNDED = "PAYMENT.SALE.REFUNDED"
 
     # NB: PAYMENT.REFUND.PENDING and PAYMENT.REFUND.FAILED do NOT exist as
     # PayPal webhook event types per
@@ -86,14 +93,14 @@ class PaypalNotificationEventType(Enum):
     # - Missing
     # Resource type: 'dispute'
     # Do we want to test this: No
-    CUSTOMER_DISPUTE_UPDATED: str = "CUSTOMER.DISPUTE.UPDATED"
+    CUSTOMER_DISPUTE_UPDATED = "CUSTOMER.DISPUTE.UPDATED"
 
     # Dispute reaches final resolution
     # Data structure references:
     # - Missing
     # Resource type: 'dispute'
     # Do we want to test this: Maybe
-    CUSTOMER_DISPUTE_RESOLVED: str = "CUSTOMER.DISPUTE.RESOLVED"
+    CUSTOMER_DISPUTE_RESOLVED = "CUSTOMER.DISPUTE.RESOLVED"
 
 
 def paypal_resource_type_for_notfication_type(
@@ -121,7 +128,7 @@ def paypal_resource_type_for_notfication_type(
 
 def example_resource_for_paypal_notification_type(
     event_type: PaypalNotificationEventType,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if event_type == PaypalNotificationEventType.PAYMENT_CAPTURE_REFUNDED:
         return {
             "id": "4D780477II019004G",
@@ -315,7 +322,7 @@ def example_resource_for_paypal_notification_type(
 
 def generate_paypal_notification_example(
     event_type: PaypalNotificationEventType,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
 
     headers = {
         "paypal-transmission-id": 0,
@@ -326,14 +333,12 @@ def generate_paypal_notification_example(
         "content-type": "application/json",
     }
 
-    def assemble_notification_body(event_type: PaypalNotificationEventType) -> Dict:
+    def assemble_notification_body(event_type: PaypalNotificationEventType) -> dict:
         return {
             "id": "WH-3F562076HD293871E-75F399086E414290U",
             "event_version": "1.0",
             "create_time": "2024-10-14T21:58:34.000Z",
-            "resource_type": paypal_resource_type_for_notfication_type(
-                event_type
-            ).value,
+            "resource_type": paypal_resource_type_for_notfication_type(event_type).value,
             "resource_version": "2.0",
             "event_type": event_type.value,
             "summary": "Human readable description",
@@ -376,6 +381,12 @@ class TestPaypalWebhookSignatureVerification(TestCase):
     the real code path (header parsing, settings gating, JSON parse, fail-closed
     branches) gets exercised.
     """
+
+    def setUp(self):
+        # MED-7: verify_signature now caches the OAuth token. Clear it
+        # between tests so each starts empty and the token-fetch + verify
+        # call sequence (and call_count) is deterministic / order-free.
+        cache.clear()
 
     ALL_HEADERS = {
         "paypal-auth-algo": "SHA256withRSA",
@@ -460,14 +471,10 @@ class TestPaypalWebhookSignatureVerification(TestCase):
         """C1.4 — any urllib URLError / timeout must be caught and fail closed."""
         mock_urlopen.side_effect = URLError("boom")
         request = self._build_paypal_request_with_headers()
-        with self.assertLogs(
-            "registration.views.paypal_webhooks", level="ERROR"
-        ) as captured:
+        with self.assertLogs("registration.views.paypal_webhooks", level="ERROR") as captured:
             self.assertFalse(verify_signature(request))
         # At least one ERROR log entry should mention the failure.
-        self.assertTrue(
-            any("PayPal" in msg or "boom" in msg for msg in captured.output)
-        )
+        self.assertTrue(any("PayPal" in msg or "boom" in msg for msg in captured.output))
 
     @patch("urllib.request.urlopen")
     def test_non_200_from_verify_endpoint_returns_false(self, mock_urlopen):
@@ -487,6 +494,48 @@ class TestPaypalWebhookSignatureVerification(TestCase):
         request = self._build_paypal_request_with_headers()
         self.assertFalse(verify_signature(request))
         self.assertFalse(mock_urlopen.called)
+
+    @patch("urllib.request.urlopen")
+    def test_oauth_token_is_cached_across_calls(self, mock_urlopen):
+        """MED-7 — the second verify reuses the cached token (no re-fetch).
+
+        First call: token-fetch + verify (2). Second call: verify only,
+        because the token is served from cache (1). Total 3, not 4.
+        """
+        mock_urlopen.side_effect = [
+            self._mock_response({"access_token": "tok", "expires_in": 32400}),
+            self._mock_response({"verification_status": "SUCCESS"}),
+            self._mock_response({"verification_status": "SUCCESS"}),
+        ]
+        req = self._build_paypal_request_with_headers()
+        self.assertTrue(verify_signature(req))
+        self.assertTrue(verify_signature(self._build_paypal_request_with_headers()))
+        self.assertEqual(mock_urlopen.call_count, 3)
+
+    @patch("urllib.request.urlopen")
+    def test_401_invalidates_token_and_retries_once(self, mock_urlopen):
+        """MED-7 / LOW-3 — a 401 on verify forces a token refresh + one retry."""
+        mock_urlopen.side_effect = [
+            self._mock_response({"access_token": "stale", "expires_in": 32400}),
+            HTTPError("u", 401, "Unauthorized", {}, None),
+            self._mock_response({"access_token": "fresh", "expires_in": 32400}),
+            self._mock_response({"verification_status": "SUCCESS"}),
+        ]
+        req = self._build_paypal_request_with_headers()
+        self.assertTrue(verify_signature(req))
+        # token, verify(401), token-refresh, verify(success).
+        self.assertEqual(mock_urlopen.call_count, 4)
+
+    @patch("urllib.request.urlopen")
+    def test_non_401_http_error_fails_closed(self, mock_urlopen):
+        """A non-401 HTTP error on verify fails closed with no retry."""
+        mock_urlopen.side_effect = [
+            self._mock_response({"access_token": "tok", "expires_in": 32400}),
+            HTTPError("u", 500, "Server Error", {}, None),
+        ]
+        req = self._build_paypal_request_with_headers()
+        self.assertFalse(verify_signature(req))
+        self.assertEqual(mock_urlopen.call_count, 2)
 
 
 class TestMalformedPaypalRefundWebhooks(TestCase):
@@ -551,7 +600,7 @@ class TestMalformedPaypalRefundWebhooks(TestCase):
             integration="paypal",
             event_id=self.baseline_body["id"],
             body=self.baseline_body,
-            headers=dict(),
+            headers={},
         )
         notification.save()
 
@@ -613,13 +662,9 @@ class TestPaypalRefundWebhooks(TestCase):
         self.order.save()
         self.attendee = Attendee(**TEST_ATTENDEE_ARGS)
         self.attendee.save()
-        self.badge = Badge(
-            attendee=self.attendee, event=self.event, badgeName="Test Badge"
-        )
+        self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="Test Badge")
         self.badge.save()
-        self.order_item = OrderItem(
-            order=self.order, badge=self.badge, enteredBy="Test"
-        )
+        self.order_item = OrderItem(order=self.order, badge=self.badge, enteredBy="Test")
         self.order_item.save()
         self.order.refresh_from_db()
 
@@ -656,9 +701,7 @@ class TestPaypalRefundWebhooks(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-        webhook = PaymentWebhookNotification.objects.get(
-            event_id=self.baseline_body["id"]
-        )
+        webhook = PaymentWebhookNotification.objects.get(event_id=self.baseline_body["id"])
         self.assertEqual(webhook.event_type, "PAYMENT.CAPTURE.REFUNDED")
         self.assertEqual(webhook.integration, "paypal")
         self.assertTrue(webhook.processed)
@@ -823,9 +866,7 @@ class TestPaypalRefundWebhooks(TestCase):
         reversal and update order status."""
         mock_verify.return_value = True
 
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED
-        )
+        response, body = self._post_webhook(PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED)
 
         self.assertEqual(response.status_code, 200)
 
@@ -840,9 +881,7 @@ class TestPaypalRefundWebhooks(TestCase):
         refund_ids = [r["id"] for r in self.order.apiData.get("refunds", [])]
         self.assertIn(body["resource"]["id"], refund_ids)
         reversal_entry = next(
-            r
-            for r in self.order.apiData["refunds"]
-            if r["id"] == body["resource"]["id"]
+            r for r in self.order.apiData["refunds"] if r["id"] == body["resource"]["id"]
         )
         self.assertTrue(reversal_entry.get("reversal"))
 
@@ -854,9 +893,7 @@ class TestPaypalRefundWebhooks(TestCase):
         amount.currency_code). Handler must read the correct fields."""
         mock_verify.return_value = True
 
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.PAYMENT_SALE_REFUNDED
-        )
+        response, body = self._post_webhook(PaypalNotificationEventType.PAYMENT_SALE_REFUNDED)
 
         self.assertEqual(response.status_code, 200)
 
@@ -878,9 +915,7 @@ class TestPaypalRefundWebhooks(TestCase):
         apiData["dispute"], add attendee to BanList, and set holdType."""
         mock_verify.return_value = True
 
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
-        )
+        response, body = self._post_webhook(PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED)
 
         self.assertEqual(response.status_code, 200)
 
@@ -907,9 +942,7 @@ class TestPaypalRefundWebhooks(TestCase):
         self.order.apiData = {}
         self.order.save()
 
-        response, body = self._post_webhook(
-            PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
-        )
+        response, body = self._post_webhook(PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED)
 
         self.assertEqual(response.status_code, 200)
 
@@ -1044,9 +1077,7 @@ class TestPaypalRefundWebhooks(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-        webhook = PaymentWebhookNotification.objects.get(
-            event_id=self.baseline_body["id"]
-        )
+        webhook = PaymentWebhookNotification.objects.get(event_id=self.baseline_body["id"])
         self.assertFalse(webhook.processed)
 
     @tag("PayPal")
@@ -1115,9 +1146,7 @@ class TestPaypalRefundWebhooks(TestCase):
         self.assertEqual(response2.status_code, 200)
 
         # Should only have one notification stored
-        count = PaymentWebhookNotification.objects.filter(
-            event_id=self.baseline_body["id"]
-        ).count()
+        count = PaymentWebhookNotification.objects.filter(event_id=self.baseline_body["id"]).count()
         self.assertEqual(count, 1)
 
 
@@ -1195,7 +1224,12 @@ class TestPaypalWebhookStubs(PayPalOrdersTestCase):
         _, body = generate_paypal_notification_example(
             PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
         )
-        response = self._post(body)
+        # S24: the chargeback email is dispatched via transaction.on_commit
+        # (only for the CAS winner), so a rollback can never send it. In a
+        # TestCase the wrapping transaction is rolled back, so on_commit
+        # callbacks must be explicitly executed to observe the side effect.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._post(body)
 
         self.assertEqual(response.status_code, 200)
         self.order.refresh_from_db()
@@ -1363,9 +1397,7 @@ class TestPaypalRefundWebhookPerRegistrantType(TestCase):
         from registration.tests.common import TEST_TABLE_ARGS
 
         dealer_attendee = self._make_attendee("dealer@example.com", "Dealer", "Test")
-        badge = Badge(
-            attendee=dealer_attendee, event=self.event, badgeName="DealerBadge"
-        )
+        badge = Badge(attendee=dealer_attendee, event=self.event, badgeName="DealerBadge")
         badge.save()
         table = TableSize(**TEST_TABLE_ARGS)
         table.save()
@@ -1478,13 +1510,9 @@ class TestPaypalViewsCoverageGaps(TestCase):
     def test_get_paypal_access_token_returns_none_without_credentials(self):
         from registration.views.paypal_webhooks import _get_paypal_access_token
 
-        with self.assertLogs(
-            "registration.views.paypal_webhooks", level="WARNING"
-        ) as captured:
+        with self.assertLogs("registration.views.paypal_webhooks", level="WARNING") as captured:
             self.assertIsNone(_get_paypal_access_token())
-        self.assertTrue(
-            any("credentials not configured" in msg for msg in captured.output)
-        )
+        self.assertTrue(any("credentials not configured" in msg for msg in captured.output))
 
     @override_settings(
         PAYPAL_WEBHOOK_ID="TEST-WEBHOOK-ID",
@@ -1506,9 +1534,7 @@ class TestPaypalViewsCoverageGaps(TestCase):
             content_type="application/json",
             **meta,
         )
-        with self.assertLogs(
-            "registration.views.paypal_webhooks", level="WARNING"
-        ) as captured:
+        with self.assertLogs("registration.views.paypal_webhooks", level="WARNING") as captured:
             self.assertFalse(verify_signature(request))
         self.assertFalse(mock_urlopen.called)
         self.assertTrue(any("not valid JSON" in msg for msg in captured.output))
@@ -1545,14 +1571,10 @@ class TestPaypalViewsCoverageGaps(TestCase):
             content_type="application/json",
             **meta,
         )
-        with self.assertLogs(
-            "registration.views.paypal_webhooks", level="ERROR"
-        ) as captured:
+        with self.assertLogs("registration.views.paypal_webhooks", level="ERROR") as captured:
             self.assertFalse(verify_signature(request))
         self.assertTrue(
-            any(
-                "verify-webhook-signature call failed" in msg for msg in captured.output
-            )
+            any("verify-webhook-signature call failed" in msg for msg in captured.output)
         )
 
     @patch("registration.views.paypal_webhooks.verify_signature")
@@ -1566,9 +1588,7 @@ class TestPaypalViewsCoverageGaps(TestCase):
         mock_save.side_effect = IntegrityError("duplicate event_id")
 
         body = {"id": "WH-RACE", "event_type": "PAYMENT.CAPTURE.REFUNDED"}
-        with self.assertLogs(
-            "registration.views.paypal_webhooks", level="WARNING"
-        ) as captured:
+        with self.assertLogs("registration.views.paypal_webhooks", level="WARNING") as captured:
             response = self.client.post(
                 reverse("registration:paypal_webhook"),
                 json.dumps(body),
@@ -1606,9 +1626,7 @@ class TestPaypalViewsCoverageGaps(TestCase):
 
         with (
             patch.dict(_HANDLERS, {"PAYMENT.CAPTURE.REFUNDED": boom}),
-            self.assertLogs(
-                "registration.views.paypal_webhooks", level="ERROR"
-            ) as captured,
+            self.assertLogs("registration.views.paypal_webhooks", level="ERROR") as captured,
         ):
             response = self.client.post(
                 reverse("registration:paypal_webhook"),
@@ -1620,9 +1638,7 @@ class TestPaypalViewsCoverageGaps(TestCase):
         self.assertEqual(response.status_code, 200)
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertFalse(webhook.processed)
-        self.assertTrue(
-            any("crashed; marking unprocessed" in msg for msg in captured.output)
-        )
+        self.assertTrue(any("crashed; marking unprocessed" in msg for msg in captured.output))
 
 
 # ---------------------------------------------------------------------------
@@ -1674,11 +1690,7 @@ class TestPaypalHandlerHelperCoverageGaps(TestCase):
             status=Order.COMPLETED,
             reference="NON-MATCH",
             billingEmail="x@example.com",
-            apiData={
-                "purchase_units": [
-                    {"payments": {"captures": [{"id": "SOMETHING-ELSE"}]}}
-                ]
-            },
+            apiData={"purchase_units": [{"payments": {"captures": [{"id": "SOMETHING-ELSE"}]}}]},
         ).save()
 
         self.assertIsNone(_find_order_by_capture_id("not-a-real-capture"))
@@ -1720,9 +1732,7 @@ class TestPaypalHandlerHelperCoverageGaps(TestCase):
         )
 
         resource = {
-            "links": [
-                {"rel": "up", "href": "https://api.paypal.com/v2/something-else/xxx"}
-            ]
+            "links": [{"rel": "up", "href": "https://api.paypal.com/v2/something-else/xxx"}]
         }
         self.assertIsNone(_parse_capture_id_from_links(resource))
 
@@ -1773,9 +1783,7 @@ class TestPaypalHandlerHelperCoverageGaps(TestCase):
         )
         order.save()
 
-        found = _find_order_for_v1_sale(
-            {"invoice_number": "missing", "custom": "V1-CUSTOM"}
-        )
+        found = _find_order_for_v1_sale({"invoice_number": "missing", "custom": "V1-CUSTOM"})
         self.assertEqual(found.pk, order.pk)
 
     def test_find_order_for_dispute_fallback_paths(self):
@@ -1800,11 +1808,7 @@ class TestPaypalHandlerHelperCoverageGaps(TestCase):
         custom_order.save()
 
         found_by_custom = _find_order_for_dispute(
-            {
-                "disputed_transactions": [
-                    {"custom": "DISPUTE-CUSTOM", "invoice_number": "nothing"}
-                ]
-            }
+            {"disputed_transactions": [{"custom": "DISPUTE-CUSTOM", "invoice_number": "nothing"}]}
         )
         self.assertEqual(found_by_custom.pk, custom_order.pk)
 
@@ -1904,9 +1908,7 @@ class TestPaypalHandlerNoMatchingOrderCoverageGaps(TestCase):
             )
 
     def test_capture_reversed_no_matching_order(self):
-        response, body = self._post(
-            PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED
-        )
+        response, body = self._post(PaypalNotificationEventType.PAYMENT_CAPTURE_REVERSED)
         self.assertEqual(response.status_code, 200)
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertFalse(webhook.processed)
@@ -1918,17 +1920,13 @@ class TestPaypalHandlerNoMatchingOrderCoverageGaps(TestCase):
         self.assertFalse(webhook.processed)
 
     def test_dispute_updated_no_matching_order(self):
-        response, body = self._post(
-            PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED
-        )
+        response, body = self._post(PaypalNotificationEventType.CUSTOMER_DISPUTE_UPDATED)
         self.assertEqual(response.status_code, 200)
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertFalse(webhook.processed)
 
     def test_dispute_resolved_no_matching_order(self):
-        response, body = self._post(
-            PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED
-        )
+        response, body = self._post(PaypalNotificationEventType.CUSTOMER_DISPUTE_RESOLVED)
         self.assertEqual(response.status_code, 200)
         webhook = PaymentWebhookNotification.objects.get(event_id=body["id"])
         self.assertFalse(webhook.processed)
@@ -2091,18 +2089,21 @@ class TestPaypalHandlerMiscCoverageGaps(PayPalOrdersTestCase):
         side_effect=RuntimeError("broker unreachable"),
     )
     @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
-    def test_dispute_created_handles_email_task_enqueue_failure(
-        self, _mock_verify, _mock_delay
-    ):
+    def test_dispute_created_handles_email_task_enqueue_failure(self, _mock_verify, _mock_delay):
         """If Celery/broker is unreachable, the dispute state must still be
         persisted and the handler must mark the webhook processed=True."""
         _, body = generate_paypal_notification_example(
             PaypalNotificationEventType.CUSTOMER_DISPUTE_CREATED
         )
         body["id"] = "WH-DISPUTE-BROKER-DOWN"
-        with self.assertLogs(
-            "registration.paypal_webhook_handlers", level="ERROR"
-        ) as captured:
+        # S24: the email enqueue (and its failure-handling ERROR log) runs
+        # inside a transaction.on_commit callback. captureOnCommitCallbacks
+        # is nested *inside* assertLogs so the callback — and thus the
+        # logged error — fires while the log capture is still active.
+        with (
+            self.assertLogs("registration.paypal_webhook_handlers", level="ERROR") as captured,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
             response = self.client.post(
                 reverse("registration:paypal_webhook"),
                 json.dumps(body),
@@ -2116,10 +2117,7 @@ class TestPaypalHandlerMiscCoverageGaps(PayPalOrdersTestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.DISPUTE_EVIDENCE_REQUIRED)
         self.assertTrue(
-            any(
-                "Failed to queue chargeback notice email" in msg
-                for msg in captured.output
-            )
+            any("Failed to queue chargeback notice email" in msg for msg in captured.output)
         )
 
     @patch("registration.views.paypal_webhooks.verify_signature", return_value=True)
@@ -2189,18 +2187,20 @@ class TestPaypalCaptureWebhooks(TestCase):
 
     @patch("registration.paypal_webhook_handlers.tasks")
     @patch("registration.views.paypal_webhooks.verify_signature")
-    def test_capture_completed_pending_to_completed_queues_email(
-        self, mock_verify, mock_tasks
-    ):
+    def test_capture_completed_pending_to_completed_queues_email(self, mock_verify, mock_tasks):
         mock_verify.return_value = True
         body = self._capture_body("PAYMENT.CAPTURE.COMPLETED")
 
-        response = self.client.post(
-            reverse("registration:paypal_webhook"),
-            json.dumps(body),
-            content_type="application/json",
-            headers={"content-type": "application/json"},
-        )
+        # S24: registration email is queued via transaction.on_commit only
+        # for the CAS winner; execute on_commit callbacks so the TestCase
+        # (rolled-back transaction) can observe the enqueue.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("registration:paypal_webhook"),
+                json.dumps(body),
+                content_type="application/json",
+                headers={"content-type": "application/json"},
+            )
         self.assertEqual(response.status_code, 200)
 
         self.order.refresh_from_db()
@@ -2211,9 +2211,7 @@ class TestPaypalCaptureWebhooks(TestCase):
 
     @patch("registration.paypal_webhook_handlers.tasks")
     @patch("registration.views.paypal_webhooks.verify_signature")
-    def test_capture_completed_is_idempotent_when_already_completed(
-        self, mock_verify, mock_tasks
-    ):
+    def test_capture_completed_is_idempotent_when_already_completed(self, mock_verify, mock_tasks):
         mock_verify.return_value = True
         self.order.status = Order.COMPLETED
         self.order.email_sent = True
@@ -2337,3 +2335,65 @@ class TestPaypalCaptureWebhooks(TestCase):
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.REFUNDED)
+
+
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+    PAYPAL_CLIENT_ID="cid",
+    PAYPAL_CLIENT_SECRET="csec",
+)
+class TestPaypalTokenCache(SimpleTestCase):
+    """MED-7 — _get_paypal_access_token caching (no DB, runs locally)."""
+
+    def setUp(self):
+        cache.clear()
+
+    @staticmethod
+    def _resp(body):
+        inner = MagicMock()
+        inner.read.return_value = json.dumps(body).encode()
+        inner.status = 200
+        cm = MagicMock()
+        cm.__enter__.return_value = inner
+        cm.__exit__.return_value = False
+        return cm
+
+    @patch("urllib.request.urlopen")
+    def test_token_fetched_once_then_served_from_cache(self, mock_urlopen):
+        from registration.views.paypal_webhooks import _get_paypal_access_token
+
+        mock_urlopen.side_effect = [self._resp({"access_token": "T", "expires_in": 32400})]
+        self.assertEqual(_get_paypal_access_token(), "T")
+        # Second call: cache hit, no second HTTP fetch.
+        self.assertEqual(_get_paypal_access_token(), "T")
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+    @patch("urllib.request.urlopen")
+    def test_force_refresh_and_invalidate(self, mock_urlopen):
+        from registration.views.paypal_webhooks import (
+            _get_paypal_access_token,
+            invalidate_paypal_access_token,
+        )
+
+        mock_urlopen.side_effect = [
+            self._resp({"access_token": "A", "expires_in": 32400}),
+            self._resp({"access_token": "B", "expires_in": 32400}),
+            self._resp({"access_token": "C", "expires_in": 32400}),
+        ]
+        self.assertEqual(_get_paypal_access_token(), "A")
+        # force_refresh bypasses the cache.
+        self.assertEqual(_get_paypal_access_token(force_refresh=True), "B")
+        # invalidate drops the cache, so the next plain call re-fetches.
+        invalidate_paypal_access_token()
+        self.assertEqual(_get_paypal_access_token(), "C")
+        self.assertEqual(mock_urlopen.call_count, 3)
+
+    @patch("urllib.request.urlopen")
+    def test_ttl_capped_below_paypal_expiry(self, mock_urlopen):
+        from registration.views import paypal_webhooks as pw
+
+        mock_urlopen.side_effect = [self._resp({"access_token": "T", "expires_in": 99999})]
+        with patch.object(pw.cache, "set", wraps=pw.cache.set) as spy:
+            pw._get_paypal_access_token()
+        timeout = spy.call_args.kwargs.get("timeout") or spy.call_args.args[2]
+        self.assertLessEqual(timeout, pw.PAYPAL_TOKEN_CACHE_MAX_TTL)

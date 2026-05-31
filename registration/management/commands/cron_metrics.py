@@ -1,5 +1,5 @@
-from datetime import datetime
 from abc import ABCMeta, abstractmethod
+from datetime import datetime
 
 from django.conf import settings
 from django.contrib.sites.models import Site
@@ -8,11 +8,11 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 from influxdb import InfluxDBClient
 
-from registration.models import *
-
+from registration.models import Event, Order, OrderItem, PriceLevel, Staff
 
 """
-There's a few options for where these metrics could end up.  These should eventually be configurable:
+There's a few options for where these metrics could end up. These should
+eventually be configurable:
  - built-in database metrics table: (simplest, no external dependency).
  - prometheus: Time-series database, with existing reporters for e.g. django request processors.
  - influxdb: Another great time-series database.
@@ -43,7 +43,19 @@ class Command(BaseCommand):
         now = timezone.now()
         today = now.date()
 
-        backend_class = eval(settings.APIS_METRICS_BACKEND)
+        # ASVS V5.2.4 / OWASP A03: do not evaluate configuration as
+        # Python source. Resolve the metrics backend through an explicit
+        # registry of allowed classes. Adding a new backend is a
+        # deliberate, code-review-able change to this dict, not a side
+        # effect of an env-var write.
+        try:
+            backend_class = METRICS_BACKENDS[settings.APIS_METRICS_BACKEND]
+        except KeyError as exc:
+            raise CommandError(
+                f"APIS_METRICS_BACKEND={settings.APIS_METRICS_BACKEND!r} is not a "
+                f"registered metrics backend. Allowed: {sorted(METRICS_BACKENDS)}"
+            ) from exc
+
         try:
             backend_settings = settings.APIS_METRICS_SETTINGS
         except AttributeError:
@@ -91,16 +103,12 @@ class Command(BaseCommand):
 
             # Organization donations
             org_donations = event.donations
-            org_sum = order_items.aggregate(Sum("order__orgDonation"))[
-                "order__orgDonation__sum"
-            ]
+            org_sum = order_items.aggregate(Sum("order__orgDonation"))["order__orgDonation__sum"]
             if org_sum:
                 org_donations += org_sum
             backend_writer(event, "org_donations", int(org_donations * 100))
 
-            print(
-                "Event: {0} - (total completed orders: {1})".format(event, total_count)
-            )
+            print(f"Event: {event} - (total completed orders: {total_count})")
             for level in price_levels:
                 print(level, "-", level_bins[level.id])
 
@@ -112,9 +120,7 @@ class Command(BaseCommand):
                     days_to_event=days_to_event,
                 )
 
-            print(
-                "Staff: {0} ({1} active)".format(total_staff_count, active_staff_count)
-            )
+            print(f"Staff: {total_staff_count} ({active_staff_count} active)")
             backend_writer(event, "staff_total", total_staff_count)
             backend_writer(event, "staff_active", active_staff_count)
             backend_writer(event, "orders", total_count)
@@ -167,7 +173,7 @@ class InfluxDBReporter(CronReporterABC):
         return now.isoformat("T") + "Z"
 
     def batch(self, event, topic, value, **kwargs):
-        """
+        r"""
         Stage a data point to record to be committed to the database in bulk
 
         :param event:
@@ -227,3 +233,13 @@ class InfluxDBReporter(CronReporterABC):
 
 
 CronReporterABC.register(InfluxDBReporter)
+
+
+# Registry of allowed metrics backends. Resolved by name from
+# settings.APIS_METRICS_BACKEND; see Command.handle. Adding a new
+# entry is the only way to introduce a new backend — `eval()` was
+# removed in the rescan P0 fix.
+METRICS_BACKENDS = {
+    "DummyReporter": DummyReporter,
+    "InfluxDBReporter": InfluxDBReporter,
+}

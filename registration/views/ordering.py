@@ -2,9 +2,8 @@ import json
 import logging
 from collections import Counter
 from json import JSONDecodeError
-from typing import Optional
+from typing import Any, cast
 
-from django.core.signing import TimestampSigner
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from idempotency_key.decorators import idempotency_key
@@ -12,15 +11,30 @@ from paypalserversdk.exceptions.api_exception import ApiException
 
 from registration import mqtt, tasks
 from registration.forms import OrderForm
-from registration.models import *
+from registration.models import (
+    Attendee,
+    Badge,
+    Cart,
+    DealerAsst,
+    Decimal,
+    Discount,
+    Event,
+    Order,
+    OrderItem,
+    PriceLevel,
+    PriceLevelOption,
+    settings,
+)
 from registration.payments import (
     charge_payment,
-    update_capacity_for_status_change,
+    transition_order_status,
 )
 from registration.paypal_payments import (
     capture_paypal_payment,
     create_unpaid_paypal_order,
 )
+from registration.ratelimit import rate_limited_json
+from registration.signing import resolve_terminal_token
 from registration.types import BillingData, TranslatedCartItem
 
 from . import cart, common
@@ -120,13 +134,13 @@ def do_checkout(
     processor: str,
     billingData: BillingData,
     total: Decimal,
-    discount: Decimal,
+    discount: Discount | None,
     cartItems: list,
     orderItems: list,
     donationOrg: Decimal,
     donationCharity: Decimal,
-    request: HttpRequest = None,
-) -> tuple[bool, dict, Order]:
+    request: HttpRequest | None = None,
+) -> tuple[bool, dict | str, Order | None]:
     event = Event.objects.get(default=True)
     # Reuse the reference token set on the PayPal order at create_paypal_order
     # time so that invoice_id/custom_id on every downstream PayPal webhook
@@ -140,7 +154,7 @@ def do_checkout(
 
     billName = None
     if billingData.get("cc_firstname") and billingData.get("cc_lastname"):
-        billName = f"{billingData.get("cc_firstname")} {billingData.get("cc_lastname")}"
+        billName = f"{billingData.get('cc_firstname')} {billingData.get('cc_lastname')}"
     form = OrderForm(
         collect_billing_address=processor == "square" and event.collectBillingAddress,
         data={
@@ -161,7 +175,11 @@ def do_checkout(
     )
 
     if not form.is_valid():
-        return False, {"errors": [{"code": f"{k} - {v}"} for k, v in form.errors]}, None
+        return (
+            False,
+            {"errors": [{"code": f"{k} - {v}"} for k, v in cast(Any, form.errors)]},
+            None,
+        )
 
     order: Order = form.save(commit=False)
 
@@ -179,7 +197,11 @@ def do_checkout(
                 return False, error, None
             for level, count in levels:
                 level.reserve_slots(count)
-            order.status = Order.PENDING
+            # Initial Order creation to PENDING inside the reservation
+            # atomic block — a row insert, not a race-prone state
+            # transition (no prior status to CAS from; capacity is the
+            # reserve_slots() above).
+            order.status = Order.PENDING  # status-writer-ok: initial create
             order.save()
             _save_order_items(order, cartItems, orderItems)
 
@@ -187,6 +209,8 @@ def do_checkout(
         # order.status and save on their own success/failure branches
         # (except a couple of PayPal early-return error paths handled by
         # the normalization guard below).
+        status: bool
+        response: dict | str
         if processor == "paypal":
             orderId = billingData.get("source_id")
             if not orderId:
@@ -205,20 +229,20 @@ def do_checkout(
                 {"errors": [{"code": f"Unknown processor: {processor}"}]},
             )
 
-        # Normalize order.status and persist. Payment handlers usually
-        # save themselves, but some mocks only mutate the in-memory
-        # object, and a few PayPal early-return branches (Missing-id /
-        # ApiException / JSON-decode) return without saving at all. We
-        # always save so the DB reflects the terminal state, and we coerce
-        # PENDING into a concrete terminal before the capacity call so
-        # update_capacity_for_status_change doesn't see old==new==PENDING.
-        if order.status == Order.PENDING:
-            order.status = Order.COMPLETED if status else Order.FAILED
-        order.save()
-
-        # Uniform capacity transition PENDING→COMPLETED (confirm) or
-        # PENDING→FAILED (release).
-        update_capacity_for_status_change(order, Order.PENDING, order.status)
+        # S24 + peer-review BLOCK-1: charge_payment / capture_paypal_payment
+        # now fuse the PENDING→terminal status write WITH the capacity
+        # transition in a single atomic compare-and-set
+        # (transition_order_status, expected=PENDING). There is no longer a
+        # raw, unguarded update_capacity_for_status_change here — that was
+        # the double-decrement defect (a concurrent webhook winning the CAS
+        # then this path also adjusting capacity). The only post-handler
+        # work is finalizing PayPal early-return paths (Missing-id /
+        # JSON-decode) that return without transitioning: this CAS fails
+        # those still-PENDING orders exactly once; if a handler or a
+        # concurrent webhook already moved the order off PENDING it
+        # no-ops (no double capacity, no clobber of the winner).
+        target = Order.COMPLETED if status else Order.FAILED
+        transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
 
         if status:
             if discount:
@@ -232,12 +256,11 @@ def do_checkout(
         if order.id:
             try:
                 order.refresh_from_db()
+                # S24: only fail it if it's still PENDING — a parallel
+                # webhook may have legitimately completed it; CAS makes
+                # that race-safe and runs the capacity release itself.
                 if order.status == Order.PENDING:
-                    update_capacity_for_status_change(
-                        order, Order.PENDING, Order.FAILED
-                    )
-                    order.status = Order.FAILED
-                    order.save()
+                    transition_order_status(order, Order.FAILED, expected=[Order.PENDING])
             except Exception as cleanup_error:
                 logger.error(f"Error during checkout cleanup: {cleanup_error}")
         raise
@@ -252,7 +275,7 @@ def doZeroCheckout(discount, cartItems, orderItems):
         billingEmail = attendee["email"]
     elif orderItems:
         attendee = orderItems[0].badge.attendee
-        billingName = "{0} {1}".format(attendee.firstName, attendee.lastName)
+        billingName = f"{attendee.firstName} {attendee.lastName}"
         billingEmail = attendee.email
 
     reference = common.get_unique_confirmation_token(Order)
@@ -340,9 +363,11 @@ def get_discount_total(disc, subtotal):
     return 0
 
 
-def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Decimal:
-    item_total = 0
-    discount = 0
+def get_line_item_total(
+    item: Cart | OrderItem, disc: str | None = ""
+) -> tuple[Decimal | int, Decimal | int]:
+    item_total: Decimal | int = 0
+    discount: Decimal | int = 0
     if isinstance(item, Cart):
         post_data = json.loads(item.formData)
         pdp = post_data["priceLevel"]
@@ -353,13 +378,10 @@ def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Dec
         item_total += getCartItemOptionTotal(options)
 
     elif isinstance(item, OrderItem):
-        item_sub_total = item.priceLevel.basePrice
-        eff_level = item.badge.effectiveLevel()
+        item_sub_total = cast(PriceLevel, item.priceLevel).basePrice
+        eff_level = cast(Badge, item.badge).effectiveLevel()
 
-        if eff_level:
-            item_total = item_sub_total - eff_level.basePrice
-        else:
-            item_total = item_sub_total
+        item_total = item_sub_total - eff_level.basePrice if eff_level else item_sub_total
 
         item_total += get_order_item_option_total(item.attendeeoptions_set.all())
 
@@ -370,22 +392,23 @@ def get_line_item_total(item: Cart | OrderItem, disc: Optional[str] = "") -> Dec
 
 
 def get_total(
-    cartItems: list[Cart], orderItems: list[OrderItem], disc: Optional[str] = ""
-) -> tuple[Decimal, Decimal]:
-    total = 0
-    total_discount = 0
+    cartItems: list[Cart], orderItems: list[OrderItem], disc: str | None = ""
+) -> tuple[Decimal | int, Decimal | int]:
+    total: Decimal | int = 0
+    total_discount: Decimal | int = 0
     if not cartItems and not orderItems:
         return 0, 0
 
-    for item in cartItems:
-        item_total, discount = get_line_item_total(item, disc)
+    cart_item: Cart | OrderItem
+    for cart_item in cartItems:
+        item_total, discount = get_line_item_total(cart_item, disc)
         total_discount += discount
         item_total -= discount
         if item_total > 0:
             total += item_total
 
-    for item in orderItems:
-        item_total, discount = get_line_item_total(item, disc)
+    for order_item in orderItems:
+        item_total, discount = get_line_item_total(order_item, disc)
         total_discount += discount
         item_total -= discount
         if item_total > 0:
@@ -403,21 +426,17 @@ def apply_discount(request):
 
     try:
         postData = json.loads(request.body)
-    except ValueError as e:
+    except ValueError:
         logger.error("Unable to decode JSON for apply_discount()")
         return JsonResponse({"success": False})
     dis = postData["discount"]
 
     discount = Discount.objects.filter(codeName=dis)
     if discount.count() == 0:
-        return JsonResponse(
-            {"success": False, "message": "That discount is not valid."}
-        )
+        return JsonResponse({"success": False, "message": "That discount is not valid."})
     discount = discount.first()
     if not discount.isValid():
-        return JsonResponse(
-            {"success": False, "message": "That discount is not valid."}
-        )
+        return JsonResponse({"success": False, "message": "That discount is not valid."})
 
     request.session["discount"] = discount.codeName
     return JsonResponse({"success": True})
@@ -457,9 +476,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     # Safety valve (in case session times out before checkout is complete)
     if len(cart_items) == 0 and len(order_items) == 0:
-        return common.abort(
-            400, "Session expired or no session is stored for this client"
-        )
+        return common.abort(400, "Session expired or no session is stored for this client")
 
     try:
         post_data = json.loads(request.body)
@@ -470,16 +487,19 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     event = Event.objects.get(default=True)
 
-    discount = Discount.objects.filter(codeName=discount_code)
-    if discount.count() > 0 and discount.first().isValid():
-        discount = discount.first()
-    else:
-        discount = None
+    discount_qs = Discount.objects.filter(codeName=discount_code)
+    # Preserved query side-effects (count()/first()) from the original
+    # control flow; the resolved value itself was never read here.
+    _resolved_discount = (  # intentionally unused; kept for query-side-effect parity
+        discount_qs.first()
+        if discount_qs.count() > 0 and cast(Discount, discount_qs.first()).isValid()
+        else None
+    )
 
     # Process cart item data and calculate totals
     translated_cart: list[TranslatedCartItem] = []
-    for item in cart_items:
-        parsed_data = json.loads(item.formData)
+    for cart_item in cart_items:
+        parsed_data = json.loads(cart_item.formData)
         pda = parsed_data["attendee"]
         pdp = parsed_data["priceLevel"]
 
@@ -491,34 +511,30 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         )
         priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 
-        item_total, discount = get_line_item_total(item, discount_code)
+        item_total, _discount = get_line_item_total(cart_item, discount_code)
         translated_cart.append(
             {
-                "name": "%s %s - %s" % (event, priceLevel, attendee),
-                "total": item_total,
+                "name": f"{event} {priceLevel} - {attendee}",
+                "total": cast(Decimal, item_total),
                 "donation": False,
             }
         )
 
-    for item in order_items:
-        item_total, discount = get_line_item_total(item, discount_code)
-        badge = item.badge
+    for order_item in order_items:
+        item_total, _discount = get_line_item_total(order_item, discount_code)
+        badge = cast(Badge, order_item.badge)
         translated_cart.append(
             {
-                "name": str(event)
-                + " "
-                + str(item.priceLevel)
-                + " - "
-                + str(badge.attendee),
-                "total": item_total,
+                "name": str(event) + " " + str(order_item.priceLevel) + " - " + str(badge.attendee),
+                "total": cast(Decimal, item_total),
                 "donation": False,
             }
         )
 
     subtotal, total_discount = get_total(cart_items, order_items, discount_code)
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    porg: Decimal | int = Decimal(post_data.get("orgDonation") or "0.00")
+    pcharity: Decimal | int = Decimal(post_data.get("charityDonation") or "0.00")
 
     if porg < 0:
         porg = 0
@@ -527,14 +543,14 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     if porg > 0:
         translated_cart.append(
-            {"name": "Donation to %s" % event, "total": porg, "donation": True}
+            {"name": f"Donation to {event}", "total": cast(Decimal, porg), "donation": True}
         )
 
     if pcharity > 0:
         translated_cart.append(
             {
-                "name": "Donation to %s" % event.charity,
-                "total": pcharity,
+                "name": f"Donation to {event.charity}",
+                "total": cast(Decimal, pcharity),
                 "donation": True,
             }
         )
@@ -561,6 +577,9 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
     return common.abort(400, "Cart total is zero; use the zero-checkout flow")
 
 
+# MED-3: cap deliberate registration-submit floods (enumeration / capacity
+# drain / mass-email). Idempotency keys only stop accidental retries.
+@rate_limited_json(rate="10/h")
 @idempotency_key(optional=False)
 def checkout(request):
     """
@@ -574,7 +593,7 @@ def checkout(request):
         logger.error("Unable to decode JSON for checkout()")
         return common.abort(400, "Unable to parse input options")
 
-    event = Event.objects.get(default=True)
+    Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items = list(Cart.objects.filter(id__in=session_items))
     order_items = request.session.get("order_items", [])
@@ -582,15 +601,10 @@ def checkout(request):
 
     # Safety valve (in case session times out before checkout is complete)
     if len(session_items) == 0 and len(order_items) == 0:
-        return common.abort(
-            400, "Session expired or no session is stored for this client"
-        )
+        return common.abort(400, "Session expired or no session is stored for this client")
 
     discount = Discount.objects.filter(codeName=pdisc)
-    if discount.count() > 0 and discount.first().isValid():
-        discount = discount.first()
-    else:
-        discount = None
+    discount = discount.first() if discount.count() > 0 and discount.first().isValid() else None
 
     if order_items:
         order_items = list(OrderItem.objects.filter(id__in=order_items))
@@ -636,7 +650,13 @@ def checkout(request):
             charityDonation=pcharity,
             billingType=Order.UNPAID,
         )
-        order.status = "Onsite Pending"
+        # Initial creation of a fresh onsite Order (a row insert, not a
+        # race-prone transition — it is later moved to a terminal status
+        # by complete_square/complete_cash via the CAS primitive). The
+        # legacy sentinel value is preserved as-is (now a named constant,
+        # Order.ONSITE_PENDING; the CAS expected-state lists it so the
+        # onsite completion is not silently dropped).
+        order.status = Order.ONSITE_PENDING  # status-writer-ok: initial create
         order.save()
 
         if cart_items:
@@ -709,18 +729,24 @@ def cancel_order(request):
 
 def notify_terminal(request, order):
     try:
-        associated_terminal = request.COOKIES.get("terminal-token")
-        if associated_terminal:
-            signer = TimestampSigner()
-            data_obj = signer.unsign_object(associated_terminal, max_age=60 * 30)
+        # Peer-review ATTACK-1/2: resolve via the salt-namespaced,
+        # id+epoch-bound terminal-token context (no cross-context
+        # confusion, name immutability, rotation invalidation).
+        terminal = resolve_terminal_token(request.COOKIES.get("terminal-token"), 60 * 30)
+        if terminal:
+            # S33 HIGH-2 (OWASP API1 BOLA): bind the order to the terminal
+            # that opened it, on first notify only. Best-effort — the
+            # surrounding try/except swallows failures so a binding miss
+            # never blocks completion of a legitimate checkout.
+            if order.opened_at_terminal_id is None:
+                order.opened_at_terminal = terminal
+                order.save(update_fields=["opened_at_terminal"])
             # We only need one badge ID as onsite will automatically add all
             # badges attached to the order.
             order_item = OrderItem.objects.filter(order_id=order.id).first()
             if order_item:
                 mqtt.send_mqtt_message(
-                    mqtt.get_topic(
-                        "web/registration/completed", name=data_obj["terminal"]
-                    ),
+                    mqtt.get_topic("web/registration/completed", name=terminal.name),
                     {"badgeId": order_item.badge_id},
                 )
     except Exception as ex:

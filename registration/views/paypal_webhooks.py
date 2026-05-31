@@ -3,16 +3,27 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from types import ModuleType
+from typing import Literal
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import IntegrityError
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from registration import paypal_webhook_handlers as pph
 from registration.models import PaymentWebhookNotification
+from registration.ratelimit import rate_limited_json
 from registration.views import common
+from registration.views.webhook_age import (
+    webhook_signature_bypassed,
+    webhook_within_age_window,
+)
 
+# Optional dependency: declare as Optional module so the `is None`
+# guards below type-check cleanly (no suppression needed).
+sentry_sdk: ModuleType | None
 try:
     import sentry_sdk
 except ImportError:
@@ -20,8 +31,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Sentry's capture_message accepts only this fixed set of level strings.
+_SentryLevel = Literal["fatal", "critical", "error", "warning", "info", "debug"]
 
-def _sentry_capture(message: str, level: str = "warning", **tags) -> None:
+
+def _sentry_capture(message: str, level: _SentryLevel = "warning", **tags) -> None:
     if sentry_sdk is None:
         return
     with sentry_sdk.push_scope() as scope:
@@ -35,6 +49,16 @@ PAYPAL_LIVE_API_BASE = "https://api-m.paypal.com"
 PAYPAL_SANDBOX_API_BASE = "https://api-m.sandbox.paypal.com"
 PAYPAL_HTTP_TIMEOUT = 10
 
+# MED-7: cap the cached-token lifetime well below PayPal's stated ~1h so a
+# refresh always happens before expiry; never trust expires_in to exceed
+# this. Keyed per API base so a sandbox token is never reused live.
+PAYPAL_TOKEN_CACHE_MAX_TTL = 3000  # 50 min
+PAYPAL_TOKEN_CACHE_SAFETY = 600  # refresh 10 min before PayPal's expiry
+
+
+def _paypal_token_cache_key() -> str:
+    return f"paypal:access_token:{_paypal_api_base()}"
+
 
 def _paypal_api_base() -> str:
     env = getattr(settings, "PAYPAL_ENVIRONMENT", "") or ""
@@ -43,20 +67,40 @@ def _paypal_api_base() -> str:
     return PAYPAL_SANDBOX_API_BASE
 
 
-def _get_paypal_access_token() -> str | None:
-    """Fetch an OAuth2 bearer token from PayPal using client credentials.
+def invalidate_paypal_access_token() -> None:
+    """MED-7: drop the cached token (called on a 401 from a downstream call)."""
+    try:
+        cache.delete(_paypal_token_cache_key())
+    except Exception:
+        # A cache outage must not break the fail-closed verify path.
+        logger.warning("Could not invalidate cached PayPal token")
 
-    Returns the token on success, None on any failure.
+
+def _get_paypal_access_token(*, force_refresh: bool = False) -> str | None:
+    """Return a PayPal OAuth2 bearer token, cached in Redis (MED-7).
+
+    Tokens are valid ~1h; we cache them for at most
+    ``PAYPAL_TOKEN_CACHE_MAX_TTL`` (and 10 min below ``expires_in`` if
+    PayPal returns a shorter one) so webhook latency is decoupled from
+    PayPal's OAuth uptime. ``force_refresh`` bypasses the cache (used after
+    a 401). Returns the token on success, None on any failure.
     """
+    cache_key = _paypal_token_cache_key()
+    if not force_refresh:
+        try:
+            cached = cache.get(cache_key)
+        except Exception:
+            cached = None  # cache down → fall through to a live fetch
+        if cached:
+            return cached
+
     client_id = getattr(settings, "PAYPAL_CLIENT_ID", "") or ""
     client_secret = getattr(settings, "PAYPAL_CLIENT_SECRET", "") or ""
     if not client_id or not client_secret:
         logger.warning("PayPal client credentials not configured")
         return None
 
-    basic = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode(
-        "ascii"
-    )
+    basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
     url = f"{_paypal_api_base()}/v1/oauth2/token"
     data = b"grant_type=client_credentials"
     req = urllib.request.Request(url, data=data, method="POST")
@@ -67,10 +111,26 @@ def _get_paypal_access_token() -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=PAYPAL_HTTP_TIMEOUT) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-        return payload.get("access_token")
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
         logger.error("Failed to fetch PayPal OAuth2 token: %s", e)
         return None
+
+    token = payload.get("access_token")
+    if not token:
+        return None
+
+    try:
+        expires_in = int(payload.get("expires_in", 0))
+    except (TypeError, ValueError):
+        expires_in = 0
+    ttl = PAYPAL_TOKEN_CACHE_MAX_TTL
+    if expires_in:
+        ttl = max(60, min(expires_in - PAYPAL_TOKEN_CACHE_SAFETY, ttl))
+    try:
+        cache.set(cache_key, token, timeout=ttl)
+    except Exception:
+        logger.warning("Could not cache PayPal token (continuing without cache)")
+    return token
 
 
 def verify_signature(request) -> bool:
@@ -87,10 +147,7 @@ def verify_signature(request) -> bool:
     Any missing config, parse error, or transport failure returns False
     (fail-closed).
     """
-    if (
-        getattr(settings, "E2E_MODE", False)
-        and request.headers.get("X-E2E-Mock-Signature") == "1"
-    ):
+    if webhook_signature_bypassed(request):
         return True
 
     required_headers = (
@@ -135,32 +192,63 @@ def verify_signature(request) -> bool:
         "webhook_id": webhook_id,
         "webhook_event": webhook_event,
     }
-
     url = f"{_paypal_api_base()}/v1/notifications/verify-webhook-signature"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(verify_body).encode("utf-8"),
-        method="POST",
-    )
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
+    body = json.dumps(verify_body).encode("utf-8")
 
-    try:
+    def _do_verify(bearer: str):
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Authorization", f"Bearer {bearer}")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
         with urllib.request.urlopen(req, timeout=PAYPAL_HTTP_TIMEOUT) as resp:
             if resp.status != 200:
-                logger.warning(
-                    "PayPal verify-webhook-signature returned HTTP %s", resp.status
-                )
-                return False
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
-        logger.error("PayPal verify-webhook-signature call failed: %s", e)
+                logger.warning("PayPal verify-webhook-signature returned HTTP %s", resp.status)
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+
+    # MED-7 / LOW-3: a 401 means the (possibly cached) token is stale.
+    # Invalidate, force-refresh, and retry exactly once. This bounded
+    # retry-on-auth-failure is the proportionate circuit for a fail-closed
+    # webhook verify — a full circuit-breaker is deliberately out of scope.
+    # Any non-401 HTTP error, transport failure, or parse error fails
+    # closed (returns False) as before.
+    payload = None
+    for attempt in (1, 2):
+        try:
+            payload = _do_verify(token)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and attempt == 1:
+                logger.warning("PayPal verify got 401; refreshing token and retrying once")
+                invalidate_paypal_access_token()
+                token = _get_paypal_access_token(force_refresh=True)
+                if not token:
+                    return False
+                continue
+            logger.error("PayPal verify-webhook-signature HTTP error: %s", e.code)
+            return False
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+            logger.error("PayPal verify-webhook-signature call failed: %s", e)
+            return False
+
+    if not payload or payload.get("verification_status") != "SUCCESS":
         return False
 
-    return payload.get("verification_status") == "SUCCESS"
+    # Plan S2: the freshness check lives INSIDE the signature-verified
+    # path. paypal-transmission-time is part of PayPal's signature input,
+    # so its integrity is only established once the signature verifies —
+    # enforce the age window here, not as a separate pre-check. A
+    # @patch-mocked verify_signature (unit tests) or the E2E bypass
+    # (returned True above) therefore bypasses freshness together with the
+    # signature, which is correct: an unverified timestamp is meaningless.
+    return webhook_within_age_window(
+        request.headers.get("paypal-transmission-time"), source="paypal"
+    )
 
 
+# MED-4: signature verification is the real control; cap volume so a
+# leaked signing key can't flood forged-but-valid events. 100/min/source.
+@rate_limited_json(rate="100/m")
 @require_POST
 @csrf_exempt
 def paypal_webhook(request):
@@ -180,6 +268,12 @@ def paypal_webhook(request):
 
     if "id" not in request_body:
         return common.abort(400, "Missing id")
+
+    # Freshness on paypal-transmission-time is enforced INSIDE
+    # verify_signature (plan S2 — it is meaningful only once the signature
+    # is verified). The durable PaymentWebhookNotification (integration,
+    # event_id) store (plan S38) is the replay defence for late but valid
+    # first deliveries.
 
     event_id = request_body["id"]
     event_type = request_body.get("event_type")

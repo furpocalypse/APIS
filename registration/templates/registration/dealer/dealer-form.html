@@ -284,7 +284,7 @@
     var birthdate = new Date(Date.parse($("#birthDate").val()));
     var age = getAgeByEventStart(birthdate);
     if (age < 18) {
-      alert("You must be 18 by the first day of {{event.name}} to be a dealer.");
+      alert("You must be 18 by the first day of {{ event.name|escapejs }} to be a dealer.");
       return;
     }
 
@@ -327,7 +327,7 @@
         'breakfast': false, 'switch': $('#switch').is(':checked'),
         'asstbreakfast': false
       },
-      'event': '{{event}}'
+      'event': '{{ event|escapejs }}'
     };
     $.ajax({
       "type": "POST",
@@ -339,7 +339,7 @@
         $.ajaxSettings.beforeSend(xhr, settings);
       },
       "error": function (result, status, error) {
-        alert("An error has occurred. Please contact {{event.dealerEmail}} and we will correct the problem.")
+        alert("An error has occurred. Please contact {{ event.dealerEmail|escapejs }} and we will correct the problem.")
       },
       "success": function () {
         window.location = "{% url 'registration:thanks_dealer' %}";
