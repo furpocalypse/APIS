@@ -502,7 +502,6 @@
           {% if not event.allowOnlineMinorReg %}
               let age = getAgeByEventStart(birthdate);
               if (age < 18) {
-                  {# S33 HIGH-3: str(Event)=admin-set name in a JS string literal — escapejs (Django auto-escapes HTML, not JS). #}
                   alert("You must be 18 by the first day of {{ event|escapejs }} to register online.");
                   $("#register").one('click', register_click);
                   return;
