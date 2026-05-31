@@ -372,7 +372,7 @@
           var data = {
               'attendee': {'id': attendee.id,},
               'badge': {'id': badge.id,},
-              'event': '{{ event }}',
+              'event': '{{ event | escapejs }}',
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()}
           };
 
