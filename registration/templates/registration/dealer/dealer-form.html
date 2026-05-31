@@ -284,7 +284,6 @@
     var birthdate = new Date(Date.parse($("#birthDate").val()));
     var age = getAgeByEventStart(birthdate);
     if (age < 18) {
-      {# S33 HIGH-3: alert() string literals use |escapejs; structured payloads in this file use json_script — each is XSS-safe for its sink (Django auto-escapes HTML, not JS). #}
       alert("You must be 18 by the first day of {{ event.name|escapejs }} to be a dealer.");
       return;
     }
