@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.test.utils import override_settings
 
 from registration.models import Cashdrawer, Firebase, HoldType
+from registration.signing import mint_terminal_token
 from registration.tests.common import (
     DEFAULT_EVENT_ARGS,
     Attendee,
@@ -101,7 +102,6 @@ class OnsiteBaseTestCase(TestCase):
         rejected by the strict shape/salt check in ``resolve_terminal_token``.
         Mint via the exact production issuer ``mint_terminal_token`` so the
         test's issuer and the view's verifier stay paired."""
-        from registration.signing import mint_terminal_token
 
         self.client.cookies["terminal-token"] = mint_terminal_token(terminal)
 
