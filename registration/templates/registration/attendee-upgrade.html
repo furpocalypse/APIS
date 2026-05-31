@@ -159,7 +159,7 @@
   <script type="text/javascript">
       // JSON.parse from <script type="application/json"> blocks emitted by
       // Django's json_script filter. Using json_script (rather than the old
-      // |safe inside a JS string literal) prevents </script> in attendee-
+      // |safe inside a JS string literal) prevents /script in attendee-
       // controlled fields from breaking out of the script tag, and prevents
       // quote/control characters from breaking the JS string. OWASP A03.
       var attendee = JSON.parse(document.getElementById("attendee-data").textContent);
