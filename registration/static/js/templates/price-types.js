@@ -102,10 +102,8 @@ const generateOptions = function (levelId) {
     const container = $("<div id='optionsContainer' class='col-xs-6 col-sm-6 col-md-6 col-lg-8'><h4>Level Options</h4><hr/><div class='form-group'><div class='col-sm-12'>" + description + "</div></div></div>");
     $("#levelContainer").append(container);
     $.each(data, function (key, val) {
-        let price;
-        if (val.value == "0.00") {
-            price = " (Free) ";
-        } else {
+        let price = '';
+        if (val.value !== "0.00") {
             price = " (+$" + val.value + ") ";
         }
         let required = "";
@@ -126,7 +124,8 @@ const generateOptions = function (levelId) {
                 }
                 $("#optionsContainer").loadTemplate(template, {
                     'name': val.name + " " + price,
-                    'id': "option_" + val.id
+                    'id': "option_" + val.id,
+                    'description': val.description
                 }, {append: true});
                 break;
             case "int":
@@ -136,7 +135,8 @@ const generateOptions = function (levelId) {
                 }
                 $("#optionsContainer").loadTemplate(template, {
                     'name': val.name + " " + price,
-                    'id': "option_" + val.id
+                    'id': "option_" + val.id,
+                    'description': val.description
                 }, {append: true});
                 break;
             case "string":
@@ -149,6 +149,7 @@ const generateOptions = function (levelId) {
                     'name': val.name + " " + price,
                     'id': "option_" + val.id,
                     'placeholder': placeholder,
+                    'description': val.description
                 }, {append: true});
                 break;
             default:
@@ -165,7 +166,8 @@ const generateOptions = function (levelId) {
                 $("#optionsContainer").loadTemplate($("#optionListTemplate"), {
                     'name': val.name + " " + price,
                     'id': "option_" + val.id,
-                    'options': options
+                    'options': options,
+                    'description': val.description
                 }, {append: true});
                 break;
         }

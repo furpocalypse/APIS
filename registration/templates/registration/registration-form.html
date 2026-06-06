@@ -128,6 +128,7 @@
       <label class="col-sm-3 control-label" data-content="name"></label>
       <div class="col-sm-9">
         <input type="checkbox" data-id="id" class="form-control form-control-text levelOptions"/>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
   </script>
@@ -136,6 +137,7 @@
       <label class="col-sm-3 control-label" data-content="name"></label>
       <div class="col-sm-9">
         <input type="checkbox" data-id="id" class="form-control form-control-text levelOptions" required/>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
   </script>
@@ -144,6 +146,7 @@
       <label class="col-sm-3 control-label" data-content="name"></label>
       <div class="col-sm-9">
         <input type="number" data-id="id" class="form-control form-control-text levelOptions" min=0/>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
 
@@ -153,6 +156,7 @@
       <label class="col-sm-3 control-label" data-content="name"></label>
       <div class="col-sm-9">
         <input type="number" data-id="id" class="form-control form-control-text levelOptions" required min=0/>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
 
@@ -163,6 +167,7 @@
       <div class="col-sm-9">
         <input type="text" data-id="id" max-length=15 class="form-control form-control-text levelOptions"
                data-template-bind='{"attribute": "placeholder", "value": "placeholder"}'/>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
   </script>
@@ -172,6 +177,7 @@
       <div class="col-sm-9">
         <input type="text" data-id="id" max-length=15 class="form-control form-control-text levelOptions" required
                data-template-bind='{"attribute": "placeholder", "value": "placeholder"}'/>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
   </script>
@@ -181,6 +187,7 @@
       <div class="col-sm-9">
         <select data-id="id" class="form-control form-control-select levelOptions"
                 data-template-bind='{"attribute": "options", "value": {"data": "options", "value":"value", "content":"content"}}'></select>
+        <span id="helpBlock" class="help-block" data-content="description"></span>
       </div>
     </div>
   </script>
@@ -366,10 +373,9 @@
           var container = $("<div id='optionsContainer' class='col-xs-12 col-sm-6 col-md-8 col-lg-8'><h4>Level Options</h4><hr/><div class='form-group'><div class='col-sm-12'>" + description + "</div></div></div>");
           $("#levelContainer").append(container);
           $.each(data, function (key, val) {
-              if (val.value == "0.00") {
-                  var price = " (Free) ";
-              } else {
-                  var price = " (+$" + val.value + ") "
+            var price = '';
+              if (val.value !== "0.00") {
+                  price = " (+$" + val.value + ") "
               }
               if (val.image == null) {
                   var image = ""
@@ -396,7 +402,8 @@
                           }
                           $("#optionsContainer").loadTemplate(template, {
                               'name': val.name + " " + price + image,
-                              'id': "option_" + val.id
+                              'id': "option_" + val.id,
+                              'description': val.description
                           }, {append: true});
                           if (val.value == "0.00") {
                               $("#option_" + val.id).prop('checked', true);
@@ -409,7 +416,8 @@
                           }
                           $("#optionsContainer").loadTemplate(template, {
                               'name': val.name + " " + price + image,
-                              'id': "option_" + val.id
+                              'id': "option_" + val.id,
+                              'description': val.description
                           }, {append: true});
                           break;
                       case "string":
@@ -422,6 +430,7 @@
                               'name': val.name + " " + price + image,
                               'id': "option_" + val.id,
                               'placeholder': placeholder,
+                              'description': val.description
                           }, {append: true});
                           break;
                       case "Jersey":
@@ -442,7 +451,8 @@
                           $("#optionsContainer").loadTemplate($("#optionListTemplate"), {
                               'name': val.name + " " + price + image,
                               'id': "option_" + val.id,
-                              'options': options
+                              'options': options,
+                              'description': val.description
                           }, {append: true});
                           break;
                   }

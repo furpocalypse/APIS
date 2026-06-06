@@ -82,8 +82,7 @@
               <input type="checkbox" id="agreeToRules" name="agreeToRules" class="form-control-checkbox" required
                       data-error="You must agree to the event code of conduct to register.">
               I agree to abide by the {{ event.name }} <a href="{{ event.codeOfConduct }}" target="_blank">Code of
-              Conduct</a>. By registering for {{ event }} you attest that you are not listed on any sexual offender
-              registry.
+              Conduct</a>.
             </label>
           </div>
           <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
@@ -373,10 +372,8 @@
               if (!val.active) {
                   return true;
               }
-              let price;
-              if (val.value == "0.00") {
-                  price = " (Free) ";
-              } else {
+              let price = '';
+              if (val.value !== "0.00") {
                   price = " (+$" + val.value + ") "
               }
               let required = "";
@@ -391,7 +388,8 @@
                       }
                       $("#optionsContainer").loadTemplate(optionBoolTemplate, {
                           'name': val.name + " " + price,
-                          'id': "option_" + val.id
+                          'id': "option_" + val.id,
+                          'description': val.description
                       }, {append: true});
                       break;
                   case "int":
@@ -401,7 +399,8 @@
                       }
                       $("#optionsContainer").loadTemplate(optionIntTemplate, {
                           'name': val.name + " " + price,
-                          'id': "option_" + val.id
+                          'id': "option_" + val.id,
+                          'description': val.description
                       }, {append: true});
                       break;
                   case "string":
@@ -414,6 +413,7 @@
                           'name': val.name + " " + price,
                           'id': "option_" + val.id,
                           'placeholder': placeholder,
+                          'description': val.description
                       }, {append: true});
                       break;
                   case "Jersey":
@@ -434,7 +434,8 @@
                       $("#optionsContainer").loadTemplate($("#optionListTemplate"), {
                           'name': val.name + " " + price,
                           'id': "option_" + val.id,
-                          'options': options
+                          'options': options,
+                          'description': val.description
                       }, {append: true});
                       break;
               }
