@@ -20,7 +20,7 @@ dependencies = [
     "django-mathfilters~=1.0.0",
     "django-nested-admin>=4.1.1",
     "django-nested-inline~=0.4.6",
-    "django-prometheus~=2.4.1",
+    "django-prometheus~=2.5.0",
     "django-ratelimit~=4.1",
     "django-redis~=6.0.0",
     "django-vite>=3.1.0",
@@ -51,18 +51,6 @@ dependencies = [
     # at collectstatic time so gunicorn doesn't compress per-request.
     "whitenoise[brotli]>=6.7.0",
 ]
-
-[tool.uv.sources]
-# django-prometheus 2.4.x requires Django<6.0; this project uses Django 6.0.x.
-# We are tracking the django-commons branch that supports Django 6 (currently
-# tagged 2.5.0.dev0 in setup.py). The pin is by full Git SHA, which uv resolves
-# via content-addressed lookup, so a force-push to upstream cannot substitute
-# different code under the same rev.
-#
-# REVISIT when django-prometheus 2.5.0 (or whatever the first Django-6
-# release is named) lands on PyPI. At that point switch to a tilde-pin in
-# [project] and remove this entry per OWASP A08 / CLAUDE.md §6.
-django-prometheus = { git = "https://github.com/django-commons/django-prometheus", rev = "ea2d559476675a688f82cc37fac22b796ec7bcba" }
 
 [dependency-groups]
 dev = [
