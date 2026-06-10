@@ -255,14 +255,14 @@ INSTALLED_APPS = [
     "allauth.mfa",
     "registration",
     "nested_inline",
-    "django_prometheus",
+    # "django_prometheus",
     "django_vite",
     "csp",
     "axes",  # P1.10: brute-force protection on auth endpoints
 ]
 
 MIDDLEWARE = [
-    "django_prometheus.middleware.PrometheusBeforeMiddleware",
+    # "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     # WhiteNoise serves /static/ from gunicorn. Position is documented:
     # right after SecurityMiddleware so security headers apply to static
@@ -374,13 +374,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 # https://docs.djangoproject.com/en/5.2/topics/cache/
 
 CACHES = {
+    # "default": {
+    #     "BACKEND": "django_redis.cache.RedisCache",
+    #     "LOCATION": os.getenv("DJANGO_REDIS_URL", "redis://redis:6379/1"),
+    #     "OPTIONS": {
+    #         "CLIENT_CLASS": "django_redis.client.DefaultClient",
+    #     },
+    #     "KEY_PREFIX": os.getenv("DJANGO_REDIS_KEY_PREFIX", "apis"),
+    # }
     "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": os.getenv("DJANGO_REDIS_URL", "redis://redis:6379/1"),
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
-        "KEY_PREFIX": os.getenv("DJANGO_REDIS_KEY_PREFIX", "apis"),
+        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
     }
 }
 
@@ -684,8 +687,7 @@ WHITENOISE_MANIFEST_STRICT = False
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"  # Strict would break PayPal/Square post-payment redirects.
-CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = False
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
