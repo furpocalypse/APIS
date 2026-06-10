@@ -58,9 +58,7 @@ if (window.paypal) {
                             country: $("#country").val(),
                             postal: $("#postal").val(),
                             source_id: data.orderID,
-                        },
-                        charityDonation: $("#donateCharity").val(),
-                        orgDonation: $("#donateOrg").val()
+                        }
                     })
                 );
 

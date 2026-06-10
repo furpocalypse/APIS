@@ -26,7 +26,7 @@
         </tr>
         {% for item in orderItems %}
           <tr class="active">
-            {% if item.attendee %}
+          {% if item.attendee %}
             <td>{% attendee_get_first item.attendee %} {{ item.attendee.lastName }}</td>
             <td>{{ item.priceLevel }}</td>
             <td>${{ item.priceLevel.basePrice }} <a class="deleteAttendee" id="delete_{{ item.id }}">&times; Remove</a></td>
@@ -131,44 +131,6 @@
         {% endif %}
         <div class="container" style="width: inherit">
           <form class="form-horizontal" role="form" data-toggle="validator">
-
-            <h3>Extra Donations</h3>
-            <div class="col-sm-11 col-sm-offset-1" style="padding-left:0px;padding-bottom:10px;">
-              {% if event.charity %}
-                If you would like to make an extra gift to our annual charity,
-                {% if event.charity.url %}<a href="{{ event.charity.url }}">{{ event.charity }}</a>{% else %}
-                  {{ event.charity }}{% endif %}, or to the convention, please enter it below.
-              {% else %}
-                If you would like to make an extra gift to the convention, please enter it below.
-              {% endif %}
-            </div>
-            {% if event.charity %}
-              <div class="form-group">
-                <label for="donateCharity" class="col-sm-3 control-label">Donate to {{ event.charity }}</label>
-                <div class="col-sm-4">
-                  <div class="input-group">
-                    <div class="input-group-addon">$</div>
-                    <input type="number" min="0" step="1" pattern="^\d+(?:\.\d{0,2})?$" placeholder="0.00"
-                           id="donateCharity" class="form-control validate"
-                           data-error="Please use only numbers and a decimal."/>
-                  </div>
-                </div>
-                <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
-              </div>
-            {% endif %}
-
-            <div class="form-group">
-              <label for="donateOrg" class="col-sm-3 control-label">Donate to {{ event }}</label>
-              <div class="col-sm-4">
-                <div class="input-group">
-                  <div class="input-group-addon">$</div>
-                  <input type="number" min="0" step="1" pattern="^\d+(?:\.\d{0,2})?$" placeholder="0.00" id="donateOrg"
-                         class="form-control validate" data-error="Please use only numbers and a decimal."/>
-                </div>
-              </div>
-              <div class="col-sm-offset-3 help-block with-errors" style=" padding-left:15px;"></div>
-            </div>
-            <hr/>
 
             {% if event.collectBillingAddress %}
               <h3>Billing Information</h3>
