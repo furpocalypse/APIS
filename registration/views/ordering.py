@@ -354,20 +354,20 @@ def get_discount_total(disc: str | Discount, subtotal: Decimal) -> Decimal:
     try:
         discount = Discount.objects.get(codeName=disc)
     except (Discount.DoesNotExist, ValueError, TypeError):
-        return 0
+        return Decimal(0)
     if discount.isValid():
         if discount.amountOff:
             return discount.amountOff
         elif discount.percentOff:
             return Decimal(subtotal * (discount.percentOff) / 100)
-    return 0
+    return Decimal(0)
 
 
 def get_line_item_total(
     item: Cart | OrderItem, disc: str | None = ""
 ) -> tuple[Decimal | int, Decimal | int]:
-    item_total: Decimal | int = 0
-    discount: Decimal | int = 0
+    item_total = Decimal(0)
+    discount = Decimal(0)
     if isinstance(item, Cart):
         post_data = json.loads(item.formData)
         pdp = post_data["priceLevel"]
