@@ -206,7 +206,7 @@ class TestCreateUnpaidPaypalOrder(OrdersTestCase):
         call_args = mock_create.call_args[0][0]
         breakdown = call_args["body"].purchase_units[0].amount.breakdown
         self.assertEqual("5", breakdown.discount.value)
-        self.assertEqual("40", breakdown.item_total.value)
+        self.assertEqual("45", breakdown.item_total.value)
 
     @patch("paypalserversdk.controllers.orders_controller.OrdersController.create_order")
     def test_A1_4_donation_items_split_into_own_purchase_unit(self, mock_create):
@@ -364,7 +364,7 @@ class TestCreateUnpaidPaypalOrderDonationSplit(OrdersTestCase):
 
         # Registration unit bears the discount: 50.00 - 5 = 45.00.
         self.assertEqual("45.00", reg_pu.amount.value)
-        self.assertEqual("45.00", reg_pu.amount.breakdown.item_total.value)
+        self.assertEqual("50.00", reg_pu.amount.breakdown.item_total.value)
         self.assertEqual("5", reg_pu.amount.breakdown.discount.value)
         self.assertEqual("REF-MIXED", reg_pu.invoice_id)
         self.assertEqual("REF-MIXED", reg_pu.custom_id)

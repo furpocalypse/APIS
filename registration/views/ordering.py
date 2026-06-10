@@ -341,7 +341,7 @@ def get_order_item_option_total(options):
     return optionTotal
 
 
-def get_discount_total(disc, subtotal):
+def get_discount_total(disc: str | Discount, subtotal: Decimal) -> Decimal:
     """Accept either a ``Discount`` model instance or a string code name.
 
     Callers in ``cart.py``/``onsite.py``/``onsite_admin.py`` hand in already-
@@ -354,20 +354,20 @@ def get_discount_total(disc, subtotal):
     try:
         discount = Discount.objects.get(codeName=disc)
     except (Discount.DoesNotExist, ValueError, TypeError):
-        return 0
+        return Decimal(0)
     if discount.isValid():
         if discount.amountOff:
             return discount.amountOff
         elif discount.percentOff:
-            return Decimal(float(subtotal) * float(discount.percentOff) / 100)
-    return 0
+            return Decimal(subtotal * (discount.percentOff) / 100)
+    return Decimal(0)
 
 
 def get_line_item_total(
     item: Cart | OrderItem, disc: str | None = ""
 ) -> tuple[Decimal | int, Decimal | int]:
-    item_total: Decimal | int = 0
-    discount: Decimal | int = 0
+    item_total = Decimal(0)
+    discount = Decimal(0)
     if isinstance(item, Cart):
         post_data = json.loads(item.formData)
         pdp = post_data["priceLevel"]
@@ -525,7 +525,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         badge = cast(Badge, order_item.badge)
         translated_cart.append(
             {
-                "name": str(event) + " " + str(order_item.priceLevel) + " - " + str(badge.attendee),
+                "name": f"{event} {order_item.priceLevel} - {badge.attendee}",
                 "total": cast(Decimal, item_total),
                 "donation": False,
             }
@@ -555,7 +555,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
             }
         )
 
-    total = subtotal + porg + pcharity
+    total = subtotal + total_discount + porg + pcharity
 
     # We only want to set up to capture payment if there is payment due
     if total > 0:
