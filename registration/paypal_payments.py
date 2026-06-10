@@ -155,9 +155,9 @@ def create_unpaid_paypal_order(
                 breakdown=AmountBreakdown(
                     item_total=Money(
                         currency_code="USD",
-                        value=str(registration_amount),
+                        value=str(registration_total),
                     ),
-                    discount=Money(currency_code="USD", value=str(discount)),
+                    discount=Money(currency_code="USD", value=str(discount_decimal)),
                 ),
             ),
             "items": registrations,
