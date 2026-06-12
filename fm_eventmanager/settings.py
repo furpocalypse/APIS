@@ -379,21 +379,17 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 # Cache
 # https://docs.djangoproject.com/en/5.2/topics/cache/
 
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
-    }
-}
 if redis_url:
-    CACHES["default"] = {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": redis_url,
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
-        "KEY_PREFIX": os.getenv("DJANGO_REDIS_KEY_PREFIX", "apis"),
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": redis_url,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+            "KEY_PREFIX": os.getenv("DJANGO_REDIS_KEY_PREFIX", "apis"),
+        }
     }
-
 
 # Celery
 if celery_url:
