@@ -7,7 +7,6 @@ $(document).ready(function (e) {
 
         if ($('#byear').val().length > 0 && $('#bmonth').val().length > 0) {
             $('#bday').prop('disabled', false);
-            $('#bday').find('option').remove();
 
             const daysInSelectedMonth = daysInMonth($('#bmonth').val(), $('#byear').val());
 
