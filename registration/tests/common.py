@@ -182,8 +182,11 @@ class CapacityTestMixin:
         )
 
 
-class OrdersTestCase(TestCase):
-    def setUp(self):
+class PriceLevelFixturesMixin:
+    """A Mixin to conveniently add pricelevel fixture data to a test case."""
+
+    def add_pricelevel_fixtures(self):
+        """Commit fixtures to the database."""
         self.price_free = PriceLevel(
             name="Free",
             description="I am Free!!",
@@ -271,6 +274,7 @@ class OrdersTestCase(TestCase):
             emailVIPEmails="apis@mailinator.com",
             available_to_attendee=True,
         )
+
         self.price_free.save()
         self.price_minor_25.save()
         self.price_accompanied_0.save()
@@ -281,11 +285,23 @@ class OrdersTestCase(TestCase):
         self.price_235.save()
         self.price_675.save()
 
+
+class DepartmentFixturesMixin:
+    """A Mixin to conveniently add department fixture data to a test case."""
+
+    def add_department_fixtures(self):
+        """Commit fixtures to the database."""
         self.department1 = Department(name="BestDept")
         self.department2 = Department(name="WorstDept")
         self.department1.save()
         self.department2.save()
 
+
+class DiscountFixturesMixin:
+    """A Mixin to conveniently add discount fixture data to a test case."""
+
+    def add_discount_fixtures(self):
+        """Commit fixtures to the database."""
         self.discount = Discount(
             codeName="FiveOff", amountOff=5.00, startDate=now, endDate=now + ten_days
         )
@@ -308,10 +324,34 @@ class OrdersTestCase(TestCase):
             startDate=now,
             endDate=now + ten_days,
         )
+
         self.discount.save()
         self.onetimediscount.save()
         self.staffdiscount.save()
         self.dealerdiscount.save()
+
+
+class EventFixtureMixin(DiscountFixturesMixin):
+    """A Mixin to conveniently add event fixture data to a test case."""
+
+    def add_event_fixtures(self):
+        """Commit fixtures to the database.
+
+        Will also call `add_discount_fixtures()`.
+        """
+        self.add_discount_fixtures()
+
+        self.event = Event(**DEFAULT_EVENT_ARGS)
+        self.event.staffDiscount = self.staffdiscount
+        self.event.dealerDiscount = self.dealerdiscount
+        self.event.save()
+
+
+class OrdersTestCase(TestCase, PriceLevelFixturesMixin, DepartmentFixturesMixin, EventFixtureMixin):
+    def setUp(self):
+        self.add_pricelevel_fixtures()
+        self.add_department_fixtures()
+        self.add_event_fixtures()
 
         self.shirt1 = ShirtSizes(name="Test_Large")
         self.shirt1.save()
@@ -336,11 +376,6 @@ class OrdersTestCase(TestCase):
         self.price_150.priceLevelOptions.add(self.option_conbook)
         self.price_150.priceLevelOptions.add(self.option_100_int)
         self.price_150.priceLevelOptions.add(self.option_shirt)
-
-        self.event = Event(**DEFAULT_EVENT_ARGS)
-        self.event.staffDiscount = self.staffdiscount
-        self.event.dealerDiscount = self.dealerdiscount
-        self.event.save()
 
         self.table_130 = TableSize(
             name="Booth",

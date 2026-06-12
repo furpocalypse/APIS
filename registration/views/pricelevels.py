@@ -55,7 +55,7 @@ def get_price_levels(request):
             dob = date(int(data.get("year")), int(data.get("month")), int(data.get("day")))
             form_type = data.get("form_type")
         except Exception:
-            response = {"status": "error", "message": "Invalid birthdate or form_type"}
+            response = {"status": "error", "message": "Invalid birthdate, form_type, or badge_id"}
             return JsonResponse(response, status=400)
 
         age_at_event = (

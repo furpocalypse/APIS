@@ -40,7 +40,11 @@
                 href="mailto:{{ badge.event.registrationEmail }}">{{ badge.event.registrationEmail }}</a>.
           </div>
 
+          <hr/>
+
           <div class="row" id="levelContainer"></div>
+
+          <hr/>
 
           <div class="form-group">
             <div class="col-sm-12">
@@ -177,7 +181,11 @@
 
       $(document).ready(function () {
           $("body").ready(function () {
-              $.getJSON("{% url 'registration:pricelevels' %}", function (data) {
+              const [year, month, day] = attendee.birthdate.split('-');
+              $.post("{% url 'registration:pricelevels' %}", JSON.stringify({
+                badge_id: badge.id,
+                form_type: FORM_TYPE,
+              }), function (data) {
                   levelData = data;
                   var prevLevel = 50;
                   if (currentLevel && currentLevel.hasOwnProperty("basePrice")) {
