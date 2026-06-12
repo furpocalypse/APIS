@@ -6,7 +6,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from registration.models import Badge, Event, PriceLevel
+from registration.models import Event, PriceLevel
 
 
 def format_price_level_list(levels):
@@ -51,17 +51,8 @@ def get_price_levels(request):
             response = {"status": "error", "message": "Invalid JSON data"}
             return JsonResponse(response, status=400)
 
-        origLevel = None
-        dob = None
         try:
-            if data.get("badge_id"):
-                badge = Badge.objects.get(id=data.get("badge_id"))
-                if badge and badge.attendee:
-                    origLevel = badge.effectiveLevel()
-                    dob = badge.attendee.birthdate
-
-            if not dob:
-                dob = date(int(data.get("year")), int(data.get("month")), int(data.get("day")))
+            dob = date(int(data.get("year")), int(data.get("month")), int(data.get("day")))
             form_type = data.get("form_type")
         except Exception:
             response = {"status": "error", "message": "Invalid birthdate, form_type, or badge_id"}
@@ -93,9 +84,6 @@ def get_price_levels(request):
             case _:
                 # probably tighten this up at some point
                 available_levels = age_appropriate_levels.filter(available_to_attendee=True)
-
-        if isinstance(origLevel, PriceLevel):
-            available_levels = available_levels.filter(Q(basePrice__gt=origLevel.basePrice))
 
         data = format_price_level_list(available_levels)
 

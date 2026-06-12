@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 from typing import Any
 
-from django.test import TestCase
+from django.test import TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -18,7 +18,7 @@ eighteen_years = timedelta(days=365 * 18)
 twenty_years = timedelta(days=365 * 20)
 
 
-class TestOrderingModule(TestCase, EventFixtureMixin, PriceLevelFixturesMixin):
+class TestOrderingModule(TransactionTestCase, EventFixtureMixin, PriceLevelFixturesMixin):
     def setUp(self):
         super().setUp()
 
@@ -136,7 +136,7 @@ class TestOrderingModule(TestCase, EventFixtureMixin, PriceLevelFixturesMixin):
                 "day": self.adult.birthdate.day,
             }
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.text)
         pricelevels = response.json()
         self.assertEqual(len(pricelevels), 3)
         self.assertEqual(pricelevels[0]["id"], self.price_45.id)
@@ -151,27 +151,8 @@ class TestOrderingModule(TestCase, EventFixtureMixin, PriceLevelFixturesMixin):
                 "day": self.minor.birthdate.day,
             }
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.text)
         pricelevels = response.json()
         self.assertEqual(len(pricelevels), 2)
         self.assertEqual(pricelevels[0]["id"], self.price_minor_25.id)
         self.assertEqual(pricelevels[1]["id"], self.price_minor_35.id)
-
-    def test_get_all_adult_pricelevels_by_badge(self):
-        response = self.send_post_request({"badge_id": self.adult.id})
-        self.assertEqual(response.status_code, 200)
-        pricelevels = response.json()
-        self.assertEqual(len(pricelevels), 2)
-        self.assertEqual(pricelevels[0]["id"], self.price_90.id)
-        self.assertEqual(pricelevels[1]["id"], self.price_235.id)
-
-    def test_get_all_minor_pricelevels_by_badge(self):
-        response = self.send_post_request(
-            {
-                "badge_id": self.minor.id,
-            }
-        )
-        self.assertEqual(response.status_code, 200)
-        pricelevels = response.json()
-        self.assertEqual(len(pricelevels), 1)
-        self.assertEqual(pricelevels[0]["id"], self.price_minor_35.id)
