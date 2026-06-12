@@ -25,6 +25,12 @@ def eval_bool(x):
     return x.lower() in ("true", "1", "t", "y", "yes")
 
 
+# Production uses redis for various things - use these values to help
+# selectively enable features that normally rely on redis.
+redis_url = os.getenv("DJANGO_REDIS_URL")
+celery_url = os.getenv("CELERY_BROKER_URL")
+idem_key_lock_location = os.getenv("IDEMPOTENCY_KEY_LOCK_LOCATION")
+
 SENTRY_ENABLED = eval_bool(os.environ.get("SENTRY_ENABLED", ""))
 if SENTRY_ENABLED:
     import sentry_sdk
@@ -373,31 +379,32 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 # Cache
 # https://docs.djangoproject.com/en/5.2/topics/cache/
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": os.getenv("DJANGO_REDIS_URL", "redis://redis:6379/1"),
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
-        "KEY_PREFIX": os.getenv("DJANGO_REDIS_KEY_PREFIX", "apis"),
+if redis_url:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": redis_url,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+            "KEY_PREFIX": os.getenv("DJANGO_REDIS_KEY_PREFIX", "apis"),
+        }
     }
-}
-
 
 # Celery
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/2")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
-CELERY_TASK_SERIALIZER = "json"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True"))
-CELERY_TASK_SEND_SENT_EVENT = eval_bool(os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True"))
-# Decision #11: tests run Celery eagerly so .delay() side effects resolve
-# before the HTTP response. Prod uses the real broker (default False). The
-# test/CI/e2e .env.* set CELERY_TASK_ALWAYS_EAGER=true.
-CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "False"))
-CELERY_TASK_EAGER_PROPAGATES = eval_bool(os.getenv("CELERY_TASK_EAGER_PROPAGATES", "False"))
+if celery_url:
+    CELERY_BROKER_URL = celery_url
+    CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", celery_url)
+    CELERY_TASK_SERIALIZER = "json"
+    CELERY_ACCEPT_CONTENT = ["json"]
+    CELERY_RESULT_SERIALIZER = "json"
+    CELERY_WORKER_SEND_TASK_EVENTS = eval_bool(os.getenv("CELERY_WORKER_SEND_TASK_EVENTS", "True"))
+    CELERY_TASK_SEND_SENT_EVENT = eval_bool(os.getenv("CELERY_TASK_SEND_SENT_EVENT", "True"))
+    # Decision #11: tests run Celery eagerly so .delay() side effects resolve
+    # before the HTTP response. Prod uses the real broker (default False). The
+    # test/CI/e2e .env.* set CELERY_TASK_ALWAYS_EAGER=true.
+    CELERY_TASK_ALWAYS_EAGER = eval_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER", "False"))
+    CELERY_TASK_EAGER_PROPAGATES = eval_bool(os.getenv("CELERY_TASK_EAGER_PROPAGATES", "False"))
 
 
 # Prometheus metrics
@@ -548,62 +555,63 @@ ALLAUTH_TRUSTED_CLIENT_IP_HEADER = os.getenv("TRUSTED_CLIENT_IP_HEADER", "X-Real
 
 LOGIN_REDIRECT_URL = "admin:index"
 
-IDEMPOTENCY_KEY = {
-    # Specify the key encoder class to be used for idempotency keys.
-    # If not specified then defaults to 'idempotency_key.encoders.BasicKeyEncoder'
-    "ENCODER_CLASS": "idempotency_key.encoders.BasicKeyEncoder",
-    # Set the response code on a conflict.
-    # If not specified this defaults to HTTP_409_CONFLICT
-    # If set to None then the original request's status code is used.
-    "CONFLICT_STATUS_CODE": status.HTTP_409_CONFLICT,
-    # Allows the idempotency key header sent from the client to be changed
-    "HEADER": "HTTP_IDEMPOTENCY_KEY",
-    "STORAGE": {
-        # Specify the storage class to be used for idempotency keys
-        # If not specified then defaults to 'idempotency_key.storage.MemoryKeyStorage'
-        "CLASS": "idempotency_key.storage.CacheKeyStorage",
-        # Name of the django cache configuration to use for the CacheStorageKey storage
-        # class.
-        # This can be overriden using the @idempotency_key(cache_name='MyCacheName')
-        # view/viewset function decorator.
-        "CACHE_NAME": "default",
-        # When the response is to be stored you have the option of deciding when this
-        # happens based on the responses status code. If the response status code
-        # matches one of the statuses below then it will be stored.
-        # The statuses below are the defaults used if this setting is not specified.
-        "STORE_ON_STATUSES": [
-            status.HTTP_200_OK,
-            status.HTTP_201_CREATED,
-            status.HTTP_202_ACCEPTED,
-            status.HTTP_203_NON_AUTHORITATIVE_INFORMATION,
-            status.HTTP_204_NO_CONTENT,
-            status.HTTP_205_RESET_CONTENT,
-            status.HTTP_206_PARTIAL_CONTENT,
-            status.HTTP_207_MULTI_STATUS,
-        ],
-    },
-    # Process/thread lock placed around the cache storage object so two
-    # threads don't call the same view/viewset method concurrently.
-    "LOCK": {
-        # Key object locking class for cache-storage access. Defaults to
-        # 'idempotency_key.locks.basic.ThreadLock' when unspecified.
-        "CLASS": "idempotency_key.locks.redis.MultiProcessRedisLock",
-        # Redis server location (only used by MultiProcessRedisLock);
-        # "host" or "host:port".
-        "LOCATION": os.getenv("IDEMPOTENCY_KEY_LOCK_LOCATION", "redis://redis:6379"),
-        # Unique cross-process lock name (MultiProcessRedisLock only).
-        "NAME": os.getenv("IDEMPOTENCY_KEY_LOCK_NAME", "APISLock"),
-        # Lock TTL in seconds; None = hold until manually released (a
-        # never-released lock is force-released after this timeout).
-        "TTL": None,
-        # Serialize storage-object access (one thread at a time). WARNING:
-        # False may allow duplicate calls under adverse timing.
-        "ENABLE": True,
-        # Seconds (float) a thread waits for the lock before giving up; on
-        # timeout the middleware returns HTTP_423_LOCKED.
-        "TIMEOUT": 0.1,
-    },
-}
+if idem_key_lock_location:
+    IDEMPOTENCY_KEY = {
+        # Specify the key encoder class to be used for idempotency keys.
+        # If not specified then defaults to 'idempotency_key.encoders.BasicKeyEncoder'
+        "ENCODER_CLASS": "idempotency_key.encoders.BasicKeyEncoder",
+        # Set the response code on a conflict.
+        # If not specified this defaults to HTTP_409_CONFLICT
+        # If set to None then the original request's status code is used.
+        "CONFLICT_STATUS_CODE": status.HTTP_409_CONFLICT,
+        # Allows the idempotency key header sent from the client to be changed
+        "HEADER": "HTTP_IDEMPOTENCY_KEY",
+        "STORAGE": {
+            # Specify the storage class to be used for idempotency keys
+            # If not specified then defaults to 'idempotency_key.storage.MemoryKeyStorage'
+            "CLASS": "idempotency_key.storage.CacheKeyStorage",
+            # Name of the django cache configuration to use for the CacheStorageKey storage
+            # class.
+            # This can be overriden using the @idempotency_key(cache_name='MyCacheName')
+            # view/viewset function decorator.
+            "CACHE_NAME": "default",
+            # When the response is to be stored you have the option of deciding when this
+            # happens based on the responses status code. If the response status code
+            # matches one of the statuses below then it will be stored.
+            # The statuses below are the defaults used if this setting is not specified.
+            "STORE_ON_STATUSES": [
+                status.HTTP_200_OK,
+                status.HTTP_201_CREATED,
+                status.HTTP_202_ACCEPTED,
+                status.HTTP_203_NON_AUTHORITATIVE_INFORMATION,
+                status.HTTP_204_NO_CONTENT,
+                status.HTTP_205_RESET_CONTENT,
+                status.HTTP_206_PARTIAL_CONTENT,
+                status.HTTP_207_MULTI_STATUS,
+            ],
+        },
+        # Process/thread lock placed around the cache storage object so two
+        # threads don't call the same view/viewset method concurrently.
+        "LOCK": {
+            # Key object locking class for cache-storage access. Defaults to
+            # 'idempotency_key.locks.basic.ThreadLock' when unspecified.
+            "CLASS": "idempotency_key.locks.redis.MultiProcessRedisLock",
+            # Redis server location (only used by MultiProcessRedisLock);
+            # "host" or "host:port".
+            "LOCATION": idem_key_lock_location,
+            # Unique cross-process lock name (MultiProcessRedisLock only).
+            "NAME": os.getenv("IDEMPOTENCY_KEY_LOCK_NAME", "APISLock"),
+            # Lock TTL in seconds; None = hold until manually released (a
+            # never-released lock is force-released after this timeout).
+            "TTL": None,
+            # Serialize storage-object access (one thread at a time). WARNING:
+            # False may allow duplicate calls under adverse timing.
+            "ENABLE": True,
+            # Seconds (float) a thread waits for the lock before giving up; on
+            # timeout the middleware returns HTTP_423_LOCKED.
+            "TIMEOUT": 0.1,
+        },
+    }
 
 # django-maintenance-mode state.
 #
@@ -775,10 +783,6 @@ SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 
 # Default email to display as part of error messages
 APIS_DEFAULT_EMAIL = os.getenv("APIS_DEFAULT_EMAIL", "registration@example.com")
-
-# Sandbox values - DEPRECATED
-AUTHNET_NAME = ""
-AUTHNET_TRANSACTIONKEY = ""
 
 # Sandbox values = DO NOT check in production ids
 SQUARE_APPLICATION_ID = os.environ.get("SQUARE_APPLICATION_ID")
