@@ -36,6 +36,20 @@ case "$TRUSTED_PROXY_MODE" in
             exit 2
         fi
 
+        # Proxy mode serves PLAIN HTTP on :80 only — server.proxy.conf.template
+        # has no 443/TLS listener. Mounted certs are a strong signal the
+        # operator expected TLS termination here (e.g. Cloudflare
+        # Full/Full-Strict dials origin :443, and every request — webhooks
+        # included — then dies with a 52x). Warn loudly instead of silently
+        # ignoring the certs.
+        if [ -r /app/certs/fullchain.pem ] || [ -r /app/certs/privkey.pem ]; then
+            echo "WARNING: TRUSTED_PROXY_MODE=proxy has NO 443/TLS listener but" >&2
+            echo "         certificates are mounted at /app/certs. Nothing will" >&2
+            echo "         answer on container port 443. If your edge (e.g." >&2
+            echo "         Cloudflare Full/Full-Strict) connects to origin :443," >&2
+            echo "         use TRUSTED_PROXY_MODE=cloudflare instead." >&2
+        fi
+
         CLIENT_IP_HEADER="${CLIENT_IP_HEADER:-X-Forwarded-For}"
         REAL_IP_RECURSIVE="${REAL_IP_RECURSIVE:-on}"
 

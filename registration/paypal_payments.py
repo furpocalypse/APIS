@@ -50,16 +50,25 @@ from .types import TranslatedCartItem
 
 PAYPAL_REQUESTS = Histogram("paypal_requests", "HTTP requests to Paypal API", ["endpoint"])
 
+
+def _sdk_environment(value: str | None) -> Environment:
+    """Map PAYPAL_ENVIRONMENT to the SDK environment.
+
+    Same prefix rule as ``_paypal_api_base`` in
+    ``registration.views.paypal_webhooks`` so the checkout SDK and webhook
+    verification can never disagree about live vs sandbox. The previous
+    ``value.lower()[0]`` raised IndexError at import time on an empty
+    string, taking down every request in the process.
+    """
+    return Environment.PRODUCTION if (value or "").lower().startswith("p") else Environment.SANDBOX
+
+
 client = PaypalServersdkClient(
     client_credentials_auth_credentials=ClientCredentialsAuthCredentials(
         o_auth_client_id=settings.PAYPAL_CLIENT_ID,
         o_auth_client_secret=settings.PAYPAL_CLIENT_SECRET,
     ),
-    environment=(
-        Environment.PRODUCTION
-        if settings.PAYPAL_ENVIRONMENT.lower()[0] == "p"
-        else Environment.SANDBOX
-    ),
+    environment=_sdk_environment(settings.PAYPAL_ENVIRONMENT),
     logging_configuration=LoggingConfiguration(
         log_level=logging.INFO,
         request_logging_config=RequestLoggingConfiguration(log_body=settings.DEBUG),

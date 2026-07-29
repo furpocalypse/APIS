@@ -30,7 +30,10 @@
 #     ${APIS_DATA_DIR:-/srv/apis}. On an Azure VM this should be on an
 #     attached managed disk.
 #   * apis-nginx mounts /opt/apis/certs:/app/certs:ro for the Cloudflare
-#     Origin Certificate. nginx refuses to start without the cert files.
+#     Origin Certificate. In cloudflare mode nginx refuses to start
+#     without the cert files; in the default proxy mode the certs are
+#     ignored (nothing listens on :443) and the entrypoint prints a
+#     warning if they are mounted.
 #
 # REQUIRED on the VM before `docker compose ... up`:
 #   - `.env.production` (created from .env.production.example; never
@@ -56,8 +59,14 @@
 
 services:
   # --------------------------------------------------------------------
-  # nginx reverse proxy. Terminates TLS from Cloudflare, enforces
-  # CF-source-IP allowlist, proxies to the app on the docker network.
+  # nginx reverse proxy, proxies to the app on the docker network.
+  # NOTE the mode/TLS coupling: only TRUSTED_PROXY_MODE=cloudflare
+  # terminates TLS on :443 (using the certs mounted below) and enforces
+  # the CF-source-IP allowlist. The default `proxy` mode serves PLAIN
+  # HTTP on :80 only — nothing answers on :443, so an edge configured
+  # for Cloudflare Full/Full-Strict (or any HTTPS-to-origin) gets 52x
+  # on every request, webhooks included. The entrypoint warns when
+  # certs are mounted in proxy mode.
   # --------------------------------------------------------------------
   nginx:
     profiles: ["app","fullstack"]
@@ -66,7 +75,8 @@ services:
     restart: always
     ports:
       # Map host:80 -> container:80 (for Cloudflare HTTP probes / ACME
-      # http-01 if you ever need it) and host:443 -> container:443.
+      # http-01 if you ever need it) and host:443 -> container:443
+      # (answered ONLY in cloudflare mode — see note above).
       - "80:80"
       - "443:443"
     env_file:
@@ -89,7 +99,9 @@ services:
       NGINX_UPSTREAM: app:8000
     volumes:
       # Cloudflare Origin Certificate (or Let's Encrypt cert) bind-mount.
-      # Pre-create on the VM:
+      # Only needed for TRUSTED_PROXY_MODE=cloudflare (the TLS-terminating
+      # mode); in the default proxy mode leave the directory empty — the
+      # entrypoint warns if certs are present but unused. To provision:
       #   sudo mkdir -p /opt/apis/certs
       #   sudo chown 101:101 /opt/apis/certs
       #   sudo chmod 750 /opt/apis/certs

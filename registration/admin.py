@@ -67,7 +67,7 @@ from registration.models import (
 )
 from registration.services import CreateAttendeeOptions
 from registration.signing import print_capability_signer
-from registration.views import webhooks
+from registration.views import paypal_webhooks, webhooks
 
 logger = logging.getLogger(__name__)
 
@@ -1618,7 +1618,13 @@ def process_unprocessed_notifications(
         logger.info(
             f"Manually processing webhook notification with event_id = {notification.event_id}"
         )
-        webhooks.process_webhook(notification)
+        # Dispatch by integration: PayPal bodies have no "type" key, so the
+        # Square dispatcher KeyErrors on them (and vice-versa event shapes
+        # would silently no-op).
+        if notification.integration == "paypal":
+            paypal_webhooks.process_webhook(notification)
+        else:
+            webhooks.process_webhook(notification)
 
 
 @admin.register(PaymentWebhookNotification)

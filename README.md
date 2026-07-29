@@ -168,8 +168,12 @@ The PayPal stub used by the webhook + checkout tests lives in
 - **`couldn't get a connection after 30.00 sec`** — Postgres (or Redis)
   isn't running. Run `make services-up`.
 - **`PAYPAL_WEBHOOK_ID is not configured`** logged as ERROR during webhook
-  tests — expected in unit tests that exercise the fail-closed path of
-  `verify_signature`. Not a failure unless a test assertion actually fails.
+  tests — expected only in unit tests that deliberately exercise the
+  fail-closed path of `verify_signature` (they override the setting to an
+  empty string). **In any deployed environment this line is an outage
+  signal, never noise**: it means every PayPal webhook delivery is being
+  rejected with 403 because `PAYPAL_WEBHOOK_ID` is missing or not reaching
+  Django settings. Investigate immediately.
 - **Pre-commit hook failures** — fix the reported issue and create a new
   commit; never use `--no-verify` in this repo.
 

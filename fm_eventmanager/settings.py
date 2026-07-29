@@ -16,6 +16,7 @@ from typing import Any
 from idempotency_key import status
 
 from fm_eventmanager.security_checks import (
+    assert_complete_paypal_config,
     assert_no_placeholder_proxy_cidrs,
     assert_strong_mqtt_secret,
 )
@@ -149,8 +150,17 @@ LOGGING: dict[str, Any] = {
     },
 }
 
-# Get loglevel from env
+# Get loglevel from env and wire it into the console handler. (Previously
+# this was read but never applied to LOGGING, making DJANGO_LOGLEVEL a dead
+# knob — operators could not raise verbosity to debug a production issue.)
+# The knob can only LOWER the threshold (DEBUG); anything else clamps to
+# INFO. Raising it must stay impossible: the S35 pinned security loggers
+# and the webhook observability loggers below all route through this
+# handler, so a quieter console would silently drop the security WARNINGs
+# and the webhook success-path lines — recreating the silent-failure
+# blindness of the PAYPAL_WEBHOOK_ID incident.
 LOGLEVEL = os.getenv("DJANGO_LOGLEVEL", "info").upper()
+LOGGING["handlers"]["console"]["level"] = "DEBUG" if LOGLEVEL == "DEBUG" else "INFO"
 
 if eval_bool(os.getenv("APIS_ADMIN_EMAIL_HANDLER", "False")):
     ADMINS = [
@@ -632,7 +642,13 @@ MAINTENANCE_MODE_STATE_FILE_PATH = os.getenv(
     "/tmp/maintenance_mode_state.txt",
 )
 MAINTENANCE_MODE_IGNORE_ADMIN_SITE = True
-MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/",)
+# Payment-provider webhooks must keep flowing during maintenance windows:
+# rejecting them with 503 makes PayPal/Square mark deliveries failed, and
+# events older than the provider retry horizon (~3 days) are then lost to
+# automatic delivery. The webhook views are csrf-exempt, signature-verified
+# endpoints with no session/UI dependency, so serving them mid-maintenance
+# is safe.
+MAINTENANCE_MODE_IGNORE_URLS = ("^/accounts/", "^/registration/webhook/")
 
 if DEBUG:
     # Add docker NAT routers + internal upstream proxies as INTERNAL_IPS
@@ -796,6 +812,16 @@ PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
 PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
 PAYPAL_CURRENCY = os.getenv("PAYPAL_CURRENCY", "USD")
 PAYPAL_ENVIRONMENT = os.getenv("PAYPAL_ENVIRONMENT", "production")  # Or "sandbox"
+# The webhook ID of the dashboard-registered webhook, sent to PayPal's
+# verify-webhook-signature API. verify_signature fails closed (403 on every
+# delivery) when this is empty, so it MUST be wired from the environment
+# here — deployments already supply the env var (.env.production / aks
+# secretproviderclass). The completeness assert below refuses to boot a
+# partially-configured PayPal deployment, but ONLY in a process with
+# APIS_ENV=production: the compose path sets that via .env.production; the
+# aks/ overlays currently do NOT set APIS_ENV, so the guard (like every
+# other _IS_PROD guard) is inert there — see aks/README.md.
+PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
 
 # Sandbox values - DO NOT check in production credentials
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
@@ -938,6 +964,22 @@ if _IS_PROD:
 if _IS_PROD:
     assert_no_placeholder_proxy_cidrs(TRUSTED_PROXY_CIDRS)
 
+# PayPal config is all-or-nothing: a deployment with credentials but no
+# webhook ID (or vice versa) cannot verify a single webhook —
+# verify_signature fails closed and 403s 100% of deliveries — yet boots
+# green and only surfaces per-delivery ERROR log lines. Fail loud at boot
+# instead (the incident this guards against: PAYPAL_WEBHOOK_ID was supplied
+# by the deployment but never mapped into settings, silently rejecting all
+# webhooks). All-empty is allowed: a deployment that genuinely does not
+# use PayPal.
+if _IS_PROD:
+    assert_complete_paypal_config(
+        client_id=PAYPAL_CLIENT_ID,
+        client_secret=PAYPAL_CLIENT_SECRET,
+        webhook_id=PAYPAL_WEBHOOK_ID,
+        environment=PAYPAL_ENVIRONMENT,
+    )
+
 # S35: security-logging observability contract. Named loggers with pinned
 # WARNING levels so the detection signals this remediation adds
 # (RequireClientIPMiddleware rejects, webhook age-window rejects, axes
@@ -960,6 +1002,21 @@ for _seclog in ("axes", "allauth", "registration.views"):
     LOGGING["loggers"][_seclog] = {
         "handlers": ["console"],
         "level": "WARNING",
+        "propagate": False,
+    }
+
+# The webhook views must stay observable at INFO in production even though
+# their parent `registration.views` is pinned to WARNING above: the
+# success-path line, the no-handler-for-event-type line, and the manual
+# admin-reprocess line are the operator's only signal distinguishing
+# "events arriving and processed" from "events silently rejected".
+for _webhook_log in (
+    "registration.views.paypal_webhooks",
+    "registration.views.webhooks",
+):
+    LOGGING["loggers"][_webhook_log] = {
+        "handlers": ["console"],
+        "level": "INFO",
         "propagate": False,
     }
 
