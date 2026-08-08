@@ -49,7 +49,7 @@ dependencies = [
     # is now a separate image (it doesn't have access to /app/apis/static
     # the way the bundled-nginx setup did). [brotli] adds br/gz pre-comp
     # at collectstatic time so gunicorn doesn't compress per-request.
-    "whitenoise[brotli]>=6.7.0",
+    "whitenoise[brotli]>=6.12.0",
 ]
 
 [dependency-groups]
