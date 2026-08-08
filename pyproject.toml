@@ -22,11 +22,11 @@ dependencies = [
     "django-nested-inline~=0.4.6",
     "django-prometheus~=2.5.0",
     "django-ratelimit~=4.1",
-    "django-redis~=6.0.0",
+    "django-redis~=7.0.0",
     "django-vite>=3.1.0",
     "django-widget-tweaks~=1.5.1",
     "gotenberg-client~=0.14.0",
-    "gunicorn>=25.0.1",
+    "gunicorn>=26.0.0",
     "influxdb~=5.3.1",                # legacy v1 client (InfluxDBReporter, deprecated)
     "influxdb-client~=1.50.0",        # v2 client (unused; kept for backward-compat)
     "influxdb3-python~=0.20",         # v3 client (InfluxDBv3Reporter — current path)
@@ -42,7 +42,7 @@ dependencies = [
     "qrcode~=8.2.0",
     "sentry-sdk>=2.66.1",
     "soupsieve>=2.9.2",
-    "squareup==44.0.1.20260122",
+    "squareup==45.0.1.20260715",
     "uvicorn>=0.52.1",
     "uvicorn-worker>=0.4.0",
     # WhiteNoise serves /static/ from gunicorn. Necessary because nginx
@@ -56,13 +56,13 @@ dependencies = [
 dev = [
     "coverage[toml]>=7.15.3",
     "coveralls>=4.1.0",
-    "django-debug-toolbar~=6.2.0",
+    "django-debug-toolbar~=7.0.0",
     "django-stubs[compatible-mypy]>=6.0.4",
     # mypy 2.0.0 INTERNAL-ERRORs on this codebase (CI lint.yml mypy job
     # crashed with exit 2). Pin to the stable 1.x line until 2.x is
     # crash-free; mypy is a Phase-B continue-on-error job so this only
     # affects whether it produces usable (non-blocking) output.
-    "mypy>=1.15,<2",
+    "mypy>=2.3.0,<3",
     "pylint>=4.0.6",
     "pylint-django>=2.8.0",
     "ruff>=0.16.1",
