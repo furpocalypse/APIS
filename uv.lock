@@ -159,8 +159,8 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "celery", extras = ["redis"], specifier = ">=5.6.3" },
     { name = "beautifulsoup4", specifier = ">=4.15.0" },
-    { name = "celery", extras = ["redis"], specifier = ">=5.4.0" },
     { name = "configobj", specifier = ">=5.0.9" },
     { name = "django", specifier = "~=6.0.8" },
     { name = "django-admin-env-notice", specifier = "~=1.0.1" },
