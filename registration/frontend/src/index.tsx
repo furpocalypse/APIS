@@ -12,7 +12,7 @@ if (import.meta.env.DEV) {
   import("solid-devtools");
 }
 
-// import "./index.scss";
+import "./index.scss";
 import { queryClient } from "./queries";
 import { routeTree } from "./routeTree.gen";
 import { initSentry } from "./sentry";
