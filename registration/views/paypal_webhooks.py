@@ -117,6 +117,7 @@ def _get_paypal_access_token(*, force_refresh: bool = False) -> str | None:
 
     token = payload.get("access_token")
     if not token:
+        logger.error("PayPal OAuth2 token response (HTTP 200) contained no access_token")
         return None
 
     try:
@@ -231,7 +232,25 @@ def verify_signature(request) -> bool:
             logger.error("PayPal verify-webhook-signature call failed: %s", e)
             return False
 
-    if not payload or payload.get("verification_status") != "SUCCESS":
+    if not isinstance(payload, dict) or not payload:
+        # No verdict was received (non-200 response or unexpected body
+        # shape): a transport/API anomaly — do not steer the operator
+        # toward webhook-ID config for it.
+        logger.error("PayPal verify-webhook-signature returned no parseable verification response")
+        return False
+    if payload.get("verification_status") != "SUCCESS":
+        # The most diagnostic branch for config-side total failures: PayPal
+        # answering FAILURE for every event means the webhook_id sent does
+        # not match a webhook registered on the app these credentials
+        # belong to (wrong PAYPAL_WEBHOOK_ID, wrong app, or a sandbox/live
+        # PAYPAL_ENVIRONMENT mismatch).
+        logger.error(
+            "PayPal verify-webhook-signature returned verification_status=%r "
+            "(expected SUCCESS); check that PAYPAL_WEBHOOK_ID matches the "
+            "webhook registered on the PayPal app for these credentials and "
+            "that PAYPAL_ENVIRONMENT matches that app's environment",
+            payload.get("verification_status"),
+        )
         return False
 
     # Plan S2: the freshness check lives INSIDE the signature-verified
@@ -299,6 +318,16 @@ def paypal_webhook(request):
         return common.success(200)
 
     process_webhook(notification)
+
+    # The one success-path log line: without it a healthy production
+    # webhook pipeline is indistinguishable from one that never receives
+    # events (settings.py gives this module's logger an INFO handler).
+    logger.info(
+        "PayPal webhook %s (%s) stored; processed=%s",
+        event_id,
+        event_type,
+        notification.processed,
+    )
 
     return common.success(200)
 
