@@ -13,7 +13,8 @@
     "noUnusedParameters": true,
     "paths": {
       "@components/*": ["./src/components/*"],
-      "@admin/*": ["./src/admin/*"]
+      "@admin/*": ["./src/admin/*"],
+      "@solid-fa/*": ["./registration/frontend/node_modules/solid-fa/dist/index.d.ts"],
     },
     "skipLibCheck": true,
     "strict": true,

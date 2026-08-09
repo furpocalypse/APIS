@@ -22,10 +22,9 @@ export const AttachedDevice: Component<{
 
   const [device] = createResource<
     DeviceDriver | undefined,
-    [HIDDevice, (value: string) => void, boolean],
-    DeviceDriver | undefined
+    [HIDDevice, (value: string) => void, boolean]
   >(
-    () => [props.device, props.emitRawScan, connected()],
+    (): [HIDDevice, (value: string) => void, boolean] => [props.device, props.emitRawScan, connected()],
     async ([device, emit, connected], { value }) => {
       if (value) {
         await value.close();
@@ -44,7 +43,7 @@ export const AttachedDevice: Component<{
       const driverName = driverNameForDevice(device);
       if (!driverName) return;
 
-      let driver;
+      let driver: DeviceDriver | undefined;
       if (driverName === "snapi") {
         driver = new SnapiDevice();
         driver.start(device, (data) => {
