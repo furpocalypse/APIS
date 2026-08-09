@@ -50,6 +50,7 @@ dependencies = [
     # the way the bundled-nginx setup did). [brotli] adds br/gz pre-comp
     # at collectstatic time so gunicorn doesn't compress per-request.
     "whitenoise[brotli]>=6.12.0",
+    "httpx[http2]>=0.28.1",
 ]
 
 [dependency-groups]
