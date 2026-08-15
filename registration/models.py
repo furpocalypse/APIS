@@ -750,7 +750,7 @@ class Attendee(models.Model):
     parentPhone = models.CharField(max_length=20, blank=True)
     parentEmail = models.CharField(max_length=200, blank=True)
     aslRequest = models.BooleanField(default=False)
-    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, blank=True)
 
     @admin.display(description="First Name")
     def getFirst(self):

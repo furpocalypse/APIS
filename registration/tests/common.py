@@ -61,7 +61,6 @@ TEST_ATTENDEE_ARGS = {
     "phone": "1112223333",
     "email": "apis@mailinator.org",
     "birthdate": "1990-01-01",
-    "event": 0,
 }
 
 DEFAULT_VENUE_ARGS = {
