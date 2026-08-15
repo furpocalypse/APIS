@@ -735,8 +735,8 @@ class Attendee(models.Model):
     country = models.CharField(max_length=200, blank=True)
     postalCode = models.CharField(max_length=20, blank=True)
     # TODO: validate that these unique constraints work across multiple con years
-    phone = models.CharField(max_length=20, unique=True)
-    email = models.CharField(max_length=200, unique=True)
+    phone = models.CharField(max_length=20)
+    email = models.CharField(max_length=200)
     birthdate = models.DateField()
     emailsOk = models.BooleanField(default=False)
     surveyOk = models.BooleanField(default=False)
@@ -1186,8 +1186,8 @@ class PaymentWebhookNotification(models.Model):
 
 
 class OrderItem(models.Model):
-    order = models.ForeignKey(Order, null=True, on_delete=models.CASCADE, unique=True)
-    badge = models.ForeignKey(Badge, null=True, on_delete=models.CASCADE, unique=True)
+    order = models.ForeignKey(Order, null=True, on_delete=models.CASCADE)
+    badge = models.ForeignKey(Badge, null=True, on_delete=models.CASCADE)
     priceLevel = models.ForeignKey(PriceLevel, null=True, on_delete=models.SET_NULL)
     enteredBy = models.CharField(max_length=100)
     enteredDate = models.DateTimeField(auto_now_add=True, null=True, blank=True)
