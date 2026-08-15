@@ -508,6 +508,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
             preferredName=pda.get("preferredName", ""),
             firstName=pda["firstName"],
             lastName=pda["lastName"],
+            event=pda["event"],
         )
         priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 

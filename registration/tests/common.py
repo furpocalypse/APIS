@@ -33,6 +33,7 @@ ten_days = timedelta(days=10)
 one_day = timedelta(days=1)
 
 DEFAULT_EVENT_ARGS = {
+    "id": 0,
     "default": True,
     "name": "Test Event 2050!",
     "dealerRegStart": now - ten_days,
@@ -60,6 +61,7 @@ TEST_ATTENDEE_ARGS = {
     "phone": "1112223333",
     "email": "apis@mailinator.org",
     "birthdate": "1990-01-01",
+    "event": 0,
 }
 
 DEFAULT_VENUE_ARGS = {
@@ -422,6 +424,7 @@ class OrdersTestCase(TestCase, PriceLevelFixturesMixin, DepartmentFixturesMixin,
             "volDepts": "",
             "surveyOk": "false",
             "signature_svg": TEST_SIGNATURE_SVG,
+            "event_id": 0,
         }
         self.attendee_form_2 = {
             "firstName": "Bea",
@@ -442,6 +445,7 @@ class OrdersTestCase(TestCase, PriceLevelFixturesMixin, DepartmentFixturesMixin,
             "volDepts": "",
             "surveyOk": "false",
             "signature_svg": TEST_SIGNATURE_SVG,
+            "event_id": 0,
         }
 
         self.attendee_form_upgrade = self.attendee_form_1

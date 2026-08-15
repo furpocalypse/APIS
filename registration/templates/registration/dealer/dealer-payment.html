@@ -362,7 +362,8 @@
                   'phone': $("#phone").val(),
                   'emailsOk': $("#contact").is(':checked'),
                   'surveyOk': $("#survey").is(':checked'),
-                  'badgeName': $("#badgeName").val()
+                  'badgeName': $("#badgeName").val(),
+                  'event': '{{ event|escapejs }}'
               },
               'dealer': {
                   'id': dealer.id,
