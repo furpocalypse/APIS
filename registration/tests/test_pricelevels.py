@@ -55,7 +55,6 @@ class TestOrderingModule(TransactionTestCase, EventFixtureMixin, PriceLevelFixtu
             phone="1234567890",
             email="someone@somewhere.com",
             birthdate=now - twenty_years,
-            event=0,
         )
         self.adult2 = Attendee(
             firstName="Another",
@@ -63,7 +62,6 @@ class TestOrderingModule(TransactionTestCase, EventFixtureMixin, PriceLevelFixtu
             phone="1234567890",
             email="another@somewhere.com",
             birthdate=now - twenty_years,
-            event=0,
         )
         self.minor = Attendee(
             firstName="A",
@@ -71,7 +69,6 @@ class TestOrderingModule(TransactionTestCase, EventFixtureMixin, PriceLevelFixtu
             phone="1234567890",
             email="child@murderer.com",
             birthdate=now - fifteen_years,
-            event=0,
         )
         self.adult.save()
         self.adult2.save()
