@@ -660,6 +660,71 @@ class StaffInvite(models.Model):
 
 
 class Attendee(models.Model):
+    class meta:
+        constraints: list[models.UniqueConstraint] = [
+            models.UniqueConstraint(
+                fields=[
+                    "firstName",
+                    "lastName",
+                    "address1",
+                    "address2",
+                    "city",
+                    "state",
+                    "country",
+                    "event",
+                ],
+                name="fully qualified mailing address",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "preferredName",
+                    "address1",
+                    "address2",
+                    "city",
+                    "state",
+                    "country",
+                    "registration_year",
+                    "registration_convention",
+                    "event",
+                ],
+                name="nickname qualified mailing address",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "firstName",
+                    "lastName",
+                    "phone",
+                    "event",
+                ],
+                name="fully qualified phone contact",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "preferredName",
+                    "phone",
+                    "event",
+                ],
+                name="nickname qualified phone contact",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "firstName",
+                    "lastName",
+                    "email",
+                    "event",
+                ],
+                name="fully qualified email contact",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "preferredName",
+                    "email",
+                    "event",
+                ],
+                name="nickname qualified email contact",
+            ),
+        ]
+
     firstName = models.CharField("Legal First Name", max_length=200)
     preferredName = models.CharField("Preferred First Name", max_length=200, blank=True)
     lastName = models.CharField("Legal Last Name", max_length=200)
@@ -669,8 +734,9 @@ class Attendee(models.Model):
     state = models.CharField(max_length=200, blank=True)
     country = models.CharField(max_length=200, blank=True)
     postalCode = models.CharField(max_length=20, blank=True)
-    phone = models.CharField(max_length=20)
-    email = models.CharField(max_length=200)
+    # TODO: validate that these unique constraints work across multiple con years
+    phone = models.CharField(max_length=20, unique=True)
+    email = models.CharField(max_length=200, unique=True)
     birthdate = models.DateField()
     emailsOk = models.BooleanField(default=False)
     surveyOk = models.BooleanField(default=False)
@@ -684,6 +750,7 @@ class Attendee(models.Model):
     parentPhone = models.CharField(max_length=20, blank=True)
     parentEmail = models.CharField(max_length=200, blank=True)
     aslRequest = models.BooleanField(default=False)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
 
     @admin.display(description="First Name")
     def getFirst(self):
@@ -707,6 +774,18 @@ def badge_signature_bitmap_path(instance, filename):
 
 
 class Badge(models.Model):
+    class meta:
+        constraints: list[models.UniqueConstraint] = [
+            models.UniqueConstraint(
+                fields=[
+                    "attendee",
+                    "event",
+                    "registeredDate",
+                ],
+                name="One attendee per day badge purchase",
+            ),
+        ]
+
     ABANDONED = "Abandoned"
     COMP = "Comp"
     DEALER = "Dealer"
@@ -1107,8 +1186,8 @@ class PaymentWebhookNotification(models.Model):
 
 
 class OrderItem(models.Model):
-    order = models.ForeignKey(Order, null=True, on_delete=models.CASCADE)
-    badge = models.ForeignKey(Badge, null=True, on_delete=models.CASCADE)
+    order = models.ForeignKey(Order, null=True, on_delete=models.CASCADE, unique=True)
+    badge = models.ForeignKey(Badge, null=True, on_delete=models.CASCADE, unique=True)
     priceLevel = models.ForeignKey(PriceLevel, null=True, on_delete=models.SET_NULL)
     enteredBy = models.CharField(max_length=100)
     enteredDate = models.DateTimeField(auto_now_add=True, null=True, blank=True)
