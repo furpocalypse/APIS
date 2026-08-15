@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='attendee',
             name='event',
-            field=models.ForeignKey(default='Furpocalypse 2026', on_delete=django.db.models.deletion.CASCADE, to='registration.event'),
+            field=models.ForeignKey(default=0, on_delete=django.db.models.deletion.CASCADE, to='registration.event'),
             preserve_default=False,
         ),
     ]
