@@ -57,7 +57,7 @@ dependencies = [
 dev = [
     "coverage[toml]>=7.15.3",
     "coveralls>=4.1.0",
-    "django-debug-toolbar~=7.0.0",
+    "django-debug-toolbar~=7.1.0",
     "django-stubs[compatible-mypy]>=6.0.4",
     # mypy 2.0.0 INTERNAL-ERRORs on this codebase (CI lint.yml mypy job
     # crashed with exit 2). Pin to the stable 1.x line until 2.x is
