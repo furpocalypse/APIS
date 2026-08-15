@@ -40,7 +40,7 @@ dependencies = [
     "pyjwt~=2.13.0",
     "pytz~=2026.3.post1",
     "qrcode~=8.2.0",
-    "sentry-sdk>=2.66.1",
+    "sentry-sdk>=2.67.1",
     "soupsieve>=2.9.2",
     "squareup==45.0.1.20260715",
     "uvicorn>=0.52.1",
@@ -57,14 +57,14 @@ dependencies = [
 dev = [
     "coverage[toml]>=7.15.3",
     "coveralls>=4.1.0",
-    "django-debug-toolbar~=7.0.0",
+    "django-debug-toolbar~=7.1.0",
     "django-stubs[compatible-mypy]>=6.0.4",
     # mypy 2.0.0 INTERNAL-ERRORs on this codebase (CI lint.yml mypy job
     # crashed with exit 2). Pin to the stable 1.x line until 2.x is
     # crash-free; mypy is a Phase-B continue-on-error job so this only
     # affects whether it produces usable (non-blocking) output.
     "mypy>=2.3.0,<3",
-    "pylint>=4.0.6",
+    "pylint>=4.0.7",
     "pylint-django>=2.8.0",
     "ruff>=0.16.1",
     "vulture>=2.16",
