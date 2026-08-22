@@ -36,13 +36,13 @@ dependencies = [
     "pillow>=12.3.0",
     "psycopg[binary,pool]>=3.3.4",
     "pydantic>=2.13.4",
-    "pygments~=2.20.0",
+    "pygments>=2.20,<2.22",
     "pyjwt~=2.13.0",
     "pytz~=2026.3.post1",
     "qrcode~=8.2.0",
     "sentry-sdk>=2.66.1",
     "soupsieve>=2.9.2",
-    "squareup==45.0.1.20260715",
+    "squareup==45.1.0.20260819",
     "uvicorn>=0.52.1",
     "uvicorn-worker>=0.4.0",
     # WhiteNoise serves /static/ from gunicorn. Necessary because nginx
@@ -57,7 +57,7 @@ dependencies = [
 dev = [
     "coverage[toml]>=7.15.3",
     "coveralls>=4.1.0",
-    "django-debug-toolbar~=7.0.0",
+    "django-debug-toolbar>=7.0,<7.2",
     "django-stubs[compatible-mypy]>=6.0.4",
     # mypy 2.0.0 INTERNAL-ERRORs on this codebase (CI lint.yml mypy job
     # crashed with exit 2). Pin to the stable 1.x line until 2.x is
