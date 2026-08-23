@@ -151,7 +151,7 @@ def get_cart(request):
     return output
 
 
-def saveCart(cart):
+def saveCart(cart: Cart):
     post_data = json.loads(cart.formData)
     pda = post_data["attendee"]
     pdp = post_data["priceLevel"]
