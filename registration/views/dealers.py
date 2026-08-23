@@ -721,7 +721,7 @@ def addNewDealer(request):
         birthdate=birthdate,
         emailsOk=bool(pda["emailsOk"]),
         surveyOk=bool(pda["surveyOk"]),
-        event=bool(pda["event"]),
+        # event=bool(pda["event"]),
     )
     attendee.save()
 

@@ -671,7 +671,7 @@ class Attendee(models.Model):
                     "city",
                     "state",
                     "country",
-                    "event",
+                    # "event",
                 ],
                 name="fully qualified mailing address",
             ),
@@ -685,7 +685,7 @@ class Attendee(models.Model):
                     "country",
                     "registration_year",
                     "registration_convention",
-                    "event",
+                    # "event",
                 ],
                 name="nickname qualified mailing address",
             ),
@@ -694,7 +694,7 @@ class Attendee(models.Model):
                     "firstName",
                     "lastName",
                     "phone",
-                    "event",
+                    # "event",
                 ],
                 name="fully qualified phone contact",
             ),
@@ -702,7 +702,7 @@ class Attendee(models.Model):
                 fields=[
                     "preferredName",
                     "phone",
-                    "event",
+                    # "event",
                 ],
                 name="nickname qualified phone contact",
             ),
@@ -711,7 +711,7 @@ class Attendee(models.Model):
                     "firstName",
                     "lastName",
                     "email",
-                    "event",
+                    # "event",
                 ],
                 name="fully qualified email contact",
             ),
@@ -719,7 +719,7 @@ class Attendee(models.Model):
                 fields=[
                     "preferredName",
                     "email",
-                    "event",
+                    # "event",
                 ],
                 name="nickname qualified email contact",
             ),
@@ -750,7 +750,7 @@ class Attendee(models.Model):
     parentPhone = models.CharField(max_length=20, blank=True)
     parentEmail = models.CharField(max_length=200, blank=True)
     aslRequest = models.BooleanField(default=False)
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, blank=True, null=True)
+    # event = models.ForeignKey(Event, on_delete=models.CASCADE, blank=True, null=True)
 
     @admin.display(description="First Name")
     def getFirst(self):
