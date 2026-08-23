@@ -537,7 +537,8 @@
                   'surveyOk': $("#survey").is(':checked'),
                   'asl': false,
                   'signature_svg': signature.jSignature("getData", "svgbase64")[1],
-                  'signature_bitmap': signature.jSignature("getData", "image")[1]
+                  'signature_bitmap': signature.jSignature("getData", "image")[1],
+                  'event': '{{ event|escapejs }}'
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
               {# S33 HIGH-3: str(Event)=admin-set name in a JS string literal — escapejs (Django auto-escapes HTML, not JS). #}

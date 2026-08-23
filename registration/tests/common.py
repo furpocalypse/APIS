@@ -33,6 +33,7 @@ ten_days = timedelta(days=10)
 one_day = timedelta(days=1)
 
 DEFAULT_EVENT_ARGS = {
+    "id": 0,
     "default": True,
     "name": "Test Event 2050!",
     "dealerRegStart": now - ten_days,
@@ -422,6 +423,7 @@ class OrdersTestCase(TestCase, PriceLevelFixturesMixin, DepartmentFixturesMixin,
             "volDepts": "",
             "surveyOk": "false",
             "signature_svg": TEST_SIGNATURE_SVG,
+            "event_id": 0,
         }
         self.attendee_form_2 = {
             "firstName": "Bea",
@@ -442,6 +444,7 @@ class OrdersTestCase(TestCase, PriceLevelFixturesMixin, DepartmentFixturesMixin,
             "volDepts": "",
             "surveyOk": "false",
             "signature_svg": TEST_SIGNATURE_SVG,
+            "event_id": 0,
         }
 
         self.attendee_form_upgrade = self.attendee_form_1

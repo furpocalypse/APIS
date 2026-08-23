@@ -399,6 +399,7 @@ def get_total(
     if not cartItems and not orderItems:
         return 0, 0
 
+    # FIXME: This looks fragile.
     cart_item: Cart | OrderItem
     for cart_item in cartItems:
         item_total, discount = get_line_item_total(cart_item, disc)
@@ -508,6 +509,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
             preferredName=pda.get("preferredName", ""),
             firstName=pda["firstName"],
             lastName=pda["lastName"],
+            # event=pda["event"],
         )
         priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 
@@ -596,15 +598,19 @@ def checkout(request):
     Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items = list(Cart.objects.filter(id__in=session_items))
-    order_items = request.session.get("order_items", [])
+    order_items: list[OrderItem] = request.session.get("order_items", [])
     pdisc = request.session.get("discount", "")
 
     # Safety valve (in case session times out before checkout is complete)
     if len(session_items) == 0 and len(order_items) == 0:
         return common.abort(400, "Session expired or no session is stored for this client")
 
-    discount = Discount.objects.filter(codeName=pdisc)
-    discount = discount.first() if discount.count() > 0 and discount.first().isValid() else None
+    discount_rec = Discount.objects.filter(codeName=pdisc)
+    discount: str | None = (
+        str(discount_rec.first().amountOff)
+        if discount_rec.count() > 0 and discount_rec.first().isValid()
+        else None
+    )
 
     if order_items:
         order_items = list(OrderItem.objects.filter(id__in=order_items))

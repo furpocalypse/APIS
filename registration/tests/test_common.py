@@ -41,6 +41,7 @@ class TestGetOptionsDict(TestCase):
             phone="1112223333",
             email="apis@mailinator.org",
             birthdate="1990-01-01",
+            # event=0,
         )
         attendee.save()
 

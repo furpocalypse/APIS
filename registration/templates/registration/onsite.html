@@ -495,7 +495,8 @@
                   'surveyOk': $("#survey").is(':checked'),
                   'volDepts': '',
                   'asl': '',
-                  'onsite': true
+                  'onsite': true,
+                  'event': '{{ event|escapejs }}'
               },
               'priceLevel': {'id': $(".selectLevel")[0].id.split('_')[1], 'options': getOptions()},
               'jersey': {}, 'event': '{{ event|escapejs }}'

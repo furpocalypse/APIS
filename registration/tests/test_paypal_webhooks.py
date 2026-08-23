@@ -1373,6 +1373,7 @@ class TestPaypalRefundWebhookPerRegistrantType(TestCase):
             phone="1112223333",
             email=email,
             birthdate="1990-01-01",
+            # event=0,
         )
         attendee.save()
         return attendee

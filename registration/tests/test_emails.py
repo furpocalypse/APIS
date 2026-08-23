@@ -52,6 +52,7 @@ class EmailTestCase(TestCase):
             phone="1112223333",
             email="apis@mailinator.org",
             birthdate="1990-01-01",
+            # event=0,
         )
         self.attendee.save()
         self.badge = Badge(attendee=self.attendee, event=self.event, badgeName="DisStaff")

@@ -132,6 +132,7 @@ def add_new_staff(request):
         birthdate=birthdate,
         emailsOk=True,
         surveyOk=False,
+        # event=pda["event"],
     )
     attendee.save()
 
