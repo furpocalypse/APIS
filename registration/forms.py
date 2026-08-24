@@ -4,7 +4,7 @@ from django import forms
 from django.forms import ModelForm, ValidationError
 from django.forms.widgets import TextInput
 
-from .models import Attendee, Badge, Event, Firebase, Order
+from .models import Attendee, Badge, BadgeBackground, Event, Firebase, Order
 
 COUNTRIES_REQUIRING_STATE = ("US",)
 
@@ -120,6 +120,15 @@ class BadgeForm(forms.ModelForm):
     class Meta:
         model = Badge
         fields = ("badgeName", "signature_svg", "signature_bitmap")
+
+
+class BadgeBackgroundForm(forms.ModelForm):
+    def clean_letter_id(self):
+        return self.cleaned_data["letter_id"].capitalize()
+
+    class Meta:
+        model = BadgeBackground
+        exclude = ()
 
 
 class OrderForm(forms.ModelForm):

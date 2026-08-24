@@ -85,6 +85,10 @@ def content_file_name(instance, filename):
     return "/".join(["priceleveloption", str(instance.pk), filename])
 
 
+def badge_bg_file_name(instance: BadgeBackground, filename: str):
+    return "/".join(["badgeart", str(instance.event.id), filename])
+
+
 def default_registration_email():
     """S32: Event email-field default.
 
@@ -706,6 +710,27 @@ def badge_signature_bitmap_path(instance, filename):
     return f"event_{instance.event.id}/badge_{instance.id}/sig_bmp_{filename}"
 
 
+class BadgeBackground(models.Model):
+    event = models.ForeignKey(Event, null=True, blank=True, on_delete=models.CASCADE)
+    letter_id = models.CharField(max_length=1)
+    title = models.CharField(max_length=200)
+    artist = models.CharField(max_length=200)
+    image = models.ImageField(upload_to=badge_bg_file_name)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event_id", "letter_id"],
+                name="unique_badge_bg_letter_per_event_id",
+            ),
+        ]
+        ordering = ["event", "letter_id"]
+        #ordering = ["-event__eventStart", "letter_id"]
+
+    def __str__(self):
+        return f"{self.letter_id}: \"{self.title}\""
+
+
 class Badge(models.Model):
     ABANDONED = "Abandoned"
     COMP = "Comp"
@@ -715,6 +740,7 @@ class Badge(models.Model):
     UNPAID = "Unpaid"
     attendee = models.ForeignKey(Attendee, null=True, blank=True, on_delete=models.CASCADE)
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    background = models.ForeignKey(BadgeBackground, on_delete=models.SET_NULL, null=True)
     registeredDate = models.DateTimeField(null=True)
     registrationToken = models.CharField(max_length=200, default=get_registration_token)
     badgeName = models.CharField(max_length=200, blank=True)
