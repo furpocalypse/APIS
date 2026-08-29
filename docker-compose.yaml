@@ -42,6 +42,7 @@ services:
       # canonical.
       - ./registration:/app/registration
       - ./fm_eventmanager/settings.py:/app/fm_eventmanager/settings.py
+      - ./media:/app/apis/media
     env_file:
       - .env.dev
     depends_on:
@@ -57,7 +58,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./registration:/app/registration
-      - ./fm_eventmanager/settings.py:/app/fm_eventmanager/settings.py
+      - ./fm_eventmanager:/app/fm_eventmanager
+      - ./media:/app/media
     env_file:
       - .env.dev
     depends_on:

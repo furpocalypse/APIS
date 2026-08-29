@@ -70,3 +70,4 @@ docker-compose.override.yaml
 /registration/static/import_export/
 /registration/static/mfa/
 azure/.azure
+/media/*

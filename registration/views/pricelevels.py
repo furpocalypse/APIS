@@ -9,7 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from registration.models import Event, PriceLevel
 
 
-def format_price_level_list(levels):
+def format_price_level_list(levels: list[PriceLevel]):
     data = [
         {
             "name": level.name,

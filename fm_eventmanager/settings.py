@@ -675,6 +675,11 @@ STATIC_ROOT = os.getenv("STATIC_ROOT", "/app/apis/static/")
 # up automatically because ``registration`` is an INSTALLED_APP. Pointing
 # STATICFILES_DIRS at ``/app/apis/static/bundler`` is circular (that path is
 # ``collectstatic``'s destination, not its source) and triggers W004.
+if DEBUG:
+    # Stopgap to get uploaded images working on dev.
+    # Still figuring out prod.
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = os.getenv("MEDIA_ROOT", "/app/apis/media/")
 
 STORAGES = {
     "default": {
