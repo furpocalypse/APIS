@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import logging
 import random
@@ -726,6 +727,13 @@ class BadgeBackground(models.Model):
         ]
         ordering = ["event", "letter_id"]
         #ordering = ["-event__eventStart", "letter_id"]
+    
+    def getImageDataUri(self):
+        img_bytes = self.image.read()
+        base64_utf8_str = base64.b64encode(img_bytes).decode("utf-8")
+
+        ext = self.image.name.split(".")[-1]
+        return f"data:image/{ext};base64,{base64_utf8_str}"
 
     def __str__(self):
         return f"{self.letter_id}: \"{self.title}\""
