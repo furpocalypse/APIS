@@ -45,13 +45,9 @@ Optional monitoring stack (InfluxDB 3 + Prometheus + node-exporter + Grafana): `
 git clone https://github.com/furpocalypse/APIS.git
 cd APIS
 
-# Decision #11: `.env.dev` is TRACKED, complete and secret-free — the dev
-# compose loads it directly, so `docker compose up` Just Works after a
-# clean clone. Only the DB credential file is per-machine:
+# Copy environment variables from boilerplates and edit if necessary.
+cp .env.dev.example .env.dev
 cp database.env.example database.env
-# (database.env is gitignored. DATABASE_USER / DATABASE_PASS in .env.dev
-# must match POSTGRES_USER / POSTGRES_PASSWORD in database.env; edit
-# .env.dev in place only if you change those.)
 
 # Install Docker if you don't have it; on Ubuntu:
 #   curl -fsSL https://get.docker.com | sh
@@ -59,6 +55,8 @@ cp database.env.example database.env
 
 # Build + start the stack
 docker compose up -d
+# Optionally include the Gotenberg container if working with badge printing
+docker compose --profile gotenberg up -d
 
 # Create the initial admin (idempotent — refuses if a superuser exists)
 docker compose exec app /app/manage.py bootstrap_admin

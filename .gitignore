@@ -39,6 +39,7 @@ fm_eventmanager/maintenance_mode_state.txt
 localhost.crt
 localhost.key
 .env
+.env.dev
 .env.production
 .env.*.local
 database.env
