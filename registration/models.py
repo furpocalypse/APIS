@@ -86,8 +86,8 @@ def content_file_name(instance, filename):
     return "/".join(["priceleveloption", str(instance.pk), filename])
 
 
-def badge_bg_file_name(instance: BadgeBackground, filename: str):
-    return "/".join(["badgeart", str(instance.event.id), filename])
+def badge_bg_file_name(instance: models.Model, filename: str):
+    return "/".join(["badgeart", str(instance.pk), filename])
 
 
 def default_registration_email():
@@ -727,7 +727,7 @@ class BadgeBackground(models.Model):
         ]
         ordering = ["event", "letter_id"]
         #ordering = ["-event__eventStart", "letter_id"]
-    
+
     def getImageDataUri(self):
         img_bytes = self.image.read()
         base64_utf8_str = base64.b64encode(img_bytes).decode("utf-8")

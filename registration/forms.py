@@ -128,7 +128,13 @@ class BadgeBackgroundForm(forms.ModelForm):
 
     class Meta:
         model = BadgeBackground
-        exclude = ()
+        fields = (
+            "event",
+            "letter_id",
+            "title",
+            "artist",
+            "image"
+        )
 
 
 class OrderForm(forms.ModelForm):

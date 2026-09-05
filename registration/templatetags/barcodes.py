@@ -9,12 +9,12 @@ from base64 import b64encode
 from io import BytesIO
 from xml.etree import ElementTree as ET
 
+import qrcode
 from django import template
 from django.utils.html import mark_safe
 from pdf417 import encode, render_image, render_svg
-import qrcode
 from qrcode.image.styledpil import StyledPilImage
-from qrcode.image.styles.moduledrawers.pil import CircleModuleDrawer, RoundedModuleDrawer
+from qrcode.image.styles.moduledrawers.pil import CircleModuleDrawer
 
 register = template.Library()
 
@@ -38,7 +38,7 @@ def pdf417_svg(*args, **kwargs) -> str:
     :returns: A string containing the entire SVG document tree.
 
     Example 1:
-    
+
     .. code-block:: html
         {% load barcodes %}
         <!-- Renders a barcode with name/address delimited by newlines -->
@@ -117,7 +117,7 @@ def qr_data_uri(data: str, circles = False) -> str:
 
     :param data: The text to encode in the QR code.
     :param circles: Render the QR code blocks as circles?
-    
+
     :returns: A base64 data URI representing a PNG image.
 
     Example:
@@ -133,7 +133,8 @@ def qr_data_uri(data: str, circles = False) -> str:
     )
     qr.add_data(data)
     mk_img_kwargs = {}
-    if circles: mk_img_kwargs["module_drawer"] = CircleModuleDrawer()
+    if circles:
+        mk_img_kwargs["module_drawer"] = CircleModuleDrawer()
     buffered = BytesIO()
     image = qr.make_image(**mk_img_kwargs)
     image.save(buffered, format="PNG")
