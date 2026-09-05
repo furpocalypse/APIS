@@ -123,6 +123,7 @@ dependencies = [
     { name = "markuppy" },
     { name = "paho-mqtt" },
     { name = "paypal-server-sdk" },
+    { name = "pdf417" },
     { name = "pillow" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
@@ -189,6 +190,7 @@ requires-dist = [
     { name = "markuppy", specifier = ">=1.14" },
     { name = "paho-mqtt", specifier = "~=2.1.0" },
     { name = "paypal-server-sdk", specifier = "==2.3.0" },
+    { name = "pdf417", specifier = ">=0.8.1" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.4" },
     { name = "pydantic", specifier = ">=2.13.4" },
@@ -1629,6 +1631,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c8/62/89a2434828b650e2263fa56878b9b6117be5e017b45182dbb663f6228142/paypal_server_sdk-2.3.0.tar.gz", hash = "sha256:ace4cc1e3a53684fdcb526feda1a0dfd37bbea17af8095c33261ff05ebacb49d", size = 295061, upload-time = "2026-06-05T21:29:16.603Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/21/842292f28b70de7d4d4314df062dc7d373e5928bcb77b8a8a9cdb4e9f44f/paypal_server_sdk-2.3.0-py3-none-any.whl", hash = "sha256:40f17a4aa3f5d65112391559f5e54411e4862cceb7f5c3ad0d5f3d27ec43fdef", size = 646911, upload-time = "2026-06-05T21:29:15.411Z" },
+]
+
+[[package]]
+name = "pdf417"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/1e/13b568b43e610b462613b83ff55f938d1520f799c31ac0d2c01b3089c61e/pdf417-0.8.1.tar.gz", hash = "sha256:2d75d5f6e3c1e89bb5cf2b01ddb1c69dd0db1f3dfeb403dab8745e64f95b3758", size = 23987, upload-time = "2020-10-03T19:01:36.084Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/19/0c89e3264ecba4733fa5f5bc6bf4abe332512c60de59d622f7c2359e1cd6/pdf417-0.8.1-py2.py3-none-any.whl", hash = "sha256:7d29114a87e19454a3e0e10aeb2297db46429e4ac7fb92671f6632455f0f76d3", size = 23722, upload-time = "2020-10-03T19:01:34.394Z" },
 ]
 
 [[package]]

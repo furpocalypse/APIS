@@ -51,6 +51,7 @@ dependencies = [
     # at collectstatic time so gunicorn doesn't compress per-request.
     "whitenoise[brotli]>=6.12.0",
     "httpx[http2]>=0.28.1",
+    "pdf417>=0.8.1",
 ]
 
 [dependency-groups]

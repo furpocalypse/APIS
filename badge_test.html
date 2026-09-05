@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            @media print {
+                @page {
+                    size: 3.375in 2.125in;
+                    margin: 0;
+                }
+                html, body {
+                    margin: 0;
+                    padding: 0;
+                }
+            }
+        </style>
+    </head>
+<body>
+    <section class="badge-container">
+        <img class="badge-bg" src="./media/badgeart/1/Mxxvous_FuranFuran.png">
+        <div class="corner-level">
+            Attendee<br>
+            2026
+        </div>
+        <div class="nameplate">
+            <div class="attendee-name">Oh Shit A Bear</div>
+            <div class="attendee-level">Attendee</div>
+            <div class="badge-number">42069</div>
+        </div>
+    </section>
+    <section class="badge-container">
+        <canvas class="badge-barcode"></canvas>
+        <div class="art-credit">Art: "Furan Furan" by Mxxvous</div>
+    </section>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: black;
+            margin: 0;
+            padding: 0;
+        }
+        section.badge-container {
+            position: relative;
+            width: 100vw;
+            height: 99.9vh;
+            break-after: page;
+        }
+        .corner-level {
+            position: absolute;
+            top: 0.25em;
+            right: 0.25em;
+            font-family: Impact, sans-serif;
+            color: white;
+            text-align: right;
+            text-transform: uppercase;
+            text-shadow:
+                -1px -1px 0 #000,  
+                1px -1px 0 #000,
+                -1px 1px 0 #000,
+                1px 1px 0 #000;
+        }
+        .badge-bg {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .nameplate {
+            position: absolute;
+            bottom: 0.5em;
+            left: 0.5em;
+            right: 0.5em;
+            height: 3em;
+            border-radius: 0.25em;
+            background-color: rgba(255, 255, 255, 0.5);
+            text-align: center;
+        }
+        .attendee-name {
+            font-size: 14pt;
+            overflow: hidden;
+            max-height: 1em;
+        }
+        .attendee-level {
+            font-size: 6pt;
+        }
+        .badge-number {
+            position: absolute;
+            bottom: 0.25em;
+            right: 0.25em;
+            font-size: 6pt;
+        }
+        .badge-barcode {
+            position: absolute;
+            top: .0625in;
+            right: .0625in;
+            transform: rotate(-90deg) translateX(50%);
+            height: 0.33in;
+            transform-origin: bottom right;
+        }
+        .art-credit {
+            font-size: 5pt;
+            position: absolute;
+            bottom: 0.25em;
+            right: 0.25em;
+        }
+    </style>
+    <script>let module = {};</script>
+<script src="https://cdn.jsdelivr.net/gh/bkuzmic/pdf417-js@refs/heads/master/pdf417-min.js"></script>
+<script>
+    function generate(data, canvas) {
+        PDF417.init(data);             
+        var barcode = PDF417.getBarcodeArray();
+
+        // block sizes (width and height) in pixels
+        var bw = 2;
+        var bh = 2;
+
+        canvas.width = bw * barcode['num_cols'];
+        canvas.height = bh * barcode['num_rows'];
+
+        const ctx = canvas.getContext('2d');                    
+
+        // graph barcode elements
+        let y = 0;
+        // for each row
+        for (let r = 0; r < barcode['num_rows']; ++r) {
+            let x = 0;
+            // for each column
+            for (let c = 0; c < barcode['num_cols']; ++c) {
+                if (barcode['bcode'][r][c] == 1) {                        
+                    ctx.fillRect(x, y, bw, bh);
+                }
+                x += bw;
+            }
+            y += bh;
+        }       
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        try {
+            /** @type {HTMLCanvasElement} */
+            const bcCanvas = document.querySelector(".badge-barcode");
+            generate("42069:\tOh Shit A Bear", bcCanvas);
+        } finally {
+            window.badgeReady = true;
+        }
+    });
+</script>
+
+</body>
+</html>
