@@ -67,7 +67,7 @@
     "vite-plugin-solid": "^2.11.11",
     "vite-plugin-wasm": "^3.5.0",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.4"
+    "vitest": "^5.0.0"
   },
   "allowScripts": {
     "@parcel/watcher@2.6.0": true,
