@@ -21,6 +21,8 @@ from fm_eventmanager.security_checks import (
     assert_strong_mqtt_secret,
 )
 
+from fm_eventmanager.storage_config import get_storage_config
+
 
 def eval_bool(x):
     return x.lower() in ("true", "1", "t", "y", "yes")
@@ -682,9 +684,7 @@ if DEBUG:
     MEDIA_ROOT = os.getenv("MEDIA_ROOT", "/app/apis/media/")
 
 STORAGES = {
-    "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
-    },
+    "default": get_storage_config(),
     "staticfiles": {
         "BACKEND": "fm_eventmanager.file_storage.SelectiveManifestStaticFilesStorage",
     },

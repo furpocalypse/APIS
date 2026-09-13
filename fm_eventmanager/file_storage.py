@@ -6,6 +6,7 @@ def _is_excluded(name: str) -> bool:
 
 
 class SelectiveManifestStaticFilesStorage(ManifestStaticFilesStorage):
+    """Storage backend for handling static files defined in a Vite mamifest."""
     def hashed_name(self, name, content=None, filename=None):
         if _is_excluded(name):
             return name
