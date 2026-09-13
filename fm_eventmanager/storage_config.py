@@ -77,7 +77,11 @@ def get_storage_config():
         if "AWS_S3_ADDRESSING_STYLE" in _environ:
             storage_options["addressing_style"] = _getenv("AWS_S3_ADDRESSING_STYLE")
 
-    if storage_backend == "storages.backend.azure_storage.AzureStorage":
+    if storage_backend == "storages.backends.azure_storage.AzureStorage":
+        storage_options = {
+            "azure_container": _getenv("AZURE_CONTAINER")
+        }
+        
         if "AZURE_CONNECTION_STRING" in _environ:
             storage_options["connection_string"] = _getenv("AZURE_CONNECTION_STRING")
         if "AZURE_ACCOUNT_NAME" in _environ:
@@ -88,8 +92,6 @@ def get_storage_config():
             storage_options["token_credential"] = _getenv("AZURE_TOKEN_CREDENTIAL")
         if "AZURE_SAS_TOKEN" in _environ:
             storage_options["sas_token"] = _getenv("AZURE_SAS_TOKEN")
-        if "AZURE_CONTAINER" in _environ:
-            storage_options["azure_container"] = _getenv("AZURE_CONTAINER")
         if "AZURE_LOCATION" in _environ:
             storage_options["azure_location"] = _getenv("AZURE_LOCATION")
         if "AZURE_SSL" in _environ:

@@ -52,7 +52,7 @@ dependencies = [
     "whitenoise[brotli]>=6.12.0",
     "httpx[http2]>=0.28.1",
     "pdf417>=0.8.1",
-    "django-storages[s3]>=1.14.6",
+    "django-storages[azure,s3]>=1.14.6",
 ]
 
 [dependency-groups]
