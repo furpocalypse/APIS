@@ -156,6 +156,9 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
                 "name": badge.badgeName,
                 "level": level,
                 "number": badge.badgeNumber,
+                "background_title": badge.background.title,
+                "background_artist": badge.background.artist,
+                "background_image": badge.background.getImageDataUri(),
             }
         )
 

@@ -21,6 +21,8 @@ from fm_eventmanager.security_checks import (
     assert_strong_mqtt_secret,
 )
 
+from fm_eventmanager.storage_config import get_storage_config
+
 
 def eval_bool(x):
     return x.lower() in ("true", "1", "t", "y", "yes")
@@ -675,11 +677,14 @@ STATIC_ROOT = os.getenv("STATIC_ROOT", "/app/apis/static/")
 # up automatically because ``registration`` is an INSTALLED_APP. Pointing
 # STATICFILES_DIRS at ``/app/apis/static/bundler`` is circular (that path is
 # ``collectstatic``'s destination, not its source) and triggers W004.
+if DEBUG:
+    # Stopgap to get uploaded images working on dev.
+    # Still figuring out prod.
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = os.getenv("MEDIA_ROOT", "/app/apis/media/")
 
 STORAGES = {
-    "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
-    },
+    "default": get_storage_config(),
     "staticfiles": {
         "BACKEND": "fm_eventmanager.file_storage.SelectiveManifestStaticFilesStorage",
     },

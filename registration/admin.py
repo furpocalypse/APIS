@@ -31,11 +31,12 @@ from qrcode.image.svg import SvgPathFillImage
 import registration.emails
 import registration.views.onsite_admin
 from registration import mqtt, payments, paypal_payments, tasks
-from registration.forms import FirebaseForm
+from registration.forms import BadgeBackgroundForm, FirebaseForm
 from registration.models import (
     Attendee,
     AttendeeOptions,
     Badge,
+    BadgeBackground,
     BadgeTemplate,
     BanList,
     Cart,
@@ -1149,8 +1150,8 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
             {
                 "fields": (
                     "printed",
-                    ("badgeName", "badgeNumber", "get_age_range"),
-                    ("registeredDate", "event", "registrationToken"),
+                    ("badgeName", "event", "badgeNumber", "background", "get_age_range"),
+                    ("registeredDate", "registrationToken"),
                     "image_signature",
                     "attendee",
                 )
@@ -1184,6 +1185,17 @@ class BadgeAdmin(NestedModelAdmin, ImportExportModelAdmin):
             obj.delete()
         self.message_user(request, f"Removed {len(abandoned)} abandoned orders.")
 
+@admin.register(BadgeBackground)
+class BadgeBackgroundAdmin(admin.ModelAdmin):
+    list_display = [
+        "letter_id",
+        "title",
+        "artist",
+        "event"
+    ]
+    list_display_links = ["title"]
+    list_filter = ["artist", "event"]
+    form = BadgeBackgroundForm
 
 @admin.register(Attendee)
 class AttendeeAdmin(NestedModelAdmin):
