@@ -20,7 +20,6 @@ from fm_eventmanager.security_checks import (
     assert_no_placeholder_proxy_cidrs,
     assert_strong_mqtt_secret,
 )
-
 from fm_eventmanager.storage_config import get_storage_config
 
 

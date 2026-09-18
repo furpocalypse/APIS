@@ -1,9 +1,7 @@
 """Module providing storage config and options for settings.py."""
 
-from os import (
-    getenv as _getenv,
-    environ as _environ
-)
+from os import environ as _environ, getenv as _getenv
+
 
 def get_storage_config():
     """Provides configuration of cloud (or local) storage for upload fields.
@@ -23,7 +21,7 @@ def get_storage_config():
     Additional support can be added as necessary.
 
     Refer to .env.production.example in the project root and django-storages's
-    documentation for more information on storage settings. 
+    documentation for more information on storage settings.
 
     Example:
 
@@ -81,7 +79,7 @@ def get_storage_config():
         storage_options = {
             "azure_container": _getenv("AZURE_CONTAINER")
         }
-        
+
         if "AZURE_CONNECTION_STRING" in _environ:
             storage_options["connection_string"] = _getenv("AZURE_CONNECTION_STRING")
         if "AZURE_ACCOUNT_NAME" in _environ:

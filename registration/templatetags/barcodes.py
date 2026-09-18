@@ -11,7 +11,7 @@ from xml.etree import ElementTree as ET
 
 import qrcode
 from django import template
-from django.utils.html import mark_safe
+from django.utils.safestring import mark_safe
 from pdf417 import encode, render_image, render_svg
 from qrcode.image.styledpil import StyledPilImage
 from qrcode.image.styles.moduledrawers.pil import CircleModuleDrawer
