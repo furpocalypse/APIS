@@ -18,6 +18,7 @@ from qrcode.image.styles.moduledrawers.pil import CircleModuleDrawer
 
 register = template.Library()
 
+
 @register.simple_tag
 def pdf417_svg(*args, **kwargs) -> str:
     """
@@ -61,9 +62,10 @@ def pdf417_svg(*args, **kwargs) -> str:
     class_list = kwargs.get("class_list")
     codes = encode(delimiter.join(str(x) for x in args), columns, security_level)
     svg = render_svg(codes)
-    if (class_list):
+    if class_list:
         svg.getroot().set("class", class_list)
     return mark_safe(ET.tostring(svg.getroot(), "unicode"))
+
 
 @register.simple_tag
 def pdf417_data_uri(*args, **kwargs) -> str:
@@ -110,8 +112,9 @@ def pdf417_data_uri(*args, **kwargs) -> str:
     b64 = b64encode(buffered.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{b64}"
 
+
 @register.simple_tag
-def qr_data_uri(data: str, circles = False) -> str:
+def qr_data_uri(data: str, circles=False) -> str:
     """
     Generates a data URI for a QR code containing arbitrary text data.
 
@@ -128,8 +131,7 @@ def qr_data_uri(data: str, circles = False) -> str:
     """
 
     qr = qrcode.QRCode(
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        image_factory=StyledPilImage
+        error_correction=qrcode.constants.ERROR_CORRECT_H, image_factory=StyledPilImage
     )
     qr.add_data(data)
     mk_img_kwargs = {}

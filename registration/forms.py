@@ -128,13 +128,7 @@ class BadgeBackgroundForm(forms.ModelForm):
 
     class Meta:
         model = BadgeBackground
-        fields = (
-            "event",
-            "letter_id",
-            "title",
-            "artist",
-            "image"
-        )
+        fields = ("event", "letter_id", "title", "artist", "image")
 
 
 class OrderForm(forms.ModelForm):

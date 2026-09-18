@@ -726,7 +726,7 @@ class BadgeBackground(models.Model):
             ),
         ]
         ordering = ["event", "letter_id"]
-        #ordering = ["-event__eventStart", "letter_id"]
+        # ordering = ["-event__eventStart", "letter_id"]
 
     def getImageDataUri(self):
         img_bytes = self.image.read()
@@ -736,7 +736,7 @@ class BadgeBackground(models.Model):
         return f"data:image/{ext};base64,{base64_utf8_str}"
 
     def __str__(self):
-        return f"{self.letter_id}: \"{self.title}\""
+        return f'{self.letter_id}: "{self.title}"'
 
 
 class Badge(models.Model):
