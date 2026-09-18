@@ -35,12 +35,12 @@ def get_storage_config():
     """
 
     storage_backend = _getenv(
-        "DEFAULT_STORAGE_METHOD",
-        "django.core.files.storage.FileSystemStorage")
+        "DEFAULT_STORAGE_METHOD", "django.core.files.storage.FileSystemStorage"
+    )
 
     storage_options = None
 
-    storage_config = { "BACKEND": storage_backend }
+    storage_config = {"BACKEND": storage_backend}
     if storage_backend == "storages.backends.s3.S3Storage":
         storage_options = {
             "bucket_name": _getenv("AWS_STORAGE_BUCKET_NAME"),
@@ -76,9 +76,7 @@ def get_storage_config():
             storage_options["addressing_style"] = _getenv("AWS_S3_ADDRESSING_STYLE")
 
     if storage_backend == "storages.backends.azure_storage.AzureStorage":
-        storage_options = {
-            "azure_container": _getenv("AZURE_CONTAINER")
-        }
+        storage_options = {"azure_container": _getenv("AZURE_CONTAINER")}
 
         if "AZURE_CONNECTION_STRING" in _environ:
             storage_options["connection_string"] = _getenv("AZURE_CONNECTION_STRING")
@@ -115,4 +113,3 @@ def get_storage_config():
         storage_config["OPTIONS"] = storage_options
 
     return storage_config
-
