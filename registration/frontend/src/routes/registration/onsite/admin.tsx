@@ -137,7 +137,7 @@ const MqttConnecting: Component<{ mqtt?: MqttClient }> = (props) => {
     errorMessage() ? "alert-danger" : "alert-warning";
 
   return (
-    <Show when={!props.mqtt?.isConnected()}>
+    <Show when={props.mqtt && !props.mqtt?.isConnected()}>
       <div class={`alert my-3 ${errorClasses()}`}>
         <h4 class="alert-heading d-flex align-items-center column-gap-2">
           <span>Connecting to MQTT</span> <div class="spinner-border" />

@@ -8,6 +8,7 @@ import {
 import {
   type Component,
   type Setter,
+  Show,
   createEffect,
   createMemo,
   createSignal,
@@ -113,6 +114,7 @@ export const CartActions: Component<{
   const hasPrintableBadges = () => printableBadgeIds()?.length > 0 || false;
   const supportsCard = () => config()?.terminals?.selected?.features.card;
   const canDiscount = () => config()?.permissions.discount;
+  const isMqttEnabled = () => !!config()?.mqtt;
 
   const badgeReferences = () =>
     props.entries?.result?.map((badge) => badge.reference) || [];
@@ -120,6 +122,7 @@ export const CartActions: Component<{
   return (
     <div>
       <div class="row g-2 mb-2">
+        <Show when={isMqttEnabled()}>
         <ActionButton
           class="btn-outline-warning"
           disabled={loading() || !canApplyPayment() || !canDiscount()}
@@ -131,7 +134,9 @@ export const CartActions: Component<{
         >
           <IconAndLabel children="Discount" icon={faGift} fw />
         </ActionButton>
+        </Show>
 
+        <Show when={terminalHandlesCash()}>
         <ActionButton
           class="btn-primary"
           disabled={loading() || !terminalHandlesCash() || !canApplyPayment()}
@@ -149,7 +154,9 @@ export const CartActions: Component<{
         >
           <IconAndLabel children="Cash" icon={faMoneyBillAlt} fw />
         </ActionButton>
+        </Show>
 
+        <Show when={supportsCard()}>
         <ActionButton
           class="btn-primary"
           disabled={loading() || !supportsCard() || !canApplyPayment()}
@@ -159,9 +166,11 @@ export const CartActions: Component<{
         >
           <IconAndLabel children="Card" icon={faCreditCard} fw />
         </ActionButton>
+        </Show>
       </div>
 
       <div class="row g-2">
+        <Show when={hasSquareTerminal()}>
         <ActionButton
           class="btn-outline-info"
           disabled={loading() || !hasSquareTerminal() || !allBadgesPaid()}
@@ -170,6 +179,7 @@ export const CartActions: Component<{
         >
           <IconAndLabel children="Receipt" icon={faReceipt} fw />
         </ActionButton>
+        </Show>
 
         <ActionButton
           class="btn-info"
