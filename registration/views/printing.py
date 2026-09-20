@@ -151,11 +151,19 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
         elif Dealer.objects.filter(attendee=badge.attendee, event=badge.event).exists():
             level = "Dealer"
 
+        # badge.background can be None, this is done to appease mypy
+        bg_title = badge.background.title if badge.background else ""
+        bg_artist = badge.background.artist if badge.background else ""
+        bg_image = badge.background.getImageDataUri() if badge.background else ""
+
         badge_groups[badge_template.id].append(
             {
                 "name": badge.badgeName,
                 "level": level,
                 "number": badge.badgeNumber,
+                "background_title": bg_title,
+                "background_artist": bg_artist,
+                "background_image": bg_image,
             }
         )
 

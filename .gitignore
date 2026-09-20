@@ -39,6 +39,7 @@ fm_eventmanager/maintenance_mode_state.txt
 localhost.crt
 localhost.key
 .env
+.env.dev
 .env.production
 .env.*.local
 database.env
@@ -70,3 +71,4 @@ docker-compose.override.yaml
 /registration/static/import_export/
 /registration/static/mfa/
 azure/.azure
+/media/*
