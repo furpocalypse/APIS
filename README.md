@@ -48,6 +48,7 @@ cd APIS
 # Decision #11: `.env.dev` is TRACKED, complete and secret-free — the dev
 # compose loads it directly, so `docker compose up` Just Works after a
 # clean clone. Only the DB credential file is per-machine:
+cp .env.dev .env
 cp database.env.example database.env
 # (database.env is gitignored. DATABASE_USER / DATABASE_PASS in .env.dev
 # must match POSTGRES_USER / POSTGRES_PASSWORD in database.env; edit
@@ -100,7 +101,7 @@ unless you are narrowing down a specific failure.
 
 #### Prerequisites
 
-- `uv` installed (see the Manual setup section above).
+- `uv` installed ([install instructions][uv-install]).
 - Docker + Docker Compose running — the Django suite connects to real
   PostgreSQL, Redis, and Gotenberg instances rather than mocking them.
   `make test-django` runs `make services-up` for you, but you can start
@@ -119,7 +120,7 @@ unless you are narrowing down a specific failure.
 
 | Target                         | What it runs                                                                 |
 |--------------------------------|------------------------------------------------------------------------------|
-| `make test`                    | Full regression gate: Django + Vitest + Playwright. Use before opening a PR. |
+| `make test`                    | Django + Vitest.                            |
 | `make test-django`             | All 450+ Django tests against a throwaway Postgres DB.                       |
 | `make test-paypal`             | Only tests tagged `paypal` / `PayPal` — fastest feedback for payment work.   |
 | `make test-coverage`           | Django suite under `coverage`; emits `htmlcov/` + terminal summary.          |

@@ -5,9 +5,10 @@ from json import JSONDecodeError
 from typing import Any, cast
 
 from django.db import transaction
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from idempotency_key.decorators import idempotency_key
 from paypalserversdk.exceptions.api_exception import ApiException
+from paypalserversdk.exceptions.error_exception import ErrorException
 
 from registration import mqtt, tasks
 from registration.forms import OrderForm
@@ -185,6 +186,8 @@ def do_checkout(
 
     price_level_counts = _count_price_levels(cartItems, orderItems)
 
+    response: dict | str = {}
+
     try:
         # Reserve capacity and persist a PENDING Order + cart items up
         # front. This matches the limited-registration-stock design: the
@@ -205,52 +208,53 @@ def do_checkout(
             order.save()
             _save_order_items(order, cartItems, orderItems)
 
-        # Payment dispatch. charge_payment / capture_paypal_payment set
-        # order.status and save on their own success/failure branches
-        # (except a couple of PayPal early-return error paths handled by
-        # the normalization guard below).
-        status: bool
-        response: dict | str
-        if processor == "paypal":
-            orderId = billingData.get("source_id")
-            if not orderId:
-                status, response = False, "Missing PayPal order ID"
+            # Payment dispatch. charge_payment / capture_paypal_payment set
+            # order.status and save on their own success/failure branches
+            # (except a couple of PayPal early-return error paths handled by
+            # the normalization guard below).
+            status: bool
+
+            if processor == "paypal":
+                orderId = billingData.get("source_id")
+                if not orderId:
+                    status, response = False, "Missing PayPal order ID"
+                else:
+                    mock_response = ""
+                    if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
+                        post_data = json.loads(request.body)
+                        mock_response = post_data.get("paypalMockResponse")
+                    status, response = capture_paypal_payment(orderId, order, mock_response)
+            elif processor == "square":
+                status, response = charge_payment(order, billingData, request)
             else:
-                mock_response = ""
-                if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
-                    post_data = json.loads(request.body)
-                    mock_response = post_data.get("paypalMockResponse")
-                status, response = capture_paypal_payment(orderId, order, mock_response)
-        elif processor == "square":
-            status, response = charge_payment(order, billingData, request)
-        else:
-            status, response = (
-                False,
-                {"errors": [{"code": f"Unknown processor: {processor}"}]},
-            )
+                status, response = (
+                    False,
+                    {"errors": [{"code": f"Unknown processor: {processor}"}]},
+                )
 
-        # S24 + peer-review BLOCK-1: charge_payment / capture_paypal_payment
-        # now fuse the PENDING→terminal status write WITH the capacity
-        # transition in a single atomic compare-and-set
-        # (transition_order_status, expected=PENDING). There is no longer a
-        # raw, unguarded update_capacity_for_status_change here — that was
-        # the double-decrement defect (a concurrent webhook winning the CAS
-        # then this path also adjusting capacity). The only post-handler
-        # work is finalizing PayPal early-return paths (Missing-id /
-        # JSON-decode) that return without transitioning: this CAS fails
-        # those still-PENDING orders exactly once; if a handler or a
-        # concurrent webhook already moved the order off PENDING it
-        # no-ops (no double capacity, no clobber of the winner).
-        target = Order.COMPLETED if status else Order.FAILED
-        transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
+            # S24 + peer-review BLOCK-1: charge_payment / capture_paypal_payment
+            # now fuse the PENDING→terminal status write WITH the capacity
+            # transition in a single atomic compare-and-set
+            # (transition_order_status, expected=PENDING). There is no longer a
+            # raw, unguarded update_capacity_for_status_change here — that was
+            # the double-decrement defect (a concurrent webhook winning the CAS
+            # then this path also adjusting capacity). The only post-handler
+            # work is finalizing PayPal early-return paths (Missing-id /
+            # JSON-decode) that return without transitioning: this CAS fails
+            # those still-PENDING orders exactly once; if a handler or a
+            # concurrent webhook already moved the order off PENDING it
+            # no-ops (no double capacity, no clobber of the winner).
+            target = Order.COMPLETED if status else Order.FAILED
+            transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
 
-        if status:
-            if discount:
-                discount.used = discount.used + 1
-                discount.save()
-            return True, {"errors": []}, order
+            if status:
+                if discount:
+                    discount.used = discount.used + 1
+                    discount.save()
+                return True, {"errors": []}, order
+            raise RuntimeError
+    except RuntimeError as exp:
         return False, response, order
-
     except Exception as e:
         logger.error(f"Error during checkout: {e}")
         if order.id:

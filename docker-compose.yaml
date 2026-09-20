@@ -43,7 +43,7 @@ services:
       - ./registration:/app/registration
       - ./fm_eventmanager/settings.py:/app/fm_eventmanager/settings.py
     env_file:
-      - .env.dev
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,7 +59,7 @@ services:
       - ./registration:/app/registration
       - ./fm_eventmanager/settings.py:/app/fm_eventmanager/settings.py
     env_file:
-      - .env.dev
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
