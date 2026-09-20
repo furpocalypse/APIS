@@ -1,6 +1,9 @@
 from datetime import timedelta
+from os.path import join
 from tempfile import TemporaryDirectory
+from urllib.parse import urljoin
 
+from django.conf import settings
 from django.test import TestCase
 from django.utils import timezone
 from PIL import Image
@@ -116,7 +119,8 @@ class TestGetOptionsDict(TestCase):
         # Add an image to the price level option
         image = Image.new("RGB", (200, 100), "white")
         image_path = f"{self.tempdir.name}/testimage.jpg"
-        image.save(image_path)
+        image_url = urljoin(settings.MEDIA_URL, f".{image_path}")
+        image.save(join(settings.MEDIA_ROOT, image_path))
         pl_option.optionImage = image_path
         pl_option.save()
 
@@ -132,7 +136,7 @@ class TestGetOptionsDict(TestCase):
                     "type": pl_option.optionExtraType,
                     "value": attendee_option.optionValue,
                     "id": pl_option.id,
-                    "image": image_path,
+                    "image": image_url,
                 }
             ],
         )
