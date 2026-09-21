@@ -34,7 +34,7 @@ Commands:
 	make dev-migrate                : Apply Django migrations (inside `make dev` container)
 	make dev-createsuperuser        : Create a Django superuser (inside `make dev` container, interactive)
 
-	make test                       : Run Django + Playwright end-to-end suites (full regression gate)
+	make test                       : Run Django + frontend suites (Playwright excluded; see make e2e)
 	make test-django                : Run only the Django test suite
 	make test-paypal                : Run only PayPal-tagged tests (uses uv)
 	make test-coverage              : Run Django test suite under coverage; emit htmlcov/
@@ -98,7 +98,7 @@ dev:
 dev-setup:
 	uv sync
 	@echo "Settings are checked into fm_eventmanager/settings.py (single canonical file)."
-	@echo "Copy .env.dev.example to .env and adjust if needed; then run 'docker compose up -d'."
+	@echo "Copy .env.dev to .env and adjust if needed; then run 'docker compose up -d'."
 
 pre-commit-setup:
 	pip3 install pre-commit
@@ -174,6 +174,7 @@ TEST_DATABASE_PASS ?= secret
 TEST_DATABASE_NAME ?= apis
 TEST_REDIS_HOST    ?= 127.0.0.1
 TEST_REDIS_PORT    ?= 6379
+TEST_GOTENBERG_URL ?= http://127.0.0.1:3000
 
 TEST_STATIC_ROOT ?= $(CURDIR)/build/test-static
 
@@ -195,15 +196,6 @@ PAYPAL_CLIENT_SECRET  ?= test
 SQUARE_APPLICATION_ID ?= test
 SQUARE_ACCESS_TOKEN   ?= test
 SQUARE_LOCATION_ID    ?= test
-
-# Decision #11: the test posture lives in the tracked, secret-free,
-# fully-independent .env.test (APIS_ENV=test). TEST_ENV is a command
-# prefix that loads it (set -a exports every KEY=value) so the existing
-# `$(TEST_ENV) uv run …` call sites are unchanged. Pre-exported env vars
-# (e.g. real PAYPAL_* sandbox creds for `make test-paypal`) can still be
-# layered by exporting them before invoking make and re-sourcing is
-# idempotent. CI does NOT use this — django.yml loads .env.ci directly.
-TEST_ENV = set -a && . ./.env.test && set +a &&
 
 # Fail loudly if a model change on the branch lacks a migration. Django's
 # test runner applies existing migrations to the throwaway test database, so
