@@ -414,7 +414,14 @@ def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
         total, order_items = _set_up_assistant_checkout(request, form_data, dealer, event)
 
     status, message, order = do_checkout(
-        processor, billing_data, total, None, [], order_items, Decimal(0), Decimal(0)
+        processor=processor,
+        billingData=billing_data,
+        total=total,
+        discount=None,
+        cartItems=[],
+        orderItems=order_items,
+        donationOrg=Decimal(0),
+        donationCharity=Decimal(0),
     )
 
     if status:
@@ -654,9 +661,9 @@ def checkout_dealer(request):
     porg = Decimal(post_data["orgDonation"].strip() or "0.00")
     pcharity = Decimal(post_data.get("charityDonation", "0.00").strip() or "0.00")
     if porg < 0:
-        porg = 0
+        porg = Decimal(0)
     if pcharity < 0:
-        pcharity = 0
+        pcharity = Decimal(0)
 
     total = subtotal + porg + pcharity
 
@@ -665,7 +672,15 @@ def checkout_dealer(request):
     if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
     status, message, order = do_checkout(
-        pproc, pbill, total, discount, None, order_items, porg, pcharity, request
+        processor=pproc,
+        billingData=pbill,
+        total=total,
+        discount=discount,
+        cartItems=[],
+        orderItems=order_items,
+        donationOrg=porg,
+        donationCharity=pcharity,
+        request=request,
     )
 
     if status:

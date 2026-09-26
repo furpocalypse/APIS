@@ -149,7 +149,7 @@ class CapacityTestMixin:
         """Create completed orders that consume capacity."""
         return self._create_order_with_items(price_level, quantity, Order.COMPLETED)
 
-    def _create_cart_item(self, price_level):
+    def _create_cart_item(self, price_level) -> Cart:
         """Create a cart item targeting a price level."""
         cart_data = {
             "attendee": {

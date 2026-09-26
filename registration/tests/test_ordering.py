@@ -211,15 +211,15 @@ class TestOrderingModule(OrdersTestCase):
 
         mock_capture.return_value = (False, {"errors": ["Mock failure"]})
         (result, resp, created_order) = do_checkout(
-            "paypal",
-            {"source_id": "Anything"},
-            Decimal(50),
-            None,
-            self.cart_item_models,
-            [],
-            Decimal(0),
-            Decimal(0),
-            req,
+            processor="paypal",
+            billingData={"source_id": "Anything"},
+            total=Decimal(50),
+            discount=None,
+            cartItems=self.cart_item_models,
+            orderItems=[],
+            donationOrg=Decimal(0),
+            donationCharity=Decimal(0),
+            request=req,
         )
 
         self.assertFalse(result, "do_checkout should return a False result on capture failure")
@@ -250,7 +250,15 @@ class TestOrderingModule(OrdersTestCase):
 
         mock_capture.return_value = (True, {})
         (result, resp, created_order) = do_checkout(
-            "paypal", {}, Decimal(50), None, self.cart_item_models, [], Decimal(0), Decimal(0), req
+            processor="paypal",
+            billingData={},
+            total=Decimal(50),
+            discount=None,
+            cartItems=self.cart_item_models,
+            orderItems=[],
+            donationOrg=Decimal(0),
+            donationCharity=Decimal(0),
+            request=req,
         )
 
         self.assertTrue(result, "do_checkout should return a True result on capture success!")

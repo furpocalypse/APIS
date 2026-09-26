@@ -181,7 +181,7 @@ def saveCart(cart):
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
     cart.transferedDate = timezone.now()
-    cart.save()
+    # cart.save()
 
     return order_item
 

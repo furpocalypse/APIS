@@ -275,12 +275,8 @@ def checkout_upgrade(request):
 
         return send_upgrade_email(request, attendee, order)
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
+    porg = Decimal(max(post_data.get("orgDonation") or "0.00", 0))
+    pcharity = Decimal(max(post_data.get("charityDonation") or "0.00", 0))
 
     total = subtotal + porg + pcharity
 
@@ -288,7 +284,16 @@ def checkout_upgrade(request):
     pbill = post_data.get("billingData", {})
     if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
-    status, message, order = do_checkout(pproc, pbill, total, None, [], order_items, porg, pcharity)
+    status, message, order = do_checkout(
+        processor=pproc,
+        billingData=pbill,
+        total=total,
+        discount=None,
+        cartItems=[],
+        orderItems=order_items,
+        donationOrg=porg,
+        donationCharity=pcharity,
+    )
 
     if status:
         return send_upgrade_email(request, attendee, order)

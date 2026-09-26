@@ -2,7 +2,7 @@ import json
 import logging
 from collections import Counter
 from json import JSONDecodeError
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -95,18 +95,34 @@ def _check_capacity(price_level_counts):
     return levels, None
 
 
-def _save_order_items(order, cartItems, orderItems):
+def _create_order_items(order: Order, cartItems: list, orderItems: list):
     """Save cart items or order items linked to an order."""
     if cartItems:
         for item in cartItems:
             order_item = cart.saveCart(item)
             order_item.order = order
-            order_item.save()
     elif orderItems:
         for order_item in orderItems:
             order_item.order = order
-            order_item.save()
 
+def _commit_order_items(order: Order, cartItems: list, orderItems: list):
+    """Save cart items or order items linked to an order."""
+    for item in cartItems:
+        order_item = cart.OrderItem.objects.filter(item)
+        order_item.save()
+    for order_item in orderItems:
+        order_item.save()
+
+
+def _save_order_items(order: Order, cartItems: list, orderItems: list):
+    """Save cart items or order items linked to an order."""
+    for item in cartItems:
+        order_item = cart.OrderItem.objects.filter(item)
+        order_item.order = order
+        order_item.save()
+    for order_item in orderItems:
+        order_item.order = order
+        order_item.save()
 
 def get_cart_data_from_session(
     request: HttpRequest,
@@ -132,12 +148,13 @@ def get_cart_data_from_session(
 
 
 def do_checkout(
-    processor: str,
+    *,
+    processor: Literal["square"] | Literal["paypal"],
     billingData: BillingData,
     total: Decimal,
     discount: Discount | None,
-    cartItems: list,
-    orderItems: list,
+    cartItems: list[Cart],
+    orderItems: list[OrderItem],
     donationOrg: Decimal,
     donationCharity: Decimal,
     request: HttpRequest | None = None,
@@ -205,7 +222,7 @@ def do_checkout(
             # transition (no prior status to CAS from; capacity is the
             # reserve_slots() above).
             order.status = Order.PENDING  # status-writer-ok: initial create
-            order.save()
+            # order.save()
             _save_order_items(order, cartItems, orderItems)
 
             # Payment dispatch. charge_payment / capture_paypal_payment set
@@ -214,7 +231,9 @@ def do_checkout(
             # the normalization guard below).
             status: bool
 
-            if processor == "paypal":
+            if total == Decimal(0):
+                status = True
+            elif processor == "paypal":
                 orderId = billingData.get("source_id")
                 if not orderId:
                     status, response = False, "Missing PayPal order ID"
@@ -618,17 +637,15 @@ def checkout(request):
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
+    porg = Decimal(max(post_data.get("orgDonation") or "0.00", 0))
+    pcharity = Decimal(max(post_data.get("charityDonation") or "0.00", 0))
     pbill = post_data.get("billingData", {})
-    pproc = post_data.get("processor")
+    pproc: str = post_data.get("processor", "")
+    if pproc not in ("square", "paypal"):
+        raise RuntimeError(f"Invalid payment processor {pproc!r}")
 
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
 
-    total = subtotal + porg + pcharity
+    total: Decimal = subtotal + porg + pcharity
 
     if subtotal == 0:
         status, message, order = doZeroCheckout(discount, cart_items, order_items)
@@ -647,7 +664,7 @@ def checkout(request):
     if onsite:
         reference = common.get_unique_confirmation_token(Order)
         order = Order(
-            total=Decimal(total),
+            total=total,
             reference=reference,
             discount=discount,
             orgDonation=porg,
@@ -677,15 +694,15 @@ def checkout(request):
         message = "Onsite success"
     else:
         status, message, order = do_checkout(
-            pproc,
-            pbill,
-            total,
-            discount,
-            cart_items,
-            order_items,
-            porg,
-            pcharity,
-            request,
+            processor=pproc,
+            billingData=pbill,
+            total=total,
+            discount=discount,
+            cartItems=cart_items,
+            orderItems=order_items,
+            donationOrg=porg,
+            donationCharity=pcharity,
+            request=request,
         )
 
     if status:
