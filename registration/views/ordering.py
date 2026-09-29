@@ -612,7 +612,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
     if onsite:
         with transaction.atomic():
             reference = common.get_unique_confirmation_token(Order)
-            order = Order(
+            order: Order = Order(
                 total=total,
                 reference=reference,
                 discount=discount,
@@ -620,9 +620,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
                 charityDonation=pcharity,
                 billingType=Order.UNPAID,
             )
-
             order.status = Order.ONSITE_PENDING
-
             order.save()
 
             if cart_items:
