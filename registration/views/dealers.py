@@ -340,7 +340,7 @@ def _apply_assistants_form(
     return None
 
 
-def dealer_assistants_paypal_create(request):
+def dealer_assistants_paypal_create(request: HttpRequest) -> JsonResponse:
     """Create a PayPal order for adding paid dealer assistants."""
     try:
         form_data = json.loads(request.body)
@@ -354,14 +354,16 @@ def dealer_assistants_paypal_create(request):
     event = Event.objects.get(default=True)
 
     try:
-        total = _set_up_assistant_checkout(request, form_data, dealer, event)
+        total: tuple[Decimal, list[OrderItem]] = _set_up_assistant_checkout(
+            request, form_data, dealer, event
+        )
     except RuntimeError as ex:
-        common.abort(*ex.args)
+        return common.abort(*ex.args)
 
     translated_cart: list[TranslatedCartItem] = [
         {
             "name": f"{event} Dealer Assistant(s) - {dealer.businessName or dealer.attendee}",
-            "total": total,
+            "total": total[0],
             "donation": False,
         },
     ]
@@ -373,7 +375,7 @@ def dealer_assistants_paypal_create(request):
 
     try:
         result = create_unpaid_paypal_order(
-            total, Decimal("0.00"), translated_cart, apis_reference=reference
+            total[0], Decimal("0.00"), translated_cart, apis_reference=reference
         )
         return common.success(reason=json.loads(result.text))
     except ApiException as ex:

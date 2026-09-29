@@ -5,6 +5,7 @@ import random
 import secrets
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from django.conf import settings
 from django.contrib import admin
@@ -807,13 +808,15 @@ class Badge(models.Model):
             return Badge.COMP
         return Badge.ABANDONED
 
-    def effectiveLevel(self):
-        level = None
+    def effectiveLevel(self: "Badge") -> Literal["Unpaid"] | PriceLevel | None:
+        level: Literal["Unpaid"] | PriceLevel | None = None
         orderItems = OrderItem.objects.filter(badge=self, order__isnull=False)
         for oi in orderItems:
             if oi.order.billingType == Order.UNPAID:
                 return Badge.UNPAID
-            if not level or oi.priceLevel.basePrice > level.basePrice:
+            if not level or (
+                isinstance(oi.priceLevel, PriceLevel) and oi.priceLevel.basePrice > level.basePrice
+            ):
                 level = oi.priceLevel
         return level
 

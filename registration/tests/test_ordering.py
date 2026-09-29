@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -192,6 +193,8 @@ class TestOrderingModule(OrdersTestCase):
 
     @patch("registration.views.ordering.capture_paypal_payment")
     def test_do_not_create_order_items_on_failed_capture_paypal(self, mock_capture: MagicMock):
+        resp: dict[str, Any] | str
+
         self.event.collectAddress = False
         self.event.save()
 
@@ -226,8 +229,18 @@ class TestOrderingModule(OrdersTestCase):
         self.assertIsInstance(
             resp, dict, "do_checkout should return a dict as its response on capture failure"
         )
+        key: str
+        if (
+            isinstance(resp, dict)
+            and "errors" in resp
+            and isinstance(resp["errors"], list)
+            and len(resp["errors"]) > 0
+        ):
+            key = resp["errors"][0]
+        else:
+            raise Exception("Response structure is nonconformant.")
         self.assertEqual(
-            resp["errors"][0],
+            key,
             "Mock failure",
             "do_checkout should return an error message in its response on capture failure",
         )
@@ -265,6 +278,10 @@ class TestOrderingModule(OrdersTestCase):
         self.assertIsInstance(
             resp, dict, "do_checkout should return a dict as its response on capture success!"
         )
+        if isinstance(resp, dict) and "errors" in resp and isinstance(resp["errors"], list):
+            len(resp["errors"])
+        else:
+            raise Exception("Response structure is nonconformant.")
         self.assertEqual(
             len(resp["errors"]),
             0,

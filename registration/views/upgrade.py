@@ -1,8 +1,10 @@
 import json
 import logging
+from typing import Literal
 
 from django.forms import model_to_dict
 from django.http import (
+    HttpRequest,
     HttpResponseBadRequest,
     HttpResponseNotFound,
     HttpResponseServerError,
@@ -15,6 +17,7 @@ from registration import tasks
 from registration.models import Attendee, Badge, Decimal, Event, Order, OrderItem, PriceLevel
 from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
+from registration.types import TranslatedCartItem
 
 from . import common
 from .common import clear_session, getOptionsDict, to_json_safe
@@ -151,7 +154,9 @@ def invoice_upgrade(request):
         else:
             badge = Badge.objects.get(id=badgeId)
             attendee = Attendee.objects.get(id=attendeeId)
-            lvl = badge.effectiveLevel()
+            lvl: PriceLevel | Literal["Unpaid"] | None = badge.effectiveLevel()
+            if not isinstance(lvl, PriceLevel):
+                return common.abort(400, "Must upgrade an existing badge.")
             lvl_dict = {"basePrice": lvl.basePrice}
             orderItems = list(OrderItem.objects.filter(id__in=sessionItems))
             total, total_discount = get_total([], orderItems)
@@ -183,7 +188,7 @@ def send_upgrade_email(request, attendee, order):
     return JsonResponse({"success": True})
 
 
-def upgrade_paypal_create(request):
+def upgrade_paypal_create(request: HttpRequest) -> JsonResponse:
     """Create a PayPal order for an upgrade checkout.
 
     Mirrors :func:`registration.views.ordering.create_paypal_order` but
@@ -203,38 +208,38 @@ def upgrade_paypal_create(request):
         logger.error("Unable to decode JSON for upgrade_paypal_create()")
         return common.abort(400, "Unable to parse input options")
 
-    subtotal, total_discount = get_total([], order_items)
+    _subtotal, _total_discount = get_total([], order_items)
+    subtotal: Decimal = Decimal(_subtotal)
+    total_discount: Decimal = Decimal(_total_discount)
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
+    porg: Decimal = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
+    pcharity: Decimal = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
 
-    total = subtotal + porg + pcharity
+    total: Decimal = subtotal + porg + pcharity
     if total <= 0:
         return common.abort(400, "Cart total is zero; use the zero-checkout flow")
 
     event = Event.objects.get(default=True)
-    first = order_items[0]
+    first: OrderItem = order_items[0]
     label = f"{first.priceLevel} - {first.badge.attendee}"
-    translated_cart: list[dict[str, str | Decimal | int | bool]] = [
-        {
-            "name": f"{event} Upgrade - {label}",
-            "total": subtotal - total_discount,
-            "donation": False,
-        }
+    translated_cart: list[TranslatedCartItem] = [
+        TranslatedCartItem(
+            name=f"{event} Upgrade - {label}",
+            total=subtotal - total_discount,
+            donation=False,
+        )
     ]
     if porg > 0:
-        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
+        translated_cart.append(
+            TranslatedCartItem(name=f"Donation to {event}", total=porg, donation=True)
+        )
     if pcharity > 0:
         translated_cart.append(
-            {
-                "name": f"Donation to {event.charity}",
-                "total": pcharity,
-                "donation": True,
-            }
+            TranslatedCartItem(
+                name=f"Donation to {event.charity}",
+                total=pcharity,
+                donation=True,
+            )
         )
 
     reference = request.session.get("pending_paypal_reference")
@@ -252,6 +257,7 @@ def upgrade_paypal_create(request):
 
 
 def checkout_upgrade(request):
+    message: str = ""
     session_items = request.session.get("order_items", [])
     order_items = list(OrderItem.objects.filter(id__in=session_items))
     if "attendee_id" not in request.session:

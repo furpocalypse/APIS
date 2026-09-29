@@ -144,7 +144,7 @@ def do_checkout(
     request: HttpRequest | None = None,
 ) -> tuple[bool, dict | str, Order | None]:
 
-    response: dict | str = {}
+    response: dict[str, Any] | str = {}
 
     try:
         with transaction.atomic():
@@ -206,7 +206,8 @@ def do_checkout(
             elif processor == "paypal":
                 orderId = billingData.get("source_id")
                 if not orderId:
-                    status, response = False, "Missing PayPal order ID"
+                    status = False
+                    response = "Missing PayPal order ID"
                 else:
                     mock_response = ""
                     if request and settings.PAYPAL_ENVIRONMENT.lower()[0] != "p":
@@ -313,7 +314,7 @@ def get_order_item_option_total(options):
     return optionTotal
 
 
-def get_discount_total(disc: str | Discount, subtotal: Decimal) -> Decimal:
+def get_discount_total(disc: Discount, subtotal: Decimal) -> Decimal:
     """Accept either a ``Discount`` model instance or a string code name.
 
     Callers in ``cart.py``/``onsite.py``/``onsite_admin.py`` hand in already-
@@ -322,9 +323,9 @@ def get_discount_total(disc: str | Discount, subtotal: Decimal) -> Decimal:
     name before the DB lookup.
     """
     if isinstance(disc, Discount):
-        disc = disc.codeName
+        disc_id: str = disc.codeName
     try:
-        discount = Discount.objects.get(codeName=disc)
+        discount = Discount.objects.get(codeName=disc_id)
     except (Discount.DoesNotExist, ValueError, TypeError):
         return Decimal(0)
     if discount.isValid():
@@ -336,7 +337,7 @@ def get_discount_total(disc: str | Discount, subtotal: Decimal) -> Decimal:
 
 
 def get_line_item_total(
-    item: Cart | OrderItem, disc: str | None = ""
+    item: Cart | OrderItem, disc: Discount | None = None
 ) -> tuple[Decimal | int, Decimal | int]:
     item_total = Decimal(0)
     discount = Decimal(0)
@@ -364,7 +365,7 @@ def get_line_item_total(
 
 
 def get_total(
-    cartItems: list[Cart], orderItems: list[OrderItem], disc: str | None = ""
+    cartItems: list[Cart], orderItems: list[OrderItem], disc: Discount | None = None
 ) -> tuple[Decimal | int, Decimal | int]:
     total: Decimal | int = 0
     total_discount: Decimal | int = 0
@@ -459,14 +460,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 
     event = Event.objects.get(default=True)
 
-    discount_qs = Discount.objects.filter(codeName=discount_code)
-    # Preserved query side-effects (count()/first()) from the original
-    # control flow; the resolved value itself was never read here.
-    _resolved_discount = (  # intentionally unused; kept for query-side-effect parity
-        discount_qs.first()
-        if discount_qs.count() > 0 and cast(Discount, discount_qs.first()).isValid()
-        else None
-    )
+    discount_record: Discount | None = Discount.objects.filter(codeName=discount_code).first()
 
     # Process cart item data and calculate totals
     translated_cart: list[TranslatedCartItem] = []
@@ -483,7 +477,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         )
         priceLevel = PriceLevel.objects.get(id=int(pdp["id"]))
 
-        item_total, _discount = get_line_item_total(cart_item, discount_code)
+        item_total, _discount = get_line_item_total(cart_item, discount_record)
         translated_cart.append(
             {
                 "name": f"{event} {priceLevel} - {attendee}",
@@ -493,7 +487,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
         )
 
     for order_item in order_items:
-        item_total, _discount = get_line_item_total(order_item, discount_code)
+        item_total, _discount = get_line_item_total(order_item, discount_record)
         badge = cast(Badge, order_item.badge)
         translated_cart.append(
             {
@@ -503,7 +497,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
             }
         )
 
-    subtotal, total_discount = get_total(cart_items, order_items, discount_code)
+    subtotal, total_discount = get_total(cart_items, order_items, discount_record)
 
     porg: Decimal | int = Decimal(post_data.get("orgDonation") or "0.00")
     pcharity: Decimal | int = Decimal(post_data.get("charityDonation") or "0.00")
@@ -553,7 +547,7 @@ def create_paypal_order(request: HttpRequest) -> JsonResponse:
 # drain / mass-email). Idempotency keys only stop accidental retries.
 @rate_limited_json(rate="10/h")
 @idempotency_key(optional=False)
-def checkout(request):
+def checkout(request: HttpRequest) -> JsonResponse:
     """
     Finalizes checkout, creating order data and capturing payment.
     """
@@ -575,8 +569,11 @@ def checkout(request):
     if len(session_items) == 0 and len(order_items) == 0:
         return common.abort(400, "Session expired or no session is stored for this client")
 
-    discount = Discount.objects.filter(codeName=pdisc)
-    discount = discount.first() if discount.count() > 0 and discount.first().isValid() else None
+    discount: Discount | None = None
+    for _discount in Discount.objects.filter(codeName=pdisc):
+        if _discount.isValid() and not _discount.used:
+            discount = _discount
+            break
 
     if order_items:
         order_items = list(OrderItem.objects.filter(id__in=order_items))
@@ -594,7 +591,12 @@ def checkout(request):
     total: Decimal = subtotal + porg + pcharity
 
     if subtotal == 0:
+        status: int
+        message: str
+        order: Order | None
         status, message, order = doZeroCheckout(discount, cart_items, order_items)
+        if order is None:
+            return common.abort(400, message)
         if not status:
             return common.abort(400, message)
 
@@ -602,8 +604,8 @@ def checkout(request):
         if existing_order_item:
             add_attendee_to_assistant(request, existing_order_item.badge.attendee)
         common.clear_session(request)
-        request.session["last_order_id"] = order.id
-        tasks.send_registration_email_task.delay(order.id, order.billingEmail)
+        request.session["last_order_id"] = order.pk
+        tasks.send_registration_email_task.delay(order.pk, order.billingEmail)
         return common.success()
 
     onsite = post_data.get("onsite", False)
