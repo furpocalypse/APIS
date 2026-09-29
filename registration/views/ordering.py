@@ -620,7 +620,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
                 charityDonation=pcharity,
                 billingType=Order.UNPAID,
             )
-            order.status = Order.ONSITE_PENDING
+            transition_order_status(order, Order.ONSITE_PENDING)
             order.save()
 
             if cart_items:

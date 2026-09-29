@@ -109,8 +109,8 @@ def update_capacity_for_status_change(order, old_status, new_status):
 
 
 def transition_order_status(
-    order,
-    new_status,
+    order: Order,
+    new_status: str,
     *,
     expected=None,
     exclude=None,
