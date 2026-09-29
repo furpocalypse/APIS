@@ -694,7 +694,6 @@ def checkout_dealer(request):
         tasks.send_dealer_payment_email_task.delay(dealer.id, order.id)
         return common.success()
     else:
-        order.delete()
         return common.abort(400, message)
 
 

@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.test.utils import override_settings
 
-from registration.models import Cashdrawer, Firebase, HoldType
+from registration.models import Cashdrawer, Firebase, HoldType, OrderItem
 from registration.signing import mint_terminal_token
 from registration.tests.common import (
     DEFAULT_EVENT_ARGS,
@@ -27,6 +27,7 @@ from registration.tests.common import (
     ten_days,
 )
 from registration.views import onsite_admin
+from registration.views.cart import saveCart
 
 
 class OnsiteBaseTestCase(TestCase):
@@ -204,6 +205,37 @@ class TestOnsiteCart(OnsiteBaseTestCase):
         self.assertEqual(len(response.context["orderItems"]), 1)
 
         self.checkout()
+
+    def test_onsite_checkout_failure_leaves_no_partial_rows(self):
+        # Creation is all-or-nothing: a failure on the second cart item must
+        # not leave the Order or the first attendee committed.
+        self.add_to_cart(self.price_45, [])
+        self.add_to_cart(self.price_45, [])
+
+        def row_counts():
+            return {
+                model.__name__: model.objects.count()
+                for model in (Order, Attendee, Badge, OrderItem)
+            }
+
+        counts_before = row_counts()
+        calls = 0
+
+        def fail_on_second_item(cart_item):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("simulated failure saving the second cart item")
+            return saveCart(cart_item)
+
+        with (
+            patch("registration.views.cart.saveCart", side_effect=fail_on_second_item),
+            self.assertRaises(RuntimeError),
+        ):
+            self.checkout()
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(row_counts(), counts_before)
 
     def test_onsite_checkout_free(self):
         pass

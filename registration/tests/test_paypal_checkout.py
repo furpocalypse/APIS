@@ -235,7 +235,7 @@ class TestDoPaypalCheckout(OrdersTestCase):
             cartItems=cart_items,
             orderItems=[],
             donationOrg=Decimal("0"),
-            donationCharity= Decimal("0"),
+            donationCharity=Decimal("0"),
         )
 
         self.assertTrue(status)

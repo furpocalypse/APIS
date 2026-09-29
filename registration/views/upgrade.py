@@ -15,7 +15,6 @@ from registration import tasks
 from registration.models import Attendee, Badge, Decimal, Event, Order, OrderItem, PriceLevel
 from registration.paypal_payments import create_unpaid_paypal_order
 from registration.services import CreateAttendeeOptions
-from registration.types import TranslatedCartItem
 
 from . import common
 from .common import clear_session, getOptionsDict, to_json_safe
@@ -220,7 +219,7 @@ def upgrade_paypal_create(request):
     event = Event.objects.get(default=True)
     first = order_items[0]
     label = f"{first.priceLevel} - {first.badge.attendee}"
-    translated_cart: list[TranslatedCartItem] = [
+    translated_cart: list[dict[str, str | Decimal | int | bool]] = [
         {
             "name": f"{event} Upgrade - {label}",
             "total": subtotal - total_discount,
@@ -275,8 +274,8 @@ def checkout_upgrade(request):
 
         return send_upgrade_email(request, attendee, order)
 
-    porg = Decimal(max(post_data.get("orgDonation") or "0.00", 0))
-    pcharity = Decimal(max(post_data.get("charityDonation") or "0.00", 0))
+    porg = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
+    pcharity = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
 
     total = subtotal + porg + pcharity
 
@@ -284,6 +283,7 @@ def checkout_upgrade(request):
     pbill = post_data.get("billingData", {})
     if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
+
     status, message, order = do_checkout(
         processor=pproc,
         billingData=pbill,
@@ -297,7 +297,4 @@ def checkout_upgrade(request):
 
     if status:
         return send_upgrade_email(request, attendee, order)
-    else:
-        if order is not None:
-            order.delete()
-        return common.abort(400, message)
+    return common.abort(400, message)

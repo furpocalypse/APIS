@@ -5,12 +5,12 @@ from json import JSONDecodeError
 from typing import Any, Literal, cast
 
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, JsonResponse
 from idempotency_key.decorators import idempotency_key
 from paypalserversdk.exceptions.api_exception import ApiException
-from paypalserversdk.exceptions.error_exception import ErrorException
 
 from registration import mqtt, tasks
+from registration.exceptions import PaymentFailed
 from registration.forms import OrderForm
 from registration.models import (
     Attendee,
@@ -95,34 +95,18 @@ def _check_capacity(price_level_counts):
     return levels, None
 
 
-def _create_order_items(order: Order, cartItems: list, orderItems: list):
+def _save_order_items(
+    order: Order, cartItems: list[Cart] | None, orderItems: list[OrderItem] | None
+):
     """Save cart items or order items linked to an order."""
-    if cartItems:
-        for item in cartItems:
-            order_item = cart.saveCart(item)
-            order_item.order = order
-    elif orderItems:
-        for order_item in orderItems:
-            order_item.order = order
-
-def _commit_order_items(order: Order, cartItems: list, orderItems: list):
-    """Save cart items or order items linked to an order."""
-    for item in cartItems:
-        order_item = cart.OrderItem.objects.filter(item)
-        order_item.save()
-    for order_item in orderItems:
-        order_item.save()
-
-
-def _save_order_items(order: Order, cartItems: list, orderItems: list):
-    """Save cart items or order items linked to an order."""
-    for item in cartItems:
-        order_item = cart.OrderItem.objects.filter(item)
+    for item in cartItems or []:
+        order_item = cart.saveCart(item)
         order_item.order = order
         order_item.save()
-    for order_item in orderItems:
+    for order_item in orderItems or []:
         order_item.order = order
         order_item.save()
+
 
 def get_cart_data_from_session(
     request: HttpRequest,
@@ -159,76 +143,62 @@ def do_checkout(
     donationCharity: Decimal,
     request: HttpRequest | None = None,
 ) -> tuple[bool, dict | str, Order | None]:
-    event = Event.objects.get(default=True)
-    # Reuse the reference token set on the PayPal order at create_paypal_order
-    # time so that invoice_id/custom_id on every downstream PayPal webhook
-    # resolves to this Order via Order.reference. Fall back to a fresh token
-    # when called outside the HTTP flow (e.g. direct unit tests).
-    reference = None
-    if processor == "paypal" and request is not None:
-        reference = request.session.get("pending_paypal_reference")
-    if not reference:
-        reference = common.get_unique_confirmation_token(Order)
-
-    billName = None
-    if billingData.get("cc_firstname") and billingData.get("cc_lastname"):
-        billName = f"{billingData.get('cc_firstname')} {billingData.get('cc_lastname')}"
-    form = OrderForm(
-        collect_billing_address=processor == "square" and event.collectBillingAddress,
-        data={
-            "total": Decimal(total),
-            "reference": reference,
-            "discount": discount,
-            "orgDonation": donationOrg,
-            "charityDonation": donationCharity,
-            "billingName": billName,
-            "billingAddress1": billingData.get("address1"),
-            "billingAddress2": billingData.get("address2"),
-            "billingCity": billingData.get("city"),
-            "billingState": billingData.get("state"),
-            "billingCountry": billingData.get("country"),
-            "billingEmail": billingData.get("email"),
-            "billingPostal": billingData.get("postal"),
-        },
-    )
-
-    if not form.is_valid():
-        return (
-            False,
-            {"errors": [{"code": f"{k} - {v}"} for k, v in cast(Any, form.errors)]},
-            None,
-        )
-
-    order: Order = form.save(commit=False)
-
-    price_level_counts = _count_price_levels(cartItems, orderItems)
 
     response: dict | str = {}
 
     try:
-        # Reserve capacity and persist a PENDING Order + cart items up
-        # front. This matches the limited-registration-stock design: the
-        # Attendee/Badge/OrderItem rows exist as soon as the reservation
-        # is held, so capacity counters and DB rows stay consistent even
-        # when payment later fails.
         with transaction.atomic():
+            event = Event.objects.get(default=True)
+
+            reference = None
+            if processor == "paypal" and request is not None:
+                reference = request.session.get("pending_paypal_reference")
+            if not reference:
+                reference = common.get_unique_confirmation_token(Order)
+
+            billName = None
+            if billingData.get("cc_firstname") and billingData.get("cc_lastname"):
+                billName = f"{billingData.get('cc_firstname')} {billingData.get('cc_lastname')}"
+            form = OrderForm(
+                collect_billing_address=processor == "square" and event.collectBillingAddress,
+                data={
+                    "total": Decimal(total),
+                    "reference": reference,
+                    "discount": discount,
+                    "orgDonation": donationOrg,
+                    "charityDonation": donationCharity,
+                    "billingName": billName,
+                    "billingAddress1": billingData.get("address1"),
+                    "billingAddress2": billingData.get("address2"),
+                    "billingCity": billingData.get("city"),
+                    "billingState": billingData.get("state"),
+                    "billingCountry": billingData.get("country"),
+                    "billingEmail": billingData.get("email"),
+                    "billingPostal": billingData.get("postal"),
+                },
+            )
+
+            if not form.is_valid():
+                return (
+                    False,
+                    {"errors": [{"code": f"{k} - {v}"} for k, v in cast(Any, form.errors)]},
+                    None,
+                )
+
+            order: Order = form.save(commit=False)
+
+            price_level_counts = _count_price_levels(cartItems, orderItems)
+
             levels, error = _check_capacity(price_level_counts)
             if error:
                 return False, error, None
             for level, count in levels:
                 level.reserve_slots(count)
-            # Initial Order creation to PENDING inside the reservation
-            # atomic block — a row insert, not a race-prone state
-            # transition (no prior status to CAS from; capacity is the
-            # reserve_slots() above).
+
             order.status = Order.PENDING  # status-writer-ok: initial create
-            # order.save()
+            order.save()
             _save_order_items(order, cartItems, orderItems)
 
-            # Payment dispatch. charge_payment / capture_paypal_payment set
-            # order.status and save on their own success/failure branches
-            # (except a couple of PayPal early-return error paths handled by
-            # the normalization guard below).
             status: bool
 
             if total == Decimal(0):
@@ -251,18 +221,6 @@ def do_checkout(
                     {"errors": [{"code": f"Unknown processor: {processor}"}]},
                 )
 
-            # S24 + peer-review BLOCK-1: charge_payment / capture_paypal_payment
-            # now fuse the PENDING→terminal status write WITH the capacity
-            # transition in a single atomic compare-and-set
-            # (transition_order_status, expected=PENDING). There is no longer a
-            # raw, unguarded update_capacity_for_status_change here — that was
-            # the double-decrement defect (a concurrent webhook winning the CAS
-            # then this path also adjusting capacity). The only post-handler
-            # work is finalizing PayPal early-return paths (Missing-id /
-            # JSON-decode) that return without transitioning: this CAS fails
-            # those still-PENDING orders exactly once; if a handler or a
-            # concurrent webhook already moved the order off PENDING it
-            # no-ops (no double capacity, no clobber of the winner).
             target = Order.COMPLETED if status else Order.FAILED
             transition_order_status(order, target, expected=[Order.PENDING], refresh=False)
 
@@ -271,21 +229,12 @@ def do_checkout(
                     discount.used = discount.used + 1
                     discount.save()
                 return True, {"errors": []}, order
-            raise RuntimeError
-    except RuntimeError as exp:
-        return False, response, order
+
+            raise PaymentFailed
+    except PaymentFailed:
+        return False, response, None
     except Exception as e:
         logger.error(f"Error during checkout: {e}")
-        if order.id:
-            try:
-                order.refresh_from_db()
-                # S24: only fail it if it's still PENDING — a parallel
-                # webhook may have legitimately completed it; CAS makes
-                # that race-safe and runs the capacity release itself.
-                if order.status == Order.PENDING:
-                    transition_order_status(order, Order.FAILED, expected=[Order.PENDING])
-            except Exception as cleanup_error:
-                logger.error(f"Error during checkout cleanup: {cleanup_error}")
         raise
 
 
@@ -637,13 +586,10 @@ def checkout(request):
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
 
-    porg = Decimal(max(post_data.get("orgDonation") or "0.00", 0))
-    pcharity = Decimal(max(post_data.get("charityDonation") or "0.00", 0))
+    porg = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
+    pcharity = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
     pbill = post_data.get("billingData", {})
     pproc: str = post_data.get("processor", "")
-    if pproc not in ("square", "paypal"):
-        raise RuntimeError(f"Invalid payment processor {pproc!r}")
-
 
     total: Decimal = subtotal + porg + pcharity
 
@@ -662,37 +608,37 @@ def checkout(request):
 
     onsite = post_data.get("onsite", False)
     if onsite:
-        reference = common.get_unique_confirmation_token(Order)
-        order = Order(
-            total=total,
-            reference=reference,
-            discount=discount,
-            orgDonation=porg,
-            charityDonation=pcharity,
-            billingType=Order.UNPAID,
-        )
-        # Initial creation of a fresh onsite Order (a row insert, not a
-        # race-prone transition — it is later moved to a terminal status
-        # by complete_square/complete_cash via the CAS primitive). The
-        # legacy sentinel value is preserved as-is (now a named constant,
-        # Order.ONSITE_PENDING; the CAS expected-state lists it so the
-        # onsite completion is not silently dropped).
-        order.status = Order.ONSITE_PENDING  # status-writer-ok: initial create
-        order.save()
+        with transaction.atomic():
+            reference = common.get_unique_confirmation_token(Order)
+            order = Order(
+                total=total,
+                reference=reference,
+                discount=discount,
+                orgDonation=porg,
+                charityDonation=pcharity,
+                billingType=Order.UNPAID,
+            )
 
-        if cart_items:
-            for item in cart_items:
-                order_item = cart.saveCart(item)
-                order_item.order = order
-                order_item.save()
+            order.status = Order.ONSITE_PENDING
 
-        if discount:
-            discount.used = discount.used + 1
-            discount.save()
+            order.save()
 
-        status = True
-        message = "Onsite success"
+            if cart_items:
+                for item in cart_items:
+                    order_item = cart.saveCart(item)
+                    order_item.order = order
+                    order_item.save()
+
+            if discount:
+                discount.used = discount.used + 1
+                discount.save()
+
+            status = True
+            message = "Onsite success"
     else:
+        # Online path
+        if pproc not in ("square", "paypal"):
+            return common.abort(400, f"Invalid payment processor {pproc!r}")
         status, message, order = do_checkout(
             processor=pproc,
             billingData=pbill,

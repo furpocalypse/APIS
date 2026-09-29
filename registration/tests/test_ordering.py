@@ -205,9 +205,9 @@ class TestOrderingModule(OrdersTestCase):
 
         # Could assume zero, but this is safer in case there's any side-effects
         # from other tests.
-        starting_order_count = Order.objects.all().count
-        starting_badge_count = Badge.objects.all().count
-        starting_attendee_count = Attendee.objects.all().count
+        starting_order_count = Order.objects.all().count()
+        starting_badge_count = Badge.objects.all().count()
+        starting_attendee_count = Attendee.objects.all().count()
 
         mock_capture.return_value = (False, {"errors": ["Mock failure"]})
         (result, resp, created_order) = do_checkout(
@@ -233,25 +233,25 @@ class TestOrderingModule(OrdersTestCase):
         )
         self.assertIsNone(created_order, "A failed PayPal transaction should not create an order!")
         self.assertEqual(
-            Order.objects.all().count,
+            Order.objects.all().count(),
             starting_order_count,
             "A failed PayPal transaction should not have increased the number of orders!",
         )
         self.assertEqual(
-            Badge.objects.all().count,
+            Badge.objects.all().count(),
             starting_badge_count,
             "A failed PayPal transaction should not create badges!",
         )
         self.assertEqual(
-            Attendee.objects.all().count,
+            Attendee.objects.all().count(),
             starting_attendee_count,
-            "A dailed PayPal transaction should not create attendees!",
+            "A failed PayPal transaction should not create attendees!",
         )
 
         mock_capture.return_value = (True, {})
         (result, resp, created_order) = do_checkout(
             processor="paypal",
-            billingData={},
+            billingData={"source_id": "Anything"},
             total=Decimal(50),
             discount=None,
             cartItems=self.cart_item_models,
@@ -270,19 +270,21 @@ class TestOrderingModule(OrdersTestCase):
             0,
             "do_checkout should return no error messages in its response on capture success",
         )
-        self.assertIsNone(created_order, "A successful PayPal transaction should create an order!")
+        self.assertIsNotNone(
+            created_order, "A successful PayPal transaction should create an order!"
+        )
         self.assertEqual(
-            Order.objects.all().count,
+            Order.objects.all().count(),
             starting_order_count + 1,
             "A successful PayPal transaction should create an order!",
         )
         self.assertEqual(
-            Badge.objects.all().count,
+            Badge.objects.all().count(),
             starting_badge_count + len(self.cart_item_models),
             "A successful PayPal transaction should create badges!",
         )
         self.assertEqual(
-            Attendee.objects.all().count,
+            Attendee.objects.all().count(),
             starting_attendee_count + len(self.cart_item_models),
             "A successful PayPal transaction should create attendees!",
         )
