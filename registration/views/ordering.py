@@ -341,7 +341,9 @@ def get_discount_total(disc: Discount | str, subtotal: Decimal) -> Decimal:
     elif isinstance(disc, Discount):
         disc_id = disc.codeName
     else:
-        raise Exception("Called get_discount_total() with an invalid type for parameter 'disc'.")
+        raise Exception(
+            f"Called get_discount_total() with an invalid type for parameter 'disc: {type(disc)}'."
+        )
 
     try:
         discount = Discount.objects.get(codeName=disc_id)
@@ -589,11 +591,11 @@ def checkout(request: HttpRequest) -> JsonResponse:
     Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items: list[Cart] = list(Cart.objects.filter(id__in=session_items))
-    order_items = request.session.get("order_items", [])
-    pdisc = request.session.get("discount", "")
+    posted_order_items = request.session.get("order_items", [])
+    pdisc = request.session.get("discount", None)
 
     # Safety valve (in case session times out before checkout is complete)
-    if len(session_items) == 0 and len(order_items) == 0:
+    if len(session_items) == 0 and len(posted_order_items) == 0:
         return common.abort(400, "Session expired or no session is stored for this client")
 
     discount: Discount | None = None
@@ -602,18 +604,36 @@ def checkout(request: HttpRequest) -> JsonResponse:
             discount = _discount
             break
 
-    if order_items:
-        order_items = list(OrderItem.objects.filter(id__in=order_items))
+    order_items: list[OrderItem]
+    if posted_order_items:
+        order_items = list(OrderItem.objects.filter(id__in=posted_order_items))
+    else:
+        order_items = []
 
     subtotal, _ = get_total(cart_items, order_items, discount)
 
     if not cart_items and not order_items:
         return common.abort(400, "There is nothing in your cart!")
 
-    porg = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
-    pcharity = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
-    pbill = post_data.get("billingData", {})
-    pproc: str = post_data.get("processor", "")
+    porg: Decimal = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
+    pcharity: Decimal = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
+    pbill: dict[
+        Literal[
+            "source_id",
+            "cc_firstname",
+            "cc_lastname",
+            "email",
+            "address1",
+            "address2",
+            "city",
+            "state",
+            "postal",
+            "country",
+            "verificationToken",
+        ],
+        str,
+    ] = post_data.get("billingData", {})
+    pproc: str = post_data.get("processor", "UNSET")
 
     total: Decimal = subtotal + porg + pcharity
 
@@ -653,6 +673,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
                 charityDonation=pcharity,
                 billingType=Order.UNPAID,
             )
+            order.save()
             transition_order_status(order, Order.ONSITE_PENDING)
             order.save()
 
@@ -670,8 +691,19 @@ def checkout(request: HttpRequest) -> JsonResponse:
             message = "Onsite success"
     else:
         # Online path
-        if pproc not in ("square", "paypal"):
-            return common.abort(400, f"Invalid payment processor {pproc!r}")
+        if pproc not in ("square", "paypal") and total > Decimal(0):
+            _ci = ", ".join(f"{ci}" for ci in cart_items)
+            _oi = ", ".join(f"{oi}" for oi in order_items)
+            diagnostic: str = (
+                f"(cart_items: ({_ci}), "
+                f"order_items: ({_oi}), "
+                f"discount: ({discount})) + "
+                f"porg: ({porg}) + "
+                f"pcharity: ({pcharity})"
+            )
+            return common.abort(
+                400, f"Invalid payment processor {pproc!r} at price ${total}\n{diagnostic}"
+            )
         status, message, order = do_checkout(
             processor=pproc,
             billingData=pbill,

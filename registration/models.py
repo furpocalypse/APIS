@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models import F, Model
+from django.db.models import F
 from django.utils import timezone
 
 # Uppercase letters and digits, excluding visually ambiguous characters: 0/O, 1/I, 5/S, 8/B, 2/Z
@@ -825,16 +825,14 @@ class Badge(models.Model):
                 level = oi.priceLevel
         return level
 
-    def getOrderItems(self):
-        orderItems = OrderItem.objects.filter(badge=self, order__isnull=False)
-        return orderItems
+    def getOrderItems(self: "Badge") -> list["OrderItem"]:
+        return list(OrderItem.objects.filter(badge=self, order__isnull=False))
 
-    def getOrder(self: "Badge") -> Model | None:
-        oi: OrderItem | None = self.getOrderItems().first()
-        return oi.order if oi is not None else None
+    def getOrder(self: "Badge") -> type["Order"] | None:
+        return self.getOrderItems()[0].order if len(self.getOrderItems()) is not None else None
 
     def save(self, *args, **kwargs):
-        if not self.id and not self.registeredDate:
+        if not self.pk and not self.registeredDate:
             self.registeredDate = timezone.now()
         return super().save(*args, **kwargs)
 
