@@ -189,9 +189,11 @@ def do_checkout(
 
             price_level_counts = _count_price_levels(cartItems, orderItems)
 
+            levels: list[Any] | None
+            error: str | None
             levels, error = _check_capacity(price_level_counts)
-            if error:
-                return False, error, None
+            if error or levels is None:
+                return False, error if isinstance(error, str) else "MISSING ERROR STRING", None
             for level, count in levels:
                 level.reserve_slots(count)
 
@@ -239,17 +241,26 @@ def do_checkout(
         raise
 
 
-def doZeroCheckout(discount, cartItems, orderItems):
-    billingName = ""
-    billingEmail = ""
+def doZeroCheckout(
+    discount: Discount | None,
+    cartItems: list[Cart],
+    orderItems: list[OrderItem],
+) -> tuple[bool, str | None, Order | None]:
+    billingName: str = ""
+    billingEmail: str = ""
     if cartItems:
-        attendee = json.loads(cartItems[0].formData)["attendee"]
-        billingName = "{firstName} {lastName}".format(**attendee)
-        billingEmail = attendee["email"]
+        attendee_dict: dict[str, Any] = json.loads(cartItems[0].formData)["attendee"]
+        billingName = f"{attendee_dict['firstName']} {attendee_dict['lastName']}"
+        billingEmail = attendee_dict["email"]
     elif orderItems:
-        attendee = orderItems[0].badge.attendee
-        billingName = f"{attendee.firstName} {attendee.lastName}"
-        billingEmail = attendee.email
+        badge: Badge | None = orderItems[0].badge
+        if badge is None:
+            raise
+        attendee_rec: Attendee | None = badge.attendee
+        if attendee_rec is None:
+            raise
+        billingName = f"{attendee_rec.firstName} {attendee_rec.lastName}"
+        billingEmail = str(attendee_rec.email)
 
     reference = common.get_unique_confirmation_token(Order)
 
@@ -269,8 +280,10 @@ def doZeroCheckout(discount, cartItems, orderItems):
 
     try:
         with transaction.atomic():
+            levels: list[Any] | None
+            error: str | None
             levels, error = _check_capacity(price_level_counts)
-            if error:
+            if error or levels is None:
                 return False, error, None
 
             # Directly consume slots — no pending state for zero-cost orders
@@ -314,7 +327,7 @@ def get_order_item_option_total(options):
     return optionTotal
 
 
-def get_discount_total(disc: Discount, subtotal: Decimal) -> Decimal:
+def get_discount_total(disc: Discount | str, subtotal: Decimal) -> Decimal:
     """Accept either a ``Discount`` model instance or a string code name.
 
     Callers in ``cart.py``/``onsite.py``/``onsite_admin.py`` hand in already-
@@ -322,8 +335,14 @@ def get_discount_total(disc: Discount, subtotal: Decimal) -> Decimal:
     the raw session value which is a string. Normalize to a string code
     name before the DB lookup.
     """
-    if isinstance(disc, Discount):
-        disc_id: str = disc.codeName
+    disc_id: str
+    if isinstance(disc, str):
+        disc_id = disc
+    elif isinstance(disc, Discount):
+        disc_id = disc.codeName
+    else:
+        raise Exception("Called get_discount_total() with an invalid type for parameter 'disc'.")
+
     try:
         discount = Discount.objects.get(codeName=disc_id)
     except (Discount.DoesNotExist, ValueError, TypeError):
@@ -350,11 +369,19 @@ def get_line_item_total(
         options = pdp["options"]
         item_total += getCartItemOptionTotal(options)
 
-    elif isinstance(item, OrderItem):
+    elif (
+        isinstance(item, OrderItem)
+        and isinstance(item.priceLevel, PriceLevel)
+        and isinstance(item.badge, Badge)
+    ):
         item_sub_total = cast(PriceLevel, item.priceLevel).basePrice
-        eff_level = cast(Badge, item.badge).effectiveLevel()
+        eff_level = item.badge.effectiveLevel()
 
-        item_total = item_sub_total - eff_level.basePrice if eff_level else item_sub_total
+        item_total = (
+            item_sub_total - eff_level.basePrice
+            if isinstance(eff_level, PriceLevel)
+            else item_sub_total
+        )
 
         item_total += get_order_item_option_total(item.attendeeoptions_set.all())
 
@@ -408,7 +435,7 @@ def apply_discount(request):
     if discount.count() == 0:
         return JsonResponse({"success": False, "message": "That discount is not valid."})
     discount = discount.first()
-    if not discount.isValid():
+    if discount is None or not discount.isValid():
         return JsonResponse({"success": False, "message": "That discount is not valid."})
 
     request.session["discount"] = discount.codeName
@@ -561,7 +588,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
 
     Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
-    cart_items = list(Cart.objects.filter(id__in=session_items))
+    cart_items: list[Cart] = list(Cart.objects.filter(id__in=session_items))
     order_items = request.session.get("order_items", [])
     pdisc = request.session.get("discount", "")
 
@@ -590,19 +617,25 @@ def checkout(request: HttpRequest) -> JsonResponse:
 
     total: Decimal = subtotal + porg + pcharity
 
+    order: Order | None
+    message: str | dict[str, Any] | None
     if subtotal == 0:
         status: int
-        message: str
-        order: Order | None
         status, message, order = doZeroCheckout(discount, cart_items, order_items)
         if order is None:
-            return common.abort(400, message)
+            return common.abort(400, message if message else "Missing error message")
         if not status:
-            return common.abort(400, message)
+            return common.abort(400, message if message else "Missing error message")
 
         existing_order_item = order.orderitem_set.first()
         if existing_order_item:
-            add_attendee_to_assistant(request, existing_order_item.badge.attendee)
+            badge: Badge | None = existing_order_item.badge
+            if badge is None:
+                raise
+            attendee: Attendee | None = badge.attendee
+            if attendee is None:
+                raise
+            add_attendee_to_assistant(request, attendee)
         common.clear_session(request)
         request.session["last_order_id"] = order.pk
         tasks.send_registration_email_task.delay(order.pk, order.billingEmail)
@@ -612,7 +645,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
     if onsite:
         with transaction.atomic():
             reference = common.get_unique_confirmation_token(Order)
-            order: Order = Order(
+            order = Order(
                 total=total,
                 reference=reference,
                 discount=discount,
@@ -652,21 +685,30 @@ def checkout(request: HttpRequest) -> JsonResponse:
         )
 
     if status:
+        if not isinstance(order, Order):
+            raise
         existing_order_item = order.orderitem_set.first()
         if existing_order_item:
-            add_attendee_to_assistant(request, existing_order_item.badge.attendee)
+            badge = existing_order_item.badge
+            if badge is None:
+                raise
+            attendee = badge.attendee
+            if attendee is None:
+                raise
+            add_attendee_to_assistant(request, attendee)
         # Delete cart when done
-        cart_items = Cart.objects.filter(id__in=session_items)
-        cart_items.delete()
+        cart_items = list(Cart.objects.filter(id__in=session_items))
+        for item in cart_items:
+            item.delete()
         common.clear_session(request)
-        request.session["last_order_id"] = order.id
-        tasks.send_registration_email_task.delay(order.id, order.billingEmail)
+        request.session["last_order_id"] = order.pk
+        tasks.send_registration_email_task.delay(order.pk, order.billingEmail)
 
         notify_terminal(request, order)
 
         return common.success()
     else:
-        return common.abort(400, message)
+        return common.abort(400, message if isinstance(message, str) else f"{message}")
 
 
 def deleteOrderItem(id):

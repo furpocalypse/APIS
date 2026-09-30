@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models import F
+from django.db.models import F, Model
 from django.utils import timezone
 
 # Uppercase letters and digits, excluding visually ambiguous characters: 0/O, 1/I, 5/S, 8/B, 2/Z
@@ -812,10 +812,15 @@ class Badge(models.Model):
         level: Literal["Unpaid"] | PriceLevel | None = None
         orderItems = OrderItem.objects.filter(badge=self, order__isnull=False)
         for oi in orderItems:
-            if oi.order.billingType == Order.UNPAID:
-                return Badge.UNPAID
+            order: Order | None = oi.order
+            if order is None:
+                continue
+            if order.billingType == Order.UNPAID:
+                return "Unpaid"  # mypy is dumb and doesn't resolve Badge.UNPAID
             if not level or (
-                isinstance(oi.priceLevel, PriceLevel) and oi.priceLevel.basePrice > level.basePrice
+                isinstance(oi.priceLevel, PriceLevel)
+                and isinstance(level, PriceLevel)
+                and oi.priceLevel.basePrice > level.basePrice
             ):
                 level = oi.priceLevel
         return level
@@ -824,9 +829,9 @@ class Badge(models.Model):
         orderItems = OrderItem.objects.filter(badge=self, order__isnull=False)
         return orderItems
 
-    def getOrder(self):
-        oi = self.getOrderItems().first()
-        return oi.order
+    def getOrder(self: "Badge") -> Model | None:
+        oi: OrderItem | None = self.getOrderItems().first()
+        return oi.order if oi is not None else None
 
     def save(self, *args, **kwargs):
         if not self.id and not self.registeredDate:
