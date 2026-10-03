@@ -691,6 +691,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
             message = "Onsite success"
     else:
         # Online path
+        typed_pproc: Literal["square"] | Literal["paypal"] | None = None
         if pproc not in ("square", "paypal") and total > Decimal(0):
             _ci = ", ".join(f"{ci}" for ci in cart_items)
             _oi = ", ".join(f"{oi}" for oi in order_items)
@@ -704,8 +705,17 @@ def checkout(request: HttpRequest) -> JsonResponse:
             return common.abort(
                 400, f"Invalid payment processor {pproc!r} at price ${total}\n{diagnostic}"
             )
+        elif pproc == "square":
+            typed_pproc = "square"
+        elif pproc == "paypal":
+            typed_pproc = "paypal"
+
+        if typed_pproc is None:
+            # Just hububabloo to satisfy mypy since it isn't smart enough.
+            raise RuntimeError("Impossible branch.")
+
         status, message, order = do_checkout(
-            processor=pproc,
+            processor=typed_pproc,
             billingData=pbill,
             total=total,
             discount=discount,

@@ -733,11 +733,146 @@ class BadgeBackground(models.Model):
         img_bytes = self.image.read()
         base64_utf8_str = base64.b64encode(img_bytes).decode("utf-8")
 
+        if self.image.name is None:
+            raise RuntimeError("Image is missing a name.")
+
         ext = self.image.name.split(".")[-1]
         return f"data:image/{ext};base64,{base64_utf8_str}"
 
     def __str__(self):
         return f'{self.letter_id}: "{self.title}"'
+
+
+class Order(models.Model):
+    UNPAID = "Unpaid"
+    CREDIT = "Credit"
+    CASH = "Cash"
+    COMP = "Comp"
+    BILLING_TYPE_CHOICES = (
+        (UNPAID, "Unpaid"),
+        (CREDIT, "Credit"),
+        (CASH, "Cash"),
+        (COMP, "Comp"),
+    )
+    PENDING = "Pending"  # Card was captured and authorized, but not yet completed via settlement
+    CAPTURED = "Captured"  # Card details were captured, but no online authorization was performed
+    COMPLETED = "Completed"  # Card was captured and [later] settled
+    FAILED = "Failed"  # Card was rejected by online authorization
+    REFUNDED = "Refunded"
+    REFUND_PENDING = "Refund Pending"
+    DISPUTE_EVIDENCE_REQUIRED = (
+        "Dispute Evidence Required"  # Initial state of a dispute with evidence required
+    )
+    DISPUTE_PROCESSING = (
+        "Dispute Processing"  # Dispute evidence has been submitted and the bank is processing
+    )
+    DISPUTE_WON = (
+        "Dispute Won"  # The bank has completed processing the dispute and the seller has won
+    )
+    DISPUTE_LOST = (
+        "Dispute Lost"  # The bank has completed processing the dispute and the seller has lost
+    )
+    DISPUTE_ACCEPTED = "Dispute Accepted"  # The seller has accepted the dispute
+    # Transient sentinel: a fresh onsite (pay-at-door) Order before
+    # complete_cash/complete_square moves it to a terminal status. It is
+    # deliberately NOT in STATUS_CHOICES (not a user/admin-selectable
+    # state, and adding it would needlessly churn the field's choices
+    # metadata) — it is the documented legacy onsite pre-completion value
+    # set in views.ordering and consumed by the onsite-completion CAS.
+    ONSITE_PENDING = "Onsite Pending"
+    STATUS_CHOICES = (
+        (PENDING, "Pending"),
+        (CAPTURED, "Captured"),
+        (COMPLETED, "Completed"),
+        (REFUNDED, "Refunded"),
+        (REFUND_PENDING, "Refund Pending"),
+        (FAILED, "Failed"),
+        (DISPUTE_EVIDENCE_REQUIRED, "Dispute Evidence Required"),
+        (DISPUTE_PROCESSING, "Dispute Processing"),
+        (DISPUTE_WON, "Dispute Won"),
+        (DISPUTE_LOST, "Dispute Lost"),
+        (DISPUTE_ACCEPTED, "Dispute Accepted"),
+    )
+    # Status groups used for capacity tracking
+    CONFIRMED_STATUSES = frozenset({COMPLETED, CAPTURED})
+    PENDING_STATUSES = frozenset({PENDING})
+
+    # Maps Square dispute status to above status choices
+    DISPUTE_STATUS_MAP = {
+        "EVIDENCE_REQUIRED": DISPUTE_EVIDENCE_REQUIRED,
+        "PROCESSING": DISPUTE_PROCESSING,
+        "WON": DISPUTE_WON,
+        "LOST": DISPUTE_LOST,
+        "ACCEPTED": DISPUTE_ACCEPTED,
+        # Not certain what these states are for?
+        "INQUIRY_EVIDENCE_REQUIRED": DISPUTE_EVIDENCE_REQUIRED,
+        "INQUIRY_PROCESSING": DISPUTE_PROCESSING,
+        "INQUIRY_CLOSED": DISPUTE_WON,
+    }
+    total = models.DecimalField(max_digits=8, decimal_places=2)
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default=PENDING)
+    reference = models.CharField(max_length=50)
+    createdDate = models.DateTimeField(auto_now_add=True, null=True, verbose_name="Created Date")
+    settledDate = models.DateTimeField(auto_now_add=True, null=True, verbose_name="Settled Date")
+    discount = models.ForeignKey(Discount, null=True, on_delete=models.SET_NULL, blank=True)
+    orgDonation = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        default=Decimal(0),
+        verbose_name="Organization Donation",
+        validators=[MinValueValidator(0)],
+    )
+    charityDonation = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        default=Decimal(0),
+        verbose_name="Charity Donation",
+        validators=[MinValueValidator(0)],
+    )
+    notes = models.TextField(blank=True)
+    billingName = models.CharField(max_length=200, blank=True, verbose_name="Name")
+    billingAddress1 = models.CharField(max_length=200, blank=True, verbose_name="Address 1")
+    billingAddress2 = models.CharField(max_length=200, blank=True, verbose_name="Address 2")
+    billingCity = models.CharField(max_length=200, blank=True, verbose_name="City")
+    billingState = models.CharField(max_length=200, blank=True, verbose_name="State")
+    billingCountry = models.CharField(max_length=200, blank=True, verbose_name="Country")
+    billingPostal = models.CharField(max_length=20, blank=True, verbose_name="Postal Code")
+    billingEmail = models.CharField(max_length=200, blank=True, verbose_name="Email")
+    billingType = models.CharField(
+        max_length=20,
+        choices=BILLING_TYPE_CHOICES,
+        default=CREDIT,
+        verbose_name="Billing Type",
+    )
+    lastFour = models.CharField(max_length=4, blank=True, verbose_name="Last 4")
+    apiData = models.JSONField(null=True)
+    onsite_reference = models.UUIDField(null=True, blank=True)
+    email_sent = models.BooleanField(null=True, blank=True, default=None)
+    email_error = models.TextField(blank=True, default="")
+    # S33 HIGH-2 (OWASP API1 BOLA): the terminal that opened this order, if
+    # any. Fail-safe by design — null/legacy orders retain current behavior;
+    # the cross-terminal completion guard only engages when this is set, so
+    # an existing checkout can never be broken by enabling the binding.
+    opened_at_terminal = models.ForeignKey(
+        "Firebase",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="opened_orders",
+    )
+
+    def __str__(self):
+        return f"${self.total} {self.billingType} ({self.status}) [{self.reference}]"
+
+    class Meta:
+        permissions = (
+            ("issue_refund", "Can create refunds"),
+            ("cash", "Can handle cash transactions"),
+            ("cash_admin", "Can open and close cash drawer amounts (manager)"),
+            ("discount", "Can create discounts of arbitrary amount"),
+        )
 
 
 class Badge(models.Model):
@@ -828,7 +963,7 @@ class Badge(models.Model):
     def getOrderItems(self: "Badge") -> list["OrderItem"]:
         return list(OrderItem.objects.filter(badge=self, order__isnull=False))
 
-    def getOrder(self: "Badge") -> type["Order"] | None:
+    def getOrder(self: "Badge") -> Order | None:
         return self.getOrderItems()[0].order if len(self.getOrderItems()) is not None else None
 
     def save(self, *args, **kwargs):
@@ -985,138 +1120,6 @@ class Cart(models.Model):
 
     def __str__(self):
         return f"{self.form} {self.enteredDate}"
-
-
-class Order(models.Model):
-    UNPAID = "Unpaid"
-    CREDIT = "Credit"
-    CASH = "Cash"
-    COMP = "Comp"
-    BILLING_TYPE_CHOICES = (
-        (UNPAID, "Unpaid"),
-        (CREDIT, "Credit"),
-        (CASH, "Cash"),
-        (COMP, "Comp"),
-    )
-    PENDING = "Pending"  # Card was captured and authorized, but not yet completed via settlement
-    CAPTURED = "Captured"  # Card details were captured, but no online authorization was performed
-    COMPLETED = "Completed"  # Card was captured and [later] settled
-    FAILED = "Failed"  # Card was rejected by online authorization
-    REFUNDED = "Refunded"
-    REFUND_PENDING = "Refund Pending"
-    DISPUTE_EVIDENCE_REQUIRED = (
-        "Dispute Evidence Required"  # Initial state of a dispute with evidence required
-    )
-    DISPUTE_PROCESSING = (
-        "Dispute Processing"  # Dispute evidence has been submitted and the bank is processing
-    )
-    DISPUTE_WON = (
-        "Dispute Won"  # The bank has completed processing the dispute and the seller has won
-    )
-    DISPUTE_LOST = (
-        "Dispute Lost"  # The bank has completed processing the dispute and the seller has lost
-    )
-    DISPUTE_ACCEPTED = "Dispute Accepted"  # The seller has accepted the dispute
-    # Transient sentinel: a fresh onsite (pay-at-door) Order before
-    # complete_cash/complete_square moves it to a terminal status. It is
-    # deliberately NOT in STATUS_CHOICES (not a user/admin-selectable
-    # state, and adding it would needlessly churn the field's choices
-    # metadata) — it is the documented legacy onsite pre-completion value
-    # set in views.ordering and consumed by the onsite-completion CAS.
-    ONSITE_PENDING = "Onsite Pending"
-    STATUS_CHOICES = (
-        (PENDING, "Pending"),
-        (CAPTURED, "Captured"),
-        (COMPLETED, "Completed"),
-        (REFUNDED, "Refunded"),
-        (REFUND_PENDING, "Refund Pending"),
-        (FAILED, "Failed"),
-        (DISPUTE_EVIDENCE_REQUIRED, "Dispute Evidence Required"),
-        (DISPUTE_PROCESSING, "Dispute Processing"),
-        (DISPUTE_WON, "Dispute Won"),
-        (DISPUTE_LOST, "Dispute Lost"),
-        (DISPUTE_ACCEPTED, "Dispute Accepted"),
-    )
-    # Status groups used for capacity tracking
-    CONFIRMED_STATUSES = frozenset({COMPLETED, CAPTURED})
-    PENDING_STATUSES = frozenset({PENDING})
-
-    # Maps Square dispute status to above status choices
-    DISPUTE_STATUS_MAP = {
-        "EVIDENCE_REQUIRED": DISPUTE_EVIDENCE_REQUIRED,
-        "PROCESSING": DISPUTE_PROCESSING,
-        "WON": DISPUTE_WON,
-        "LOST": DISPUTE_LOST,
-        "ACCEPTED": DISPUTE_ACCEPTED,
-        # Not certain what these states are for?
-        "INQUIRY_EVIDENCE_REQUIRED": DISPUTE_EVIDENCE_REQUIRED,
-        "INQUIRY_PROCESSING": DISPUTE_PROCESSING,
-        "INQUIRY_CLOSED": DISPUTE_WON,
-    }
-    total = models.DecimalField(max_digits=8, decimal_places=2)
-    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default=PENDING)
-    reference = models.CharField(max_length=50)
-    createdDate = models.DateTimeField(auto_now_add=True, null=True, verbose_name="Created Date")
-    settledDate = models.DateTimeField(auto_now_add=True, null=True, verbose_name="Settled Date")
-    discount = models.ForeignKey(Discount, null=True, on_delete=models.SET_NULL, blank=True)
-    orgDonation = models.DecimalField(
-        max_digits=8,
-        decimal_places=2,
-        null=True,
-        default=Decimal(0),
-        verbose_name="Organization Donation",
-        validators=[MinValueValidator(0)],
-    )
-    charityDonation = models.DecimalField(
-        max_digits=8,
-        decimal_places=2,
-        null=True,
-        default=Decimal(0),
-        verbose_name="Charity Donation",
-        validators=[MinValueValidator(0)],
-    )
-    notes = models.TextField(blank=True)
-    billingName = models.CharField(max_length=200, blank=True, verbose_name="Name")
-    billingAddress1 = models.CharField(max_length=200, blank=True, verbose_name="Address 1")
-    billingAddress2 = models.CharField(max_length=200, blank=True, verbose_name="Address 2")
-    billingCity = models.CharField(max_length=200, blank=True, verbose_name="City")
-    billingState = models.CharField(max_length=200, blank=True, verbose_name="State")
-    billingCountry = models.CharField(max_length=200, blank=True, verbose_name="Country")
-    billingPostal = models.CharField(max_length=20, blank=True, verbose_name="Postal Code")
-    billingEmail = models.CharField(max_length=200, blank=True, verbose_name="Email")
-    billingType = models.CharField(
-        max_length=20,
-        choices=BILLING_TYPE_CHOICES,
-        default=CREDIT,
-        verbose_name="Billing Type",
-    )
-    lastFour = models.CharField(max_length=4, blank=True, verbose_name="Last 4")
-    apiData = models.JSONField(null=True)
-    onsite_reference = models.UUIDField(null=True, blank=True)
-    email_sent = models.BooleanField(null=True, blank=True, default=None)
-    email_error = models.TextField(blank=True, default="")
-    # S33 HIGH-2 (OWASP API1 BOLA): the terminal that opened this order, if
-    # any. Fail-safe by design — null/legacy orders retain current behavior;
-    # the cross-terminal completion guard only engages when this is set, so
-    # an existing checkout can never be broken by enabling the binding.
-    opened_at_terminal = models.ForeignKey(
-        "Firebase",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="opened_orders",
-    )
-
-    def __str__(self):
-        return f"${self.total} {self.billingType} ({self.status}) [{self.reference}]"
-
-    class Meta:
-        permissions = (
-            ("issue_refund", "Can create refunds"),
-            ("cash", "Can handle cash transactions"),
-            ("cash_admin", "Can open and close cash drawer amounts (manager)"),
-            ("discount", "Can create discounts of arbitrary amount"),
-        )
 
 
 class PaymentWebhookNotification(models.Model):
