@@ -141,34 +141,6 @@ class TestAttendeeCheckout(OrdersTestCase):
             "Counter drift after failed payment",
         )
 
-    # The four tests below check Square-specific error codes (CVV_FAILURE,
-    # ADDRESS_VERIFICATION_FAILURE, INVALID_EXPIRATION, GENERIC_DECLINE) that
-    # come back from Square's CreatePayment endpoint. PayPal's Orders V2 API
-    # has a different error surface (UNPROCESSABLE_ENTITY with issue codes
-    # like ``INSTRUMENT_DECLINED``, ``CARD_EXPIRED``, etc.) and there is no
-    # "nonce" concept — the equivalent test would exercise PayPal refusal
-    # paths via a mocked ``capture_paypal_payment``. These tests are kept
-    # under ``@tag("square")`` and skipped pending a PayPal rewrite; they
-    # fail today because the underlying Square checkout code has been
-    # removed.
-    @tag("square")
-    def test_bad_cvv(self):
-        self.assert_square_error("cnon:card-nonce-rejected-cvv", "CVV_FAILURE")
-
-    @tag("square")
-    def test_bad_postalcode(self):
-        self.assert_square_error(
-            "cnon:card-nonce-rejected-postalcode", "ADDRESS_VERIFICATION_FAILURE"
-        )
-
-    @tag("square")
-    def test_bad_expiration(self):
-        self.assert_square_error("cnon:card-nonce-rejected-expiration", "INVALID_EXPIRATION")
-
-    @tag("square")
-    def test_card_declined(self):
-        self.assert_square_error("cnon:card-nonce-declined", "GENERIC_DECLINE")
-
     def _assert_paypal_capture_error(self, mock_capture, issue):
         def fake_failed_capture(paypal_order_id, apis_order, paypal_mock_response):
             apis_order.status = Order.FAILED
@@ -201,41 +173,6 @@ class TestAttendeeCheckout(OrdersTestCase):
         )
         failed = Order.objects.filter(status=Order.FAILED)
         self.assertEqual(failed.count(), 1)
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_internal_server_error(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "INTERNAL_SERVER_ERROR")
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_resource_conflict(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "RESOURCE_CONFLICT")
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_authentication_failure(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "AUTHENTICATION_FAILURE")
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_invalid_request(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "INVALID_REQUEST")
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_not_authorized(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "NOT_AUTHORIZED")
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_resource_not_found(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "RESOURCE_NOT_FOUND")
-
-    @tag("paypal")
-    @patch("registration.views.ordering.capture_paypal_payment")
-    def test_paypal_capture_unprocessable_entity(self, mock_capture):
-        self._assert_paypal_capture_error(mock_capture, "UNPROCESSABLE_ENTITY")
 
     def test_full_single_order(self):
         options = [

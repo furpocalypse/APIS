@@ -207,7 +207,7 @@ def find_returning_staff(request):
     except ObjectDoesNotExist:
         return abort(404, "Staff matching query does not exist.")
 
-    request.session["staff_id"] = staff.id
+    request.session["staff_id"] = staff.pk
     return JsonResponse({"success": True, "message": "STAFF"})
 
 
@@ -282,7 +282,7 @@ def add_returning_staff(request):
         staff = Staff.objects.get(id=staff_id)
     except Staff.DoesNotExist:
         return JsonResponse({"success": False, "message": "Staff record not found"})
-    if pds.get("id") and int(pds["id"]) != staff.id:
+    if pds.get("id") and int(pds["id"]) != staff.pk:
         logger.warning(
             "BOLA attempt in add_returning_staff: session staff %s tried to mutate staff %s",
             staff_id,
@@ -293,12 +293,12 @@ def add_returning_staff(request):
     attendee = staff.attendee
     if attendee is None:
         return JsonResponse({"success": False, "message": "Staff has no attendee"})
-    if pda.get("id") and int(pda["id"]) != attendee.id:
+    if pda.get("id") and int(pda["id"]) != attendee.pk:
         logger.warning(
             "BOLA attempt in add_returning_staff: session staff %s (attendee %s) tried "
             "to mutate attendee %s",
             staff_id,
-            attendee.id,
+            attendee.pk,
             pda.get("id"),
         )
         return JsonResponse({"success": False, "message": "Attendee not found"})
@@ -358,7 +358,7 @@ def add_returning_staff(request):
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
     order_items = request.session.get("order_items", [])
-    order_items.append(order_item.id)
+    order_items.append(order_item.pk)
     request.session["order_items"] = order_items
 
     discount = event.staffDiscount

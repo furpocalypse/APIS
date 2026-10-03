@@ -151,7 +151,7 @@ def get_cart(request):
     return output
 
 
-def saveCart(cart):
+def saveCart(cart: Cart) -> OrderItem:
     post_data = json.loads(cart.formData)
     pda = post_data["attendee"]
     pdp = post_data["priceLevel"]
@@ -181,7 +181,7 @@ def saveCart(cart):
     CreateAttendeeOptions(order_item).save_options(pdp["options"])
 
     cart.transferedDate = timezone.now()
-    cart.save()
+    # cart.save()
 
     return order_item
 

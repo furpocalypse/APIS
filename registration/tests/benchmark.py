@@ -428,7 +428,7 @@ class BaseBenchmark(LiveServerTestCase):
 
     scenario: ScenarioConfig
 
-    def setUp(self):
+    def setUp(self) -> None:
         if not hasattr(self, "scenario"):
             self.skipTest("BaseBenchmark is abstract — run a concrete subclass instead")
 
@@ -481,12 +481,12 @@ class BaseBenchmark(LiveServerTestCase):
                     f"but only {tier.max_capacity} slots",
                 )
 
-    async def _run_benchmark(self):
+    async def _run_benchmark(self) -> BenchmarkReport:
         server_url = self.live_server_url
         scenario = self.scenario
 
         # Build user list with staggered start delays
-        users: list[tuple[UserSimulator, float]] = []
+        users: list[UserSimulator] = []
         user_id = 0
         for tier in scenario.tiers:
             pl = self.price_levels[tier.name]
@@ -494,7 +494,7 @@ class BaseBenchmark(LiveServerTestCase):
                 sim = UserSimulator(
                     user_id=user_id,
                     tier_name=tier.name,
-                    price_level_id=pl.id,
+                    price_level_id=pl.pk,
                     event_name=self.event.name,
                     server_url=server_url,
                     think_times=scenario.think_times,

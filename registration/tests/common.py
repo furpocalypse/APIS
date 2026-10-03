@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from abc import ABC
 from datetime import timedelta
 
 from django.test import Client, TestCase
@@ -108,13 +109,15 @@ TEST_DEALER_ASST_ARGS = {
 }
 
 
-class CapacityTestMixin:
+class CapacityTestMixin(ABC):
     """Shared helpers for capacity-related tests.
 
     Provides factory methods for creating orders, order items, and cart items
     that correctly sync PriceLevel capacity counters. Expects subclasses to
     set self.event to an Event instance before calling these helpers.
     """
+
+    event: Event
 
     def _create_order_with_items(self, price_level, quantity, status=Order.COMPLETED):
         """Create an order with OrderItems, then sync capacity counters."""
@@ -149,7 +152,7 @@ class CapacityTestMixin:
         """Create completed orders that consume capacity."""
         return self._create_order_with_items(price_level, quantity, Order.COMPLETED)
 
-    def _create_cart_item(self, price_level):
+    def _create_cart_item(self, price_level) -> Cart:
         """Create a cart item targeting a price level."""
         cart_data = {
             "attendee": {

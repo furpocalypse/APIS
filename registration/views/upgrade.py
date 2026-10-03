@@ -1,13 +1,16 @@
 import json
 import logging
+from typing import Any, Literal
 
 from django.forms import model_to_dict
 from django.http import (
+    HttpRequest,
     HttpResponseBadRequest,
     HttpResponseNotFound,
     HttpResponseServerError,
     JsonResponse,
 )
+from django.http.response import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from paypalserversdk.exceptions.api_exception import ApiException
 
@@ -65,11 +68,13 @@ def find_upgrade(request):
     attendee = get_object_or_404(Attendee, id=attendee_id)
     badge = get_object_or_404(Badge, id=badge_id)
     attendee_dict = model_to_dict(attendee)
-    badge_dict = {"id": badge.id}
+    badge_dict = {"id": badge.pk}
     level = badge.effectiveLevel()
+    if level is None:
+        raise
     existing_order_items = badge.getOrderItems()
     level_dict = {
-        "basePrice": level.basePrice,
+        "basePrice": level.basePrice if isinstance(level, PriceLevel) else level,
         "options": getOptionsDict(existing_order_items),
     }
     context = {
@@ -132,13 +137,13 @@ def add_upgrade(request):
     CreateAttendeeOptions(orderItem).save_options(pdp["options"])
 
     orderItems = request.session.get("order_items", [])
-    orderItems.append(orderItem.id)
+    orderItems.append(orderItem.pk)
     request.session["order_items"] = orderItems
 
     return JsonResponse({"success": True})
 
 
-def invoice_upgrade(request):
+def invoice_upgrade(request: HttpRequest) -> HttpResponse:
     sessionItems = request.session.get("order_items", [])
     if not sessionItems:
         context = {"orderItems": [], "total": 0, "discount": {}}
@@ -152,7 +157,9 @@ def invoice_upgrade(request):
         else:
             badge = Badge.objects.get(id=badgeId)
             attendee = Attendee.objects.get(id=attendeeId)
-            lvl = badge.effectiveLevel()
+            lvl: PriceLevel | Literal["Unpaid"] | None = badge.effectiveLevel()
+            if not isinstance(lvl, PriceLevel):
+                return common.abort(400, "Must upgrade an existing badge.")
             lvl_dict = {"basePrice": lvl.basePrice}
             orderItems = list(OrderItem.objects.filter(id__in=sessionItems))
             total, total_discount = get_total([], orderItems)
@@ -184,7 +191,7 @@ def send_upgrade_email(request, attendee, order):
     return JsonResponse({"success": True})
 
 
-def upgrade_paypal_create(request):
+def upgrade_paypal_create(request: HttpRequest) -> JsonResponse:
     """Create a PayPal order for an upgrade checkout.
 
     Mirrors :func:`registration.views.ordering.create_paypal_order` but
@@ -204,38 +211,41 @@ def upgrade_paypal_create(request):
         logger.error("Unable to decode JSON for upgrade_paypal_create()")
         return common.abort(400, "Unable to parse input options")
 
-    subtotal, total_discount = get_total([], order_items)
+    _subtotal, _total_discount = get_total([], order_items)
+    subtotal: Decimal = Decimal(_subtotal)
+    total_discount: Decimal = Decimal(_total_discount)
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
+    porg: Decimal = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
+    pcharity: Decimal = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
 
-    total = subtotal + porg + pcharity
+    total: Decimal = subtotal + porg + pcharity
     if total <= 0:
         return common.abort(400, "Cart total is zero; use the zero-checkout flow")
 
     event = Event.objects.get(default=True)
-    first = order_items[0]
-    label = f"{first.priceLevel} - {first.badge.attendee}"
+    first: OrderItem = order_items[0]
+    badge: Badge | None = first.badge
+    if not isinstance(badge, Badge):
+        raise
+    label = f"{first.priceLevel} - {badge.attendee}"
     translated_cart: list[TranslatedCartItem] = [
-        {
-            "name": f"{event} Upgrade - {label}",
-            "total": subtotal - total_discount,
-            "donation": False,
-        }
+        TranslatedCartItem(
+            name=f"{event} Upgrade - {label}",
+            total=subtotal - total_discount,
+            donation=False,
+        )
     ]
     if porg > 0:
-        translated_cart.append({"name": f"Donation to {event}", "total": porg, "donation": True})
+        translated_cart.append(
+            TranslatedCartItem(name=f"Donation to {event}", total=porg, donation=True)
+        )
     if pcharity > 0:
         translated_cart.append(
-            {
-                "name": f"Donation to {event.charity}",
-                "total": pcharity,
-                "donation": True,
-            }
+            TranslatedCartItem(
+                name=f"Donation to {event.charity}",
+                total=pcharity,
+                donation=True,
+            )
         )
 
     reference = request.session.get("pending_paypal_reference")
@@ -252,13 +262,20 @@ def upgrade_paypal_create(request):
         return common.abort(ex.response_code, json.loads(ex.response.text))
 
 
-def checkout_upgrade(request):
+def checkout_upgrade(request: HttpRequest) -> HttpResponse:
+    status: bool
+    message: str | dict[str, Any] | None = ""
     session_items = request.session.get("order_items", [])
-    order_items = list(OrderItem.objects.filter(id__in=session_items))
+    order_items: list[OrderItem] = [
+        i for i in OrderItem.objects.filter(id__in=session_items) if isinstance(i, OrderItem)
+    ]
     if "attendee_id" not in request.session:
         return HttpResponseBadRequest("Session expired")
 
-    attendee = Attendee.objects.get(id=request.session.get("attendee_id"))
+    key = request.session.get("attendee_id")
+    if not isinstance(key, int):
+        raise
+    attendee: Attendee = Attendee.objects.get(id=key)
     try:
         post_data = json.loads(request.body)
     except ValueError:
@@ -268,19 +285,15 @@ def checkout_upgrade(request):
     subtotal, _total_discount = get_total([], order_items)
 
     if subtotal == 0:
-        status, message, order = doZeroCheckout(None, None, order_items)
+        status, message, order = doZeroCheckout(None, [], order_items)
 
         if not status:
-            return common.abort(400, message)
+            return common.abort(400, message if message else "Missing abort message")
 
         return send_upgrade_email(request, attendee, order)
 
-    porg = Decimal(post_data.get("orgDonation") or "0.00")
-    pcharity = Decimal(post_data.get("charityDonation") or "0.00")
-    if porg < 0:
-        porg = 0
-    if pcharity < 0:
-        pcharity = 0
+    porg = max(Decimal(post_data.get("orgDonation") or "0.00"), Decimal("0.00"))
+    pcharity = max(Decimal(post_data.get("charityDonation") or "0.00"), Decimal("0.00"))
 
     total = subtotal + porg + pcharity
 
@@ -288,11 +301,18 @@ def checkout_upgrade(request):
     pbill = post_data.get("billingData", {})
     if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
-    status, message, order = do_checkout(pproc, pbill, total, None, [], order_items, porg, pcharity)
+
+    status, message, order = do_checkout(
+        processor=pproc,
+        billingData=pbill,
+        total=total,
+        discount=None,
+        cartItems=[],
+        orderItems=order_items,
+        donationOrg=porg,
+        donationCharity=pcharity,
+    )
 
     if status:
         return send_upgrade_email(request, attendee, order)
-    else:
-        if order is not None:
-            order.delete()
-        return common.abort(400, message)
+    return common.abort(400, message if isinstance(message, str) else "Missing error message.")

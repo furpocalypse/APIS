@@ -236,15 +236,15 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         }
 
         status, message, order = ordering.do_checkout(
-            "square",
-            billing_data,
-            Decimal("50.00"),
-            None,
-            [cart_item],
-            [],
-            Decimal("0.00"),
-            Decimal("0.00"),
-            None,
+            processor="square",
+            billingData=billing_data,
+            total=Decimal("50.00"),
+            discount=None,
+            cartItems=[cart_item],
+            orderItems=[],
+            donationOrg=Decimal("0.00"),
+            donationCharity=Decimal("0.00"),
+            request=None,
         )
 
         self.assertFalse(status)
@@ -273,15 +273,15 @@ class CheckoutCapacityTestCase(CapacityTestMixin, TestCase):
         }
 
         status, message, _order = ordering.do_checkout(
-            "square",
-            billing_data,
-            Decimal("100.00"),
-            None,
-            [cart_item1, cart_item2],
-            [],
-            Decimal("0.00"),
-            Decimal("0.00"),
-            None,
+            processor="square",
+            billingData=billing_data,
+            total=Decimal("100.00"),
+            discount=None,
+            cartItems=[cart_item1, cart_item2],
+            orderItems=[],
+            donationOrg=Decimal("0.00"),
+            donationCharity=Decimal("0.00"),
+            request=None,
         )
 
         self.assertFalse(status)
