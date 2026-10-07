@@ -98,7 +98,7 @@ dev:
 dev-setup:
 	uv sync
 	@echo "Settings are checked into fm_eventmanager/settings.py (single canonical file)."
-	@echo "Copy .env.dev to .env and adjust if needed; then run 'docker compose up -d'."
+	@echo "Copy .env.dev.example to .env and adjust if needed; then run 'docker compose up -d'."
 
 pre-commit-setup:
 	pip3 install pre-commit

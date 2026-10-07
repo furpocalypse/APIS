@@ -46,7 +46,7 @@ services:
       - ./pyproject.toml:/app/pyproject.toml
       - ./uv.lock:/app/uv.lock
     env_file:
-      - .env
+      - .env.dev
     depends_on:
       postgres:
         condition: service_healthy
