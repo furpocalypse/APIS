@@ -191,18 +191,18 @@ requires-dist = [
     { name = "influxdb3-python", specifier = "~=0.20" },
     { name = "markuppy", specifier = ">=1.14" },
     { name = "paho-mqtt", specifier = "~=2.1.0" },
-    { name = "paypal-server-sdk", specifier = "==2.3.0" },
+    { name = "paypal-server-sdk", specifier = "==2.4.0" },
     { name = "pdf417", specifier = ">=0.8.1" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.4" },
     { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "pygments", specifier = "~=2.20.0" },
-    { name = "pyjwt", specifier = "~=2.13.0" },
+    { name = "pygments", specifier = "~=2.21.0" },
+    { name = "pyjwt", specifier = "~=2.15.1" },
     { name = "pytz", specifier = "~=2026.3.post1" },
     { name = "qrcode", specifier = "~=8.2.0" },
     { name = "sentry-sdk", specifier = ">=2.66.1" },
     { name = "soupsieve", specifier = ">=2.9.2" },
-    { name = "squareup", specifier = "==45.0.1.20260715" },
+    { name = "squareup", specifier = "==46.0.0.20260916" },
     { name = "uvicorn", specifier = ">=0.52.1" },
     { name = "uvicorn-worker", specifier = ">=0.4.0" },
     { name = "whitenoise", extras = ["brotli"], specifier = ">=6.12.0" },
@@ -1717,7 +1717,7 @@ wheels = [
 
 [[package]]
 name = "paypal-server-sdk"
-version = "2.3.0"
+version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apimatic-core" },
@@ -1725,9 +1725,9 @@ dependencies = [
     { name = "apimatic-requests-client-adapter" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/62/89a2434828b650e2263fa56878b9b6117be5e017b45182dbb663f6228142/paypal_server_sdk-2.3.0.tar.gz", hash = "sha256:ace4cc1e3a53684fdcb526feda1a0dfd37bbea17af8095c33261ff05ebacb49d", size = 295061, upload-time = "2026-06-05T21:29:16.603Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/71/fb179c2b1b37957b98b47859da33112aef5e66780a2fc1b555d19d5d0d07/paypal_server_sdk-2.4.0.tar.gz", hash = "sha256:5082385d593c3e2ca98b5d50d70ad61483347b623b6b0e1cade1354dfd6836db", size = 294837, upload-time = "2026-08-21T15:06:43.056Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/21/842292f28b70de7d4d4314df062dc7d373e5928bcb77b8a8a9cdb4e9f44f/paypal_server_sdk-2.3.0-py3-none-any.whl", hash = "sha256:40f17a4aa3f5d65112391559f5e54411e4862cceb7f5c3ad0d5f3d27ec43fdef", size = 646911, upload-time = "2026-06-05T21:29:15.411Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/32/5c67d579b6fab0f93ea00f5e4fdb9f30dc87b288a593547ea899ed12f30a/paypal_server_sdk-2.4.0-py3-none-any.whl", hash = "sha256:4cee1fb2f72ec0a91dd4147994b4173168fa79bee7be0125ab20d7b05ba7ba67", size = 643073, upload-time = "2026-08-21T15:06:41.719Z" },
 ]
 
 [[package]]
@@ -2003,20 +2003,20 @@ wheels = [
 
 [[package]]
 name = "pygments"
-version = "2.20.0"
+version = "2.21.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+    { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
 ]
 
 [[package]]
 name = "pyjwt"
-version = "2.13.0"
+version = "2.15.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3b/81/58d0ac84e1ef3a3843791d6954d94c0b33d526c75eeb1efbce9d0a4c4077/pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423", size = 107515, upload-time = "2026-05-21T19:54:36.618Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/ea/5194e52748b0da83d71e082d75496eaec6e58f419f5e184786ded517e6a9/pyjwt-2.15.1.tar.gz", hash = "sha256:4f259e80cdfb6b3fc18a7de51fd1ef9ec79652f25019bae68975ca2468a34df8", size = 121252, upload-time = "2026-09-28T18:40:42.598Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/5e/ecf12fdb62546d64385c158514e9b2b671f7832108ef2ecd2020ce0af2d1/pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728", size = 31274, upload-time = "2026-05-21T19:54:35.362Z" },
+    { url = "https://files.pythonhosted.org/packages/50/ca/44de4e75f8aadc457f0634be3b542815078ded46dca30efb960edeecad6e/pyjwt-2.15.1-py3-none-any.whl", hash = "sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193", size = 33860, upload-time = "2026-09-28T18:40:41.429Z" },
 ]
 
 [[package]]
@@ -2280,7 +2280,7 @@ wheels = [
 
 [[package]]
 name = "squareup"
-version = "45.0.1.20260715"
+version = "46.0.0.20260916"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2288,9 +2288,9 @@ dependencies = [
     { name = "pydantic-core" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/83/46ff29e5b42c9b5b96193b8758f38ac0b264aa1f0cfc753acb401c7d2691/squareup-45.0.1.20260715.tar.gz", hash = "sha256:553dda841f349a53619d5280cc300cc6d57329ce6b0910a377f41d3ae02f6f6e", size = 829647, upload-time = "2026-07-14T19:03:18.912Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/82/52567f9d7e1903014848a40a8197e1fc3fdbcbac3b45b094ef7f3585bbb2/squareup-46.0.0.20260916.tar.gz", hash = "sha256:7e0e6ca7ebb0eed86fb4a315ab12c8ef639480da174f8d70b9b659cfa27d44b0", size = 830781, upload-time = "2026-09-15T21:02:16.358Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/dd/6aac4aea608aa33689d85c51d01d046a4101ab8a5ac192d3aa5d0112ce46/squareup-45.0.1.20260715-py3-none-any.whl", hash = "sha256:9d0c771ecce24213416ee15f8cc8d220450e76cb33140fcdc4b4992356bd72ac", size = 2317018, upload-time = "2026-07-14T19:03:17.144Z" },
+    { url = "https://files.pythonhosted.org/packages/03/77/ccbe2697420486cd2d3df391ddad5bf7fa6828ef0f96026d08da34d4ee18/squareup-46.0.0.20260916-py3-none-any.whl", hash = "sha256:735fcd0efad66a25cf9c6c8557cdc342bd89dd1f629cbbbbced87e4b8cdcb742", size = 2319462, upload-time = "2026-09-15T21:02:14.284Z" },
 ]
 
 [[package]]
