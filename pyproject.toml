@@ -27,9 +27,6 @@ dependencies = [
     "django-widget-tweaks~=1.5.1",
     "gotenberg-client~=1.0.0",
     "gunicorn>=26.0.0",
-    "influxdb~=5.3.1",                # legacy v1 client (InfluxDBReporter, deprecated)
-    "influxdb-client~=1.50.0",        # v2 client (unused; kept for backward-compat)
-    "influxdb3-python~=0.20",         # v3 client (InfluxDBv3Reporter — current path)
     "markuppy>=1.14",
     "paho-mqtt~=2.1.0",
     "paypal-server-sdk==2.4.0",
