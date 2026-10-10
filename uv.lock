@@ -206,7 +206,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "coverage", extras = ["toml"], specifier = ">=7.15.3" },
+    { name = "coverage", extras = ["toml"], specifier = ">=7.15.4" },
     { name = "coveralls", specifier = ">=4.1.0" },
     { name = "django-debug-toolbar", specifier = "~=7.0.0" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = ">=6.0.4" },
