@@ -989,38 +989,48 @@ def build_result(cart):
             cart.remove(pk)
             logger.error(f"ID {pk} was in cart but doesn't exist in the database")
 
-    order = None
-    subtotal = 0
-    total_discount = 0
+    order: Order | None = None
+    subtotal: Decimal = Decimal(0)
+    total_discount: Decimal = Decimal(0)
     result = []
-    orders = set()
+    orders: set[Order] = set()
     for badge in badges:
         oi = badge.getOrderItems()
         level = None
-        level_subtotal = 0
+        level_subtotal = Decimal(0)
         attendee_options = []
         effectiveLevel = None
         for item in oi:
             level = item.priceLevel
             attendee_options.extend(get_line_items(item.getOptions()))
-            level_subtotal += get_order_item_option_total(item.getOptions())
+            level_subtotal += Decimal(get_order_item_option_total(item.getOptions()))
 
             if level:
                 effectiveLevel = {"name": level.name, "price": level.basePrice}
-                level_subtotal += level.basePrice
+                level_subtotal += Decimal(level.basePrice)
 
         subtotal += level_subtotal
 
         order = badge.getOrder()
+        if order is None:
+            raise RuntimeError(
+                "Database data error in implicit and unconstrained "
+                "construction requirements relating to table Badge."
+            )
         orders.add(order)
 
         holdType = None
         if badge.attendee.holdType:
             holdType = badge.attendee.holdType.name
 
-        level_discount = (
-            Decimal(get_discount_total(order.discount, level_subtotal) * 100) * TWOPLACES
-        )
+        level_discount: Decimal
+        if order.discount is not None:
+            level_discount = Decimal(
+                get_discount_total(order.discount, level_subtotal)
+            )  # WTF? * 100) * TWOPLACES
+        else:
+            level_discount = Decimal(0)
+
         total_discount += level_discount
 
         staff_data = None
@@ -1034,8 +1044,8 @@ def build_result(cart):
             }
 
         item = {
-            "id": badge.id,
-            "orderId": order.id,
+            "id": badge.pk,
+            "orderId": order.pk,
             "firstName": badge.attendee.preferredName or badge.attendee.firstName,
             "lastName": badge.attendee.lastName,
             "badgeName": badge.badgeName,
@@ -1055,23 +1065,23 @@ def build_result(cart):
         }
         result.append(item)
 
-    total = subtotal
-    paid = Decimal(0)
+    total: Decimal = subtotal
+    paid: Decimal = Decimal(0)
 
-    charityDonation = 0
-    orgDonation = 0
+    charityDonation: Decimal = Decimal(0)
+    orgDonation: Decimal = Decimal(0)
 
     for order in orders:
-        total += order.orgDonation + order.charityDonation
+        total += Decimal(order.orgDonation) + Decimal(order.charityDonation)
         paid += (
-            order.total
+            Decimal(order.total)
             if order.billingType != Order.UNPAID
             and order.status in (Order.CAPTURED, Order.COMPLETED)
-            else 0
+            else Decimal(0)
         )
 
-        charityDonation += order.charityDonation
-        orgDonation += order.orgDonation
+        charityDonation += Decimal(order.charityDonation)
+        orgDonation += Decimal(order.orgDonation)
 
     data = {
         "success": True,
@@ -1085,7 +1095,7 @@ def build_result(cart):
     }
 
     if order is not None:
-        data["order_id"] = order.id
+        data["order_id"] = order.pk
         data["reference"] = order.reference
     else:
         data["order_id"] = None

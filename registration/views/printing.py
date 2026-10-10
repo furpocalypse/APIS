@@ -1,5 +1,5 @@
 import logging
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from django.conf import settings
 from django.contrib import messages
@@ -22,6 +22,7 @@ from registration.models import (
     BadgeTemplate,
     Dealer,
     Firebase,
+    PriceLevel,
     PrintHistory,
     Staff,
 )
@@ -72,17 +73,22 @@ def printNametag(request):
     # http(s) URLs / relative paths before rendering. The template renders
     # them via {% json_script %} so the JS string-context XSS vector is
     # closed regardless, but defense-in-depth: don't trust the GET params.
-    context = {
-        "printing_data": {
-            "file": _safe_internal_url(request.GET.get("file", ""), request),
-            "next": _safe_internal_url(request.GET.get("next", ""), request),
-        },
-    }
+    next = _safe_internal_url(request.GET.get("next", ""), request)
+
     # Keep `next` available for the template's <a> Go-Back link, where
     # auto-escape provides the HTML-context defense and our same-origin
     # validation provides the URL-scheme defense.
-    context["next"] = context["printing_data"]["next"]
-    return render(request, "registration/printing.html", context)
+    return render(
+        request,
+        "registration/printing.html",
+        {
+            "printing_data": {
+                "file": _safe_internal_url(request.GET.get("file", ""), request),
+                "next": next,
+            },
+            "next": next,
+        },
+    )
 
 
 # servePDF is intentionally NOT @staff_member_required: the security model is
@@ -119,10 +125,13 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
     badge_templates: dict[int, tuple[BadgeTemplate, Template]] = {}
 
     for badge in queryset:
-        level = badge.effectiveLevel()
-        if not level or level == Badge.UNPAID:
-            messages.warning(request, f"skipped printing {badge} because level is {level}")
+        indefinite_level: PriceLevel | Literal["Unpaid"] | None = badge.effectiveLevel()
+        if not indefinite_level or indefinite_level == Badge.UNPAID:
+            messages.warning(
+                request, f"skipped printing {badge} because level is {indefinite_level}"
+            )
             continue
+        level: PriceLevel | Literal["Unpaid"] = indefinite_level
 
         badge_template = badge.event.defaultBadgeTemplate
         if badge_template is None:
@@ -140,30 +149,25 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
                 Template(badge_template.template),
             )
 
-        level = str(level)
+        level_text = str(level.priceLevelOptions) if level != "Unpaid" else level
         if staff := Staff.objects.filter(attendee=badge.attendee, event=badge.event).first():
-            level = "Staff"
+            level_text = "Staff"
 
             if not staff.checkedIn and data_obj["source"] == PrintHistory.ONSITE:
                 staff.checkedIn = True
                 staff.save()
 
         elif Dealer.objects.filter(attendee=badge.attendee, event=badge.event).exists():
-            level = "Dealer"
-
-        # badge.background can be None, this is done to appease mypy
-        bg_title = badge.background.title if badge.background else ""
-        bg_artist = badge.background.artist if badge.background else ""
-        bg_image = badge.background.getImageDataUri() if badge.background else ""
+            level_text = "Dealer"
 
         badge_groups[badge_template.id].append(
             {
                 "name": badge.badgeName,
-                "level": level,
+                "level": level_text,
                 "number": badge.badgeNumber,
-                "background_title": bg_title,
-                "background_artist": bg_artist,
-                "background_image": bg_image,
+                "background_title": badge.background.title if badge.background else "",
+                "background_artist": badge.background.artist if badge.background else "",
+                "background_image": badge.background.getImageDataUri() if badge.background else "",
             }
         )
 

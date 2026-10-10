@@ -340,7 +340,7 @@ def _apply_assistants_form(
     return None
 
 
-def dealer_assistants_paypal_create(request):
+def dealer_assistants_paypal_create(request: HttpRequest) -> JsonResponse:
     """Create a PayPal order for adding paid dealer assistants."""
     try:
         form_data = json.loads(request.body)
@@ -354,14 +354,16 @@ def dealer_assistants_paypal_create(request):
     event = Event.objects.get(default=True)
 
     try:
-        total = _set_up_assistant_checkout(request, form_data, dealer, event)
+        total: tuple[Decimal, list[OrderItem]] = _set_up_assistant_checkout(
+            request, form_data, dealer, event
+        )
     except RuntimeError as ex:
-        common.abort(*ex.args)
+        return common.abort(*ex.args)
 
     translated_cart: list[TranslatedCartItem] = [
         {
             "name": f"{event} Dealer Assistant(s) - {dealer.businessName or dealer.attendee}",
-            "total": total,
+            "total": total[0],
             "donation": False,
         },
     ]
@@ -373,7 +375,7 @@ def dealer_assistants_paypal_create(request):
 
     try:
         result = create_unpaid_paypal_order(
-            total, Decimal("0.00"), translated_cart, apis_reference=reference
+            total[0], Decimal("0.00"), translated_cart, apis_reference=reference
         )
         return common.success(reason=json.loads(result.text))
     except ApiException as ex:
@@ -414,7 +416,14 @@ def add_assistants_checkout(request: HttpRequest) -> JsonResponse:
         total, order_items = _set_up_assistant_checkout(request, form_data, dealer, event)
 
     status, message, order = do_checkout(
-        processor, billing_data, total, None, [], order_items, Decimal(0), Decimal(0)
+        processor=processor,
+        billingData=billing_data,
+        total=total,
+        discount=None,
+        cartItems=[],
+        orderItems=order_items,
+        donationOrg=Decimal(0),
+        donationCharity=Decimal(0),
     )
 
     if status:
@@ -654,9 +663,9 @@ def checkout_dealer(request):
     porg = Decimal(post_data["orgDonation"].strip() or "0.00")
     pcharity = Decimal(post_data.get("charityDonation", "0.00").strip() or "0.00")
     if porg < 0:
-        porg = 0
+        porg = Decimal(0)
     if pcharity < 0:
-        pcharity = 0
+        pcharity = Decimal(0)
 
     total = subtotal + porg + pcharity
 
@@ -665,7 +674,15 @@ def checkout_dealer(request):
     if pproc == "paypal" and "source_id" not in pbill:
         return common.abort(400, "Missing PayPal order ID")
     status, message, order = do_checkout(
-        pproc, pbill, total, discount, None, order_items, porg, pcharity, request
+        processor=pproc,
+        billingData=pbill,
+        total=total,
+        discount=discount,
+        cartItems=[],
+        orderItems=order_items,
+        donationOrg=porg,
+        donationCharity=pcharity,
+        request=request,
     )
 
     if status:
@@ -679,7 +696,6 @@ def checkout_dealer(request):
         tasks.send_dealer_payment_email_task.delay(dealer.id, order.id)
         return common.success()
     else:
-        order.delete()
         return common.abort(400, message)
 
 

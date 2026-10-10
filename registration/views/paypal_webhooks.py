@@ -3,12 +3,11 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from types import ModuleType
-from typing import Literal
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError
+from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -21,28 +20,7 @@ from registration.views.webhook_age import (
     webhook_within_age_window,
 )
 
-# Optional dependency: declare as Optional module so the `is None`
-# guards below type-check cleanly (no suppression needed).
-sentry_sdk: ModuleType | None
-try:
-    import sentry_sdk
-except ImportError:
-    sentry_sdk = None
-
 logger = logging.getLogger(__name__)
-
-# Sentry's capture_message accepts only this fixed set of level strings.
-_SentryLevel = Literal["fatal", "critical", "error", "warning", "info", "debug"]
-
-
-def _sentry_capture(message: str, level: _SentryLevel = "warning", **tags) -> None:
-    if sentry_sdk is None:
-        return
-    with sentry_sdk.push_scope() as scope:
-        scope.set_tag("integration", "paypal_webhook")
-        for key, value in tags.items():
-            scope.set_tag(key, value)
-        sentry_sdk.capture_message(message, level=level)
 
 
 PAYPAL_LIVE_API_BASE = "https://api-m.paypal.com"
@@ -166,12 +144,6 @@ def verify_signature(request) -> bool:
 
     webhook_id = getattr(settings, "PAYPAL_WEBHOOK_ID", "") or ""
     if not webhook_id:
-        logger.error("PAYPAL_WEBHOOK_ID is not configured")
-        _sentry_capture(
-            "PAYPAL_WEBHOOK_ID is not configured",
-            level="error",
-            reason="missing_webhook_id",
-        )
         return False
 
     try:
@@ -270,14 +242,9 @@ def verify_signature(request) -> bool:
 @rate_limited_json(rate="100/m")
 @require_POST
 @csrf_exempt
-def paypal_webhook(request):
+def paypal_webhook(request: HttpRequest) -> JsonResponse:
     if not verify_signature(request):
         logger.warning("Invalid signature in PayPal webhook request")
-        _sentry_capture(
-            "PayPal webhook rejected with invalid signature",
-            level="warning",
-            reason="invalid_signature",
-        )
         return common.abort(403, "Forbidden: invalid signature")
 
     try:

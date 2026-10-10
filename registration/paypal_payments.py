@@ -2,7 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from json import JSONDecodeError
-from typing import cast
+from typing import Any, cast
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -97,14 +97,14 @@ def format_errors(api_response: ApiResponse) -> str:
     :param errors: A list of Square API errors.
     :return: Lines of text in the format of: ``<category> - <code>: <details>``
     """
-    error_string = ""
+    error_string: str = ""
     resp_dict: dict = json.loads(api_response.text)
     errors: list[ErrorDetails] = [
         ErrorDetails.from_dictionary(error) for error in resp_dict.get("errors", [])
     ]
     logger.debug(errors)
     for error in errors:
-        error_string += error.issue
+        error_string = error_string + f"{error.issue}"
         if hasattr(error, "description"):
             error_string += f" - {error.description}"
         error_string += "\n"
@@ -203,7 +203,7 @@ def create_unpaid_paypal_order(
 
     logger.debug("---- Begin PayPal Order Creation ----")
 
-    params = {
+    params: dict[str, Any] = {
         "body": OrderRequest(intent=CheckoutPaymentIntent.CAPTURE, purchase_units=purchase_units)
     }
     # Sandbox negative testing

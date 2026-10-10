@@ -98,7 +98,7 @@ unless you are narrowing down a specific failure.
 
 #### Prerequisites
 
-- `uv` installed (see the Manual setup section above).
+- `uv` installed ([install instructions][uv-install]).
 - Docker + Docker Compose running — the Django suite connects to real
   PostgreSQL, Redis, and Gotenberg instances rather than mocking them.
   `make test-django` runs `make services-up` for you, but you can start
@@ -117,7 +117,7 @@ unless you are narrowing down a specific failure.
 
 | Target                         | What it runs                                                                 |
 |--------------------------------|------------------------------------------------------------------------------|
-| `make test`                    | Full regression gate: Django + Vitest + Playwright. Use before opening a PR. |
+| `make test`                    | Django + Vitest.                            |
 | `make test-django`             | All 450+ Django tests against a throwaway Postgres DB.                       |
 | `make test-paypal`             | Only tests tagged `paypal` / `PayPal` — fastest feedback for payment work.   |
 | `make test-coverage`           | Django suite under `coverage`; emits `htmlcov/` + terminal summary.          |

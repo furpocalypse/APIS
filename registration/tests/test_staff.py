@@ -255,11 +255,11 @@ class TestAddNewStaff(StaffTestCase):
                 "birthdate": "1990-01-01",
             },
             "staff": {
-                "department": self.department1.id,
+                "department": self.department1.pk,
                 "title": "Something Cool",
                 "twitter": "@twitstaff",
                 "telegram": "@twitstaffagain",
-                "shirtsize": self.shirt1.id,
+                "shirtsize": self.shirt1.pk,
                 "specialSkills": "Something here",
                 "specialFood": "no water please",
                 "specialMedical": "alerigic to bandaids",
@@ -268,10 +268,10 @@ class TestAddNewStaff(StaffTestCase):
                 "contactRelation": "Pet",
             },
             "priceLevel": {
-                "id": self.price_150.id,
+                "id": self.price_150.pk,
                 "options": [
-                    {"id": self.option_100_int.id, "value": 1},
-                    {"id": self.option_shirt.id, "value": self.shirt1.id},
+                    {"id": self.option_100_int.pk, "value": 1},
+                    {"id": self.option_shirt.pk, "value": self.shirt1.pk},
                 ],
             },
             "event": self.event.name,
@@ -313,7 +313,7 @@ class TestInfoReturningStaff(StaffTestCase):
 
     def test_info_returning_staff(self):
         session = self.client.session
-        session["staff_id"] = self.staff.id
+        session["staff_id"] = self.staff.pk
         session.save()
         result = self.client.get(reverse("registration:info_returning_staff"))
         self.assertEqual(result.status_code, 200)
@@ -324,19 +324,23 @@ class TestInfoReturningStaff(StaffTestCase):
 class TestAddReturningStaff(StaffTestCase):
     @tag("paypal")
     @patch("registration.views.ordering.capture_paypal_payment")
-    def test_staff(self, mock_capture):
+    def test_staff_failed_lookup(self, mock_capture):
         mock_capture.return_value = (
             True,
             {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
         )
+        response = self.client.get(reverse("registration:flush"))
+        self.assertEqual(response.status_code, 200)
+
         # Failed lookup
-        postData = {
-            "email": "nottherightemail@somewhere.com",
-            "token": self.staff.registrationToken,
-        }
         response = self.client.post(
             reverse("registration:find_returning_staff"),
-            json.dumps(postData),
+            json.dumps(
+                {
+                    "email": "nottherightemail@somewhere.com",
+                    "token": self.staff.registrationToken,
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 404)
@@ -345,20 +349,28 @@ class TestAddReturningStaff(StaffTestCase):
             {"success": False, "reason": "Staff matching query does not exist."},
         )
 
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_staff_regular_staff_reg(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
+        response = self.client.get(reverse("registration:flush"))
+        self.assertEqual(response.status_code, 200)
+
         # Regular staff reg
-        postData = {"email": self.attendee.email, "token": self.staff.registrationToken}
         response = self.client.post(
             reverse("registration:find_returning_staff"),
-            json.dumps(postData),
+            json.dumps({"email": self.attendee.email, "token": self.staff.registrationToken}),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
-        response_decoded = json.loads(response.content)
-        self.assertEqual(response_decoded, {"message": "STAFF", "success": True})
+        self.assertEqual(response.json(), {"message": "STAFF", "success": True})
 
         postData = {
             "attendee": {
-                "id": self.attendee.id,
+                "id": self.attendee.pk,
                 "firstName": "Staffer",
                 "lastName": "Testerson",
                 "address1": "123 Somewhere St",
@@ -374,12 +386,12 @@ class TestAddReturningStaff(StaffTestCase):
                 "emailsOk": "true",
             },
             "staff": {
-                "id": self.staff.id,
-                "department": self.department1.id,
+                "id": self.staff.pk,
+                "department": self.department1.pk,
                 "title": "Something Cool",
                 "twitter": "@twitstaff",
                 "telegram": "@twitstaffagain",
-                "shirtsize": self.shirt1.id,
+                "shirtsize": self.shirt1.pk,
                 "specialSkills": "Something here",
                 "specialFood": "no water please",
                 "specialMedical": "alerigic to bandaids",
@@ -388,10 +400,10 @@ class TestAddReturningStaff(StaffTestCase):
                 "contactRelation": "Pet",
             },
             "priceLevel": {
-                "id": self.price_150.id,
+                "id": self.price_150.pk,
                 "options": [
-                    {"id": self.option_100_int.id, "value": 1},
-                    {"id": self.option_shirt.id, "value": self.shirt1.id},
+                    {"id": self.option_100_int.pk, "value": 1},
+                    {"id": self.option_shirt.pk, "value": self.shirt1.pk},
                 ],
             },
             "event": self.event.name,
@@ -404,10 +416,8 @@ class TestAddReturningStaff(StaffTestCase):
         self.assertEqual(response.status_code, 200)
         response = self.client.get(reverse("registration:cart"))
         self.assertEqual(response.status_code, 200)
-        cart = response.context["orderItems"]
-        self.assertEqual(len(cart), 1)
-        total = response.context["total"]
-        self.assertEqual(total, 150 + 100 - 45)
+        self.assertEqual(len(response.context["orderItems"]), 1)
+        self.assertEqual(response.context["total"], 150 + 100 - 45)
         discount = response.context["discount"]
         self.assertEqual(discount.codeName, "StaffDiscount")
         discountUsed = discount.used
@@ -425,6 +435,13 @@ class TestAddReturningStaff(StaffTestCase):
         self.assertEqual(order.charityDonation, 0)
         self.assertEqual(order.discount.used, discountUsed + 1)
 
+    @tag("paypal")
+    @patch("registration.views.ordering.capture_paypal_payment")
+    def test_staff_free_checkout_staff_reg(self, mock_capture):
+        mock_capture.return_value = (
+            True,
+            {"id": "TEST-PAYPAL-ORDER", "status": "COMPLETED"},
+        )
         response = self.client.get(reverse("registration:flush"))
         self.assertEqual(response.status_code, 200)
 
@@ -444,7 +461,7 @@ class TestAddReturningStaff(StaffTestCase):
 
         postData = {
             "attendee": {
-                "id": self.attendee2.id,
+                "id": self.attendee2.pk,
                 "firstName": "Staffer",
                 "lastName": "Testerson",
                 "address1": "123 Somewhere St",
@@ -460,12 +477,12 @@ class TestAddReturningStaff(StaffTestCase):
                 "emailsOk": "true",
             },
             "staff": {
-                "id": self.staff2.id,
-                "department": self.department2.id,
+                "id": self.staff2.pk,
+                "department": self.department2.pk,
                 "title": "Something Cool",
                 "twitter": "@twitstaff",
                 "telegram": "@twitstaffagain",
-                "shirtsize": self.shirt1.id,
+                "shirtsize": self.shirt1.pk,
                 "specialSkills": "Something here",
                 "specialFood": "no water please",
                 "specialMedical": "alerigic to bandaids",
@@ -474,10 +491,10 @@ class TestAddReturningStaff(StaffTestCase):
                 "contactRelation": "Pet",
             },
             "priceLevel": {
-                "id": self.price_45.id,
+                "id": self.price_45.pk,
                 "options": [
-                    {"id": self.option_conbook.id, "value": "true"},
-                    {"id": self.option_shirt.id, "value": self.shirt1.id},
+                    {"id": self.option_conbook.pk, "value": "true"},
+                    {"id": self.option_shirt.pk, "value": self.shirt1.pk},
                 ],
             },
             "event": self.event.name,
@@ -499,7 +516,11 @@ class TestAddReturningStaff(StaffTestCase):
         self.assertEqual(discount.codeName, "StaffDiscount")
         discountUsed = discount.used
 
+        # WARN: this was checking for 200, but it didn't make much sense why
+        # when looking at the diagnostic data.  This needs thorough review for
+        # correctness. See registration/views/ordering.py:677
         response = self.zero_checkout()
+        # self.assertEqual(response.text, "")
         self.assertEqual(response.status_code, 200)
 
         badge = Badge.objects.get(attendee=self.attendee2, event=self.event)
