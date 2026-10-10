@@ -33,7 +33,7 @@ RUN npm run build
 # the loop. `slim-trixie` is Debian 13 (trixie) slim; this is the base
 # Docker offered as `python:3.14-slim` at pin time.
 #   Resolved version at pin time: Python 3.14.4.
-FROM mirror.gcr.io/library/python:3.14-slim-trixie@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc
+FROM mirror.gcr.io/library/python:3.14-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 
 LABEL org.opencontainers.image.source="https://github.com/furthemore/APIS"
 
