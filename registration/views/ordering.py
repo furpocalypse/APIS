@@ -187,11 +187,9 @@ def do_checkout(
 
             order: Order = form.save(commit=False)
 
-            price_level_counts = _count_price_levels(cartItems, orderItems)
-
             levels: list[Any] | None
             error: str | None
-            levels, error = _check_capacity(price_level_counts)
+            levels, error = _check_capacity(_count_price_levels(cartItems, orderItems))
             if error or levels is None:
                 return False, error if isinstance(error, str) else "MISSING ERROR STRING", None
             for level, count in levels:
@@ -261,6 +259,8 @@ def doZeroCheckout(
             raise
         billingName = f"{attendee_rec.firstName} {attendee_rec.lastName}"
         billingEmail = str(attendee_rec.email)
+    else:
+        raise
 
     reference = common.get_unique_confirmation_token(Order)
 
@@ -386,6 +386,8 @@ def get_line_item_total(
         )
 
         item_total += get_order_item_option_total(item.attendeeoptions_set.all())
+    else:
+        raise
 
     if disc:
         discount = get_discount_total(disc, item_total)
@@ -398,19 +400,10 @@ def get_total(
 ) -> tuple[Decimal | int, Decimal | int]:
     total: Decimal | int = 0
     total_discount: Decimal | int = 0
-    if not cartItems and not orderItems:
-        return 0, 0
 
-    cart_item: Cart | OrderItem
-    for cart_item in cartItems:
-        item_total, discount = get_line_item_total(cart_item, disc)
-        total_discount += discount
-        item_total -= discount
-        if item_total > 0:
-            total += item_total
-
-    for order_item in orderItems:
-        item_total, discount = get_line_item_total(order_item, disc)
+    item: Cart | OrderItem
+    for item in cartItems + orderItems:
+        item_total, discount = get_line_item_total(item, disc)
         total_discount += discount
         item_total -= discount
         if item_total > 0:
@@ -588,7 +581,7 @@ def checkout(request: HttpRequest) -> JsonResponse:
         logger.error("Unable to decode JSON for checkout()")
         return common.abort(400, "Unable to parse input options")
 
-    Event.objects.get(default=True)
+    # Event.objects.get(default=True)
     session_items = request.session.get("cart_items", [])
     cart_items: list[Cart] = list(Cart.objects.filter(id__in=session_items))
     posted_order_items = request.session.get("order_items", [])

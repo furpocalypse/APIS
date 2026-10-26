@@ -15,6 +15,7 @@ from django.db import transaction
 from django.db.models import Max, QuerySet
 from django.forms import NumberInput, widgets
 from django.http import HttpResponseRedirect
+from django.http.request import HttpRequest
 from django.shortcuts import render
 from django.urls import path, re_path, reverse
 from django.utils.html import format_html
@@ -1621,7 +1622,7 @@ def json_highlight_format_value(value):
 
 @admin.action(description="Process unprocessed actions")
 def process_unprocessed_notifications(
-    _modeladmin, _request, queryset: "QuerySet[PaymentWebhookNotification]"
+    _modeladmin, request: HttpRequest, queryset: "QuerySet[PaymentWebhookNotification]"
 ):
     for notification in queryset.filter(processed=False).all():
         logger.info(
@@ -1631,7 +1632,7 @@ def process_unprocessed_notifications(
         # Square dispatcher KeyErrors on them (and vice-versa event shapes
         # would silently no-op).
         if notification.integration == "paypal":
-            paypal_webhooks.process_webhook(notification)
+            paypal_webhooks.process_webhook(request)
         else:
             webhooks.process_webhook(notification)
 
