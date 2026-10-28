@@ -149,22 +149,27 @@ def servePDF(request: HttpRequest) -> HttpResponse | JsonResponse:
                 Template(badge_template.template),
             )
 
-        level_text = str(level.priceLevelOptions) if level != "Unpaid" else level
+        is_staff = False
+        level_text = str(level) if level != "Unpaid" else level
         if staff := Staff.objects.filter(attendee=badge.attendee, event=badge.event).first():
-            level_text = "Staff"
+            is_staff = True
 
             if not staff.checkedIn and data_obj["source"] == PrintHistory.ONSITE:
                 staff.checkedIn = True
                 staff.save()
 
-        elif Dealer.objects.filter(attendee=badge.attendee, event=badge.event).exists():
-            level_text = "Dealer"
+        is_dealer = Dealer.objects.filter(attendee=badge.attendee, event=badge.event).exists()
 
         badge_groups[badge_template.id].append(
             {
                 "name": badge.badgeName,
                 "level": level_text,
                 "number": badge.badgeNumber,
+                "badge_data": badge,
+                "level_data": level,
+                "is_minor": badge.isMinor,
+                "is_staff": is_staff,
+                "is_dealer": is_dealer,
                 "background_title": badge.background.title if badge.background else "",
                 "background_artist": badge.background.artist if badge.background else "",
                 "background_image": badge.background.getImageDataUri() if badge.background else "",

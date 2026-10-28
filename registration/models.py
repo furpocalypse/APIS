@@ -3,7 +3,7 @@ import hashlib
 import logging
 import random
 import secrets
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from typing import Literal
 
@@ -905,10 +905,14 @@ class Badge(models.Model):
     def isMinor(self):
         birthdate = self.attendee.birthdate
         eventdate = self.event.eventStart
+        today = date.today()
+        # Determine age group at time of printing if today is after the event date.
+        # This lets us reprint badges for minors that stop being minors during con.
+        ref_date = today if eventdate < today else eventdate
         age_at_event = (
-            eventdate.year
+            ref_date.year
             - birthdate.year
-            - ((eventdate.month, eventdate.day) < (birthdate.month, birthdate.day))
+            - ((ref_date.month, eventdate.day) < (ref_date.month, birthdate.day))
         )
         return age_at_event < 18
 
