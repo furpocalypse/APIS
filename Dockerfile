@@ -11,7 +11,7 @@
 # are copied across via `COPY --from=assets`.
 #   Resolved version at pin time: Node 24.15.0 (current `lts` channel,
 #   slim variant on Debian trixie).
-FROM mirror.gcr.io/library/node:lts-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS assets
+FROM mirror.gcr.io/library/node:lts-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS assets
 
 ENV NODE_ENVIRONMENT=production
 
